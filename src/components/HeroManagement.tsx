@@ -4,7 +4,7 @@ import { useState, useEffect, useTransition } from 'react'
 import * as XLSX from 'xlsx'
 import { bulkImportHeroes, createHero, getHeroesByVersion } from '@/app/admin/heroes/actions'
 import { Version, Hero } from '@/utils/types' // Ensure Hero type has hero_stats joined
-import { Plus, X, Upload, Users, Shield, Sword, Zap, Sliders, Download, FileSpreadsheet } from 'lucide-react'
+import { Plus, X, Upload, Users, Shield, Sword, Zap, Sliders, Download, FileSpreadsheet, MoreVertical } from 'lucide-react'
 import { CldUploadButton } from 'next-cloudinary'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -159,23 +159,23 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
                     <p className="text-text-muted mt-1">Manage heroes for the selected patch.</p>
                 </div>
 
-                <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
-                    <div className="flex items-center gap-2 w-full md:w-auto">
-                        <div className="relative w-full md:w-auto">
-                            <select
-                                value={selectedVersionId}
-                                onChange={(e) => setSelectedVersionId(Number(e.target.value))}
-                                className="dark-input pl-10 pr-4 py-2 w-full md:w-48 appearance-none cursor-pointer"
-                            >
-                                {initialVersions.map(v => (
-                                    <option key={v.id} value={v.id}>{v.name} {v.is_active ? '(Active)' : ''}</option>
-                                ))}
-                            </select>
-                            <Sliders size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
-                        </div>
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                    {/* Version Selector */}
+                    <div className="relative w-full md:w-auto flex-1 md:flex-none">
+                        <select
+                            value={selectedVersionId}
+                            onChange={(e) => setSelectedVersionId(Number(e.target.value))}
+                            className="dark-input pl-10 pr-4 py-2 w-full md:w-48 appearance-none cursor-pointer"
+                        >
+                            {initialVersions.map(v => (
+                                <option key={v.id} value={v.id}>{v.name} {v.is_active ? '(Active)' : ''}</option>
+                            ))}
+                        </select>
+                        <Sliders size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
                     </div>
 
-                    <div className="flex items-center gap-2 w-full md:w-auto justify-center md:justify-start">
+                    {/* Desktop Actions */}
+                    <div className="hidden md:flex items-center gap-2">
                         <button
                             onClick={handleExport}
                             className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-text-muted transition-colors flex items-center gap-2"
@@ -190,31 +190,75 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
                         >
                             <FileSpreadsheet size={18} /> Import
                         </button>
-                        <input
-                            type="file"
-                            id="excel-upload"
-                            hidden
-                            accept=".xlsx, .xls"
-                            onChange={handleFileChange}
-                        />
+                        <button
+                            onClick={() => setIsModalOpen(true)}
+                            className="glow-button px-6 py-2 rounded-lg flex items-center gap-2 whitespace-nowrap"
+                        >
+                            <Plus size={20} /> Add Hero
+                        </button>
                     </div>
 
-                    <button
-                        onClick={() => setIsModalOpen(true)}
-                        className="glow-button px-6 py-2 rounded-lg flex items-center justify-center gap-2 whitespace-nowrap w-full md:w-auto"
-                    >
-                        <Plus size={20} /> Add Hero
-                    </button>
+                    {/* Mobile Actions */}
+                    <div className="flex md:hidden items-center gap-2">
+                        <button
+                            onClick={() => setIsModalOpen(true)}
+                            className="glow-button p-2 rounded-lg flex items-center justify-center aspect-square"
+                            title="Add Hero"
+                        >
+                            <Plus size={24} />
+                        </button>
+
+                        {/* Mobile Menu Dropdown */}
+                        <div className="relative">
+                            <button
+                                onClick={(e) => {
+                                    const menu = e.currentTarget.nextElementSibling;
+                                    menu?.classList.toggle('hidden');
+                                }}
+                                className="p-2 bg-white/5 border border-white/10 rounded-lg text-text-muted hover:text-white"
+                            >
+                                <MoreVertical size={24} />
+                            </button>
+                            <div className="hidden absolute right-0 top-full mt-2 w-48 bg-gray-900 border border-white/10 rounded-lg shadow-xl z-50 py-1">
+                                <button
+                                    onClick={() => {
+                                        handleExport();
+                                        // close menu helper
+                                        (document.activeElement as HTMLElement)?.blur();
+                                    }}
+                                    className="w-full text-left px-4 py-3 hover:bg-white/5 flex items-center gap-3 text-sm text-gray-300"
+                                >
+                                    <Download size={16} /> Export Excel
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        handleImportClick();
+                                    }}
+                                    className="w-full text-left px-4 py-3 hover:bg-white/5 flex items-center gap-3 text-sm text-gray-300"
+                                >
+                                    <FileSpreadsheet size={16} /> Import Excel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <input
+                        type="file"
+                        id="excel-upload"
+                        hidden
+                        accept=".xlsx, .xls"
+                        onChange={handleFileChange}
+                    />
                 </div>
             </div>
 
             {/* Filter Bar */}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide -mx-2 px-2 md:mx-0 md:px-0 md:flex-wrap">
                 {POSITIONS.map(pos => (
                     <button
                         key={pos}
                         onClick={() => setFilter(pos)}
-                        className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all ${filter === pos
+                        className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap flex-shrink-0 ${filter === pos
                             ? 'bg-purple-600 text-white shadow-[0_0_10px_rgba(147,51,234,0.5)]'
                             : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
                             }`}
@@ -225,7 +269,7 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
             </div>
 
             {/* Content: Hero Grid */}
-            <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-2">
+            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-2">
                 {isPending ? (
                     <div className="col-span-full text-center py-20 text-text-muted">Loading heroes...</div>
                 ) : filteredHeroes.length === 0 ? (
