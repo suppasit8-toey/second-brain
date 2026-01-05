@@ -47,24 +47,37 @@ export async function getHeroesByVersion(versionId: number) {
     return data
 }
 
-export async function createHero(prevState: any, formData: FormData) {
+export async function addHero(prevState: any, formData: FormData) {
     const supabase = await createClient()
 
     const name = formData.get('name') as string
     const icon_url = formData.get('icon_url') as string
     const damage_type = formData.get('damage_type') as string
-    const main_position = JSON.parse(formData.get('main_position') as string || '[]')
 
-    const version_id = formData.get('version_id') as string // ID from selector
+    // Handle multiple checkboxes for positions
+    const main_position = formData.getAll('main_position')
+
+    let version_id = formData.get('version_id') as string // ID from selector
     const power_spike = formData.get('power_spike') as string
-    // Tier removed
 
-    if (!name || !icon_url || !version_id) {
-        return { message: 'Missing required fields', success: false }
+    // If version_id is missing, find the active one
+    if (!version_id) {
+        const { data: activeVersion } = await supabase
+            .from('versions')
+            .select('id')
+            .eq('is_active', true)
+            .single()
+
+        if (activeVersion) {
+            version_id = activeVersion.id.toString()
+        }
     }
 
-    // 1. Insert Hero (or get existing if we were doing an update, but here it's "Add Hero")
-    // Ideally checks if hero exists by name to avoid dupes, but for now strict insert.
+    if (!name || !icon_url || !version_id) {
+        return { message: 'Missing required fields (Name, Icon, or Active Version)', success: false }
+    }
+
+    // 1. Insert Hero
     const { data: heroData, error: heroError } = await supabase
         .from('heroes')
         .insert([{ name, icon_url, damage_type, main_position }])
@@ -81,19 +94,20 @@ export async function createHero(prevState: any, formData: FormData) {
         .insert([{
             hero_id: heroData.id,
             version_id: parseInt(version_id),
-            power_spike,
-            tier: null, // Removed Tier input specific logic
-            win_rate: 50 // Default
+            power_spike: power_spike || 'Balanced',
+            tier: null,
+            win_rate: 50
         }])
 
     if (statsError) {
-        // Optionally delete the hero if stats failed, technically transactional issues here.
         return { message: 'Error creating stats: ' + statsError.message, success: false }
     }
 
     revalidatePath('/admin/heroes')
     return { message: 'Hero created successfully!', success: true }
 }
+
+export const createHero = addHero;
 
 export async function bulkImportHeroes(versionId: number, heroesData: any[]) {
     const supabase = await createClient()

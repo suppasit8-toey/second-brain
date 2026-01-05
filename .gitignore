@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Obsidian (Note taking app config)
+.obsidian/workspace
+.obsidian/workspace-mobile
+.obsidian/cache
+.trash/
