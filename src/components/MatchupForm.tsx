@@ -21,7 +21,7 @@ export default function MatchupForm({ heroes }: MatchupFormProps) {
     const [selectedHeroId, setSelectedHeroId] = useState<string>("")
 
     return (
-        <div className="glass-card p-6 mb-8">
+        <div className="glass-card p-4 md:p-6 mb-8">
             <h2 className="text-2xl font-bold mb-6 text-text-main flex items-center gap-2">
                 <span className="bg-red-500/20 p-2 rounded-lg text-red-500 shadow-[0_0_10px_rgba(239,68,68,0.3)]">
                     <Swords size={24} />
@@ -30,7 +30,7 @@ export default function MatchupForm({ heroes }: MatchupFormProps) {
             </h2>
 
             <form action={formAction} className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                     {/* My Hero */}
                     <div>
                         <label htmlFor="hero_id" className="block text-sm font-medium text-text-muted mb-1">
@@ -42,7 +42,7 @@ export default function MatchupForm({ heroes }: MatchupFormProps) {
                             required
                             value={selectedHeroId}
                             onChange={(e) => setSelectedHeroId(e.target.value)}
-                            className="dark-input appearance-none"
+                            className="dark-input appearance-none h-11"
                         >
                             <option value="" disabled className="bg-background">Select a hero</option>
                             {heroes.map((hero) => (
@@ -62,7 +62,7 @@ export default function MatchupForm({ heroes }: MatchupFormProps) {
                             id="opponent_id"
                             name="opponent_id"
                             required
-                            className="dark-input appearance-none"
+                            className="dark-input appearance-none h-11"
                         >
                             <option value="" disabled selected className="bg-background">Select opponent</option>
                             {heroes.map((hero) => (
@@ -82,7 +82,7 @@ export default function MatchupForm({ heroes }: MatchupFormProps) {
                             id="lane"
                             name="lane"
                             required
-                            className="dark-input appearance-none"
+                            className="dark-input appearance-none h-11"
                         >
                             {POSITIONS.map((pos) => (
                                 <option key={pos} value={pos} className="bg-background text-white">
@@ -131,10 +131,10 @@ export default function MatchupForm({ heroes }: MatchupFormProps) {
                 </div>
 
                 {/* Submit Button & Message */}
-                <div className="flex items-center justify-between pt-4">
+                <div className="flex flex-col-reverse md:flex-row items-center justify-between gap-4 pt-4">
                     <button
                         type="submit"
-                        className="glow-button bg-red-600 hover:bg-red-700 shadow-[0_0_20px_rgba(220,38,38,0.5)] px-6 py-2 rounded-md"
+                        className="glow-button bg-red-600 hover:bg-red-700 shadow-[0_0_20px_rgba(220,38,38,0.5)] px-6 py-3 md:py-2 rounded-md w-full md:w-auto text-center"
                     >
                         Save Matchup
                     </button>

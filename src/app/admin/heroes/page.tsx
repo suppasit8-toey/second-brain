@@ -7,7 +7,7 @@ export default async function Page() {
     const versions = await getVersions()
 
     return (
-        <div className="p-8 pb-24">
+        <div className="p-2 md:p-8 pb-24 w-full">
             <div className="max-w-7xl mx-auto">
                 <HeroManagement initialVersions={versions || []} />
             </div>

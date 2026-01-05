@@ -311,7 +311,7 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
             {/* 1. TOP TOOLBAR */}
-            <div className="glass-card p-6 flex flex-col gap-6 relative overflow-hidden">
+            <div className="glass-card p-4 md:p-6 flex flex-col gap-6 relative overflow-hidden">
                 <div className="flex flex-col md:flex-row items-end md:items-center gap-4 z-10">
 
                     {/* Version Selector */}
@@ -378,7 +378,7 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                     <button
                         onClick={() => handleOpenModal()}
                         disabled={!selectedHeroId || !selectedPosition}
-                        className={`px-6 py-2.5 rounded-lg flex items-center gap-2 whitespace-nowrap transition-all font-bold 
+                        className={`px-6 py-2.5 rounded-lg flex items-center justify-center gap-2 whitespace-nowrap transition-all font-bold w-full md:w-auto
                             ${(!selectedHeroId || !selectedPosition)
                                 ? 'bg-purple-600/50 text-white/50 cursor-not-allowed'
                                 : 'glow-button text-white shadow-lg shadow-purple-600/20'
@@ -399,7 +399,7 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                     <div className="mt-8 flex flex-col md:flex-row md:items-center gap-6 border-b border-white/5 pb-6 animate-in slide-in-from-top-2">
 
                         {/* 1. Context Badge (My Hero) */}
-                        <div className="flex items-center gap-4 pr-6 md:border-r border-white/10">
+                        <div className="flex items-center gap-4 pr-0 md:pr-6 md:border-r border-white/10 border-b md:border-b-0 pb-4 md:pb-0 w-full md:w-auto">
                             <div className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]">
                                 {myHero?.icon_url ? (
                                     <Image src={myHero.icon_url} alt={myHero.name} fill className="object-cover" />
@@ -506,7 +506,7 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
                     <div className="glass-card w-full max-w-4xl max-h-[90vh] flex flex-col outline-none shadow-2xl animate-in zoom-in-95 duration-200">
                         {/* NEW HEADER SECTION (Replaces old title/subtitle) */}
-                        <div className="flex items-center gap-4 p-6 bg-white/5 border-b border-white/10 shrink-0 relative">
+                        <div className="flex items-center gap-4 p-4 md:p-6 bg-white/5 border-b border-white/10 shrink-0 relative">
                             {/* Hero Image */}
                             <div className="relative w-14 h-14 rounded-full overflow-hidden border-2 border-primary/40 shadow-sm shrink-0">
                                 {myHero?.icon_url ? (
@@ -544,7 +544,7 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                         <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
 
                             {/* Left: Hero Selection */}
-                            <div className="w-full md:w-1/2 p-6 border-r border-white/10 flex flex-col gap-4 overflow-y-auto">
+                            <div className="w-full md:w-1/2 p-4 md:p-6 border-r-0 md:border-r border-b md:border-b-0 border-white/10 flex flex-col gap-4 overflow-y-auto max-h-[40vh] md:max-h-full">
                                 <div className="space-y-4">
                                     <div>
                                         <label className="text-xs font-bold text-text-muted uppercase block mb-1">Enemy Position</label>
@@ -598,7 +598,7 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                             </div>
 
                             {/* Right: Review & Settings */}
-                            <div className="w-full md:w-1/2 p-6 flex flex-col bg-surface/20">
+                            <div className="w-full md:w-1/2 p-4 md:p-6 flex flex-col bg-surface/20 max-h-[40vh] md:max-h-full">
                                 <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
                                     Selected Enemies <span className="bg-primary px-1.5 rounded text-[10px]">{selectedEnemies.length}</span>
                                 </h3>

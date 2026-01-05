@@ -153,15 +153,15 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
     return (
         <div className="space-y-8">
             {/* Header & Controls */}
-            <div className="glass-card p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="glass-card p-4 md:p-6 flex flex-col md:flex-row items-center justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">Hero Roster</h1>
                     <p className="text-text-muted mt-1">Manage heroes for the selected patch.</p>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
-                    <div className="flex items-center gap-2">
-                        <div className="relative">
+                <div className="flex flex-col md:flex-row items-center gap-4 w-full md:w-auto">
+                    <div className="flex items-center gap-2 w-full md:w-auto">
+                        <div className="relative w-full md:w-auto">
                             <select
                                 value={selectedVersionId}
                                 onChange={(e) => setSelectedVersionId(Number(e.target.value))}
@@ -175,7 +175,7 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 w-full md:w-auto justify-center md:justify-start">
                         <button
                             onClick={handleExport}
                             className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-text-muted transition-colors flex items-center gap-2"
@@ -201,7 +201,7 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
 
                     <button
                         onClick={() => setIsModalOpen(true)}
-                        className="glow-button px-6 py-2 rounded-lg flex items-center gap-2 whitespace-nowrap"
+                        className="glow-button px-6 py-2 rounded-lg flex items-center justify-center gap-2 whitespace-nowrap w-full md:w-auto"
                     >
                         <Plus size={20} /> Add Hero
                     </button>
@@ -225,7 +225,7 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
             </div>
 
             {/* Content: Hero Grid */}
-            <div className="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-12 lg:grid-cols-14 xl:grid-cols-[repeat(18,minmax(0,1fr))] gap-1">
+            <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-2">
                 {isPending ? (
                     <div className="col-span-full text-center py-20 text-text-muted">Loading heroes...</div>
                 ) : filteredHeroes.length === 0 ? (
@@ -280,14 +280,14 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
                             <X size={24} />
                         </button>
 
-                        <div className="p-6 border-b border-white/10">
+                        <div className="p-4 md:p-6 border-b border-white/10">
                             <h2 className="text-xl font-bold text-white flex items-center gap-2">
                                 <Shield className="text-primary" /> Add New Hero
                             </h2>
                             <p className="text-sm text-text-muted">Adding to version: <span className="text-accent">{initialVersions.find(v => v.id === selectedVersionId)?.name}</span></p>
                         </div>
 
-                        <form action={handleCreateSubmit} className="p-6 space-y-6">
+                        <form action={handleCreateSubmit} className="p-4 md:p-6 space-y-6">
                             {/* Image Upload */}
                             <div className="flex flex-col items-center justify-center pb-4 border-b border-white/5">
                                 <div className="relative w-24 h-24 mb-4 rounded-full overflow-hidden border-2 border-dashed border-white/20 bg-black/20 flex items-center justify-center group">
