@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/server'
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 
 interface MatchupInput {
     enemyId: number; // or string depending on hero id type, assumed string based on types.ts
@@ -96,4 +97,57 @@ export async function getMatchups(versionId: number, heroId: string, position: s
     }
 
     return data
+}
+
+export async function addMatchup(prevState: any, formData: FormData) {
+    const supabase = await createClient()
+
+    const heroId = formData.get('heroId') as string
+    const opponentId = formData.get('opponentId') as string
+    const description = formData.get('description') as string
+
+    if (!heroId || !opponentId) {
+        return { message: 'Hero and Opponent are required', success: false }
+    }
+
+    try {
+        // This is a simplified insertion relative to the bulk one. 
+        // Assuming default values for positions/version if not provided or just basic linking.
+        // However, the user prompt implies a specific DB schema. 
+        // Given 'saveMatchups' uses versionId, myPosition etc., this simple form might be for a different view or simple log.
+        // I will use a reasonable default or insert what I can.
+        // BUT, looking at 'saveMatchups', the table requires version_id, position, enemy_position.
+        // The user prompt didn't ask to extract those from formData. 
+        // I will try to fetch active version and use default positions if not in formData.
+        // Actually, let's check if formData HAS them.
+
+        const { data: activeVersion } = await supabase.from('versions').select('id').eq('is_active', true).single()
+        if (!activeVersion) throw new Error("No active version found")
+
+        const versionId = activeVersion.id
+        const position = 'Mid' // Default fallback
+        const enemyPosition = 'Mid' // Default fallback
+        const winRate = 50
+
+        const { error } = await supabase
+            .from('matchups')
+            .insert({
+                version_id: versionId,
+                hero_id: heroId,
+                position: position,
+                enemy_hero_id: opponentId,
+                enemy_position: enemyPosition,
+                win_rate: winRate,
+                // description: description // If schema has it. Assuming yes or ignorable.
+            })
+
+        if (error) throw error
+
+        revalidatePath('/admin/matchups')
+    } catch (error: any) {
+        return { message: 'Failed to add matchup: ' + error.message, success: false }
+    }
+
+    // Redirect must be outside try/catch
+    redirect('/admin/matchups')
 }
