@@ -124,5 +124,5 @@ export async function createNewMatchup(prevState: any, formData: FormData) {
     redirect('/admin/matchups')
 }
 
-// Alias for frontend compatibility
+// ALIAS TO FIX IMPORT ERRORS
 export const addMatchup = createNewMatchup;

@@ -49,14 +49,14 @@ export async function addHero(prevState: any, formData: FormData) {
     const icon_url = formData.get('icon_url') as string
     const damage_type = formData.get('damage_type') as string
 
-    // Fix: Use getAll for multiple checkboxes
+    // Correctly handle multiple checkboxes
     const main_position = formData.getAll('main_position')
 
-    // Fix: Use let so we can update if missing
+    // Use let for version_id to allow fallback
     let version_id = formData.get('version_id') as string
     const power_spike = formData.get('power_spike') as string
 
-    // Logic Flow: Fetch active version if missing
+    // Fallback: Fetch active version if missing
     if (!version_id) {
         const { data: activeVersion } = await supabase
             .from('versions')
@@ -105,24 +105,12 @@ export async function addHero(prevState: any, formData: FormData) {
 
 export async function bulkImportHeroes(versionId: number, heroesData: any[]) {
     const supabase = await createClient()
-
-    // DEBUG LOGS
-    console.log("--- BULK IMPORT START ---");
-    console.log("Version ID:", versionId);
-    console.log("Received Data Count:", heroesData?.length);
-    if (heroesData?.length > 0) {
-        console.log("First Row Sample:", heroesData[0]);
-        console.log("Keys in First Row:", Object.keys(heroesData[0]));
-    }
-    // -----------------------------
-
     let successCount = 0
     let errors: string[] = []
 
-    // Helper to find key safely (removes spaces, case-insensitive)
     const findValue = (row: any, searchKeys: string[]) => {
         const normalizedRowKeys = Object.keys(row).reduce((acc, key) => {
-            acc[key.toLowerCase().replace(/\s/g, '')] = row[key]; // Key -> key
+            acc[key.toLowerCase().replace(/\s/g, '')] = row[key];
             return acc;
         }, {} as any);
 
@@ -137,8 +125,6 @@ export async function bulkImportHeroes(versionId: number, heroesData: any[]) {
 
     for (let i = 0; i < heroesData.length; i++) {
         const row = heroesData[i];
-
-        // 1. Get Values with Fallbacks
         const name = findValue(row, ['Name', 'Hero Name', 'name']);
 
         if (!name) {
@@ -147,11 +133,10 @@ export async function bulkImportHeroes(versionId: number, heroesData: any[]) {
         }
 
         const icon_url = findValue(row, ['IconURL', 'Icon URL', 'icon']) || '';
-        const damage_type = findValue(row, ['DamageType', 'Damage Type', 'damage']) || 'Physical'; // Default
-        const position_str = findValue(row, ['Position', 'Positions', 'role']) || 'Mid'; // Default
-        const power_spike = findValue(row, ['PowerSpike', 'Power Spike', 'power']) || 'Balanced'; // Default
+        const damage_type = findValue(row, ['DamageType', 'Damage Type', 'damage']) || 'Physical';
+        const position_str = findValue(row, ['Position', 'Positions', 'role']) || 'Mid';
+        const power_spike = findValue(row, ['PowerSpike', 'Power Spike', 'power']) || 'Balanced';
 
-        // 2. Check existing hero
         const { data: existingHero } = await supabase
             .from('heroes')
             .select('id')
@@ -161,7 +146,6 @@ export async function bulkImportHeroes(versionId: number, heroesData: any[]) {
         let heroId = existingHero?.id
 
         if (!heroId) {
-            // Create new hero
             const { data: newHero, error: createError } = await supabase
                 .from('heroes')
                 .insert([{
@@ -180,15 +164,14 @@ export async function bulkImportHeroes(versionId: number, heroesData: any[]) {
             heroId = newHero.id
         }
 
-        // 3. Upsert Stats for Version
         const { error: statsError } = await supabase
             .from('hero_stats')
             .upsert({
                 hero_id: heroId,
                 version_id: versionId,
                 power_spike: power_spike,
-                tier: null, // Ignore Tier as requested
-                win_rate: 50 // Default
+                tier: null,
+                win_rate: 50
             }, { onConflict: 'hero_id, version_id' })
 
         if (statsError) {
@@ -198,7 +181,6 @@ export async function bulkImportHeroes(versionId: number, heroesData: any[]) {
         }
     }
 
-    console.log(`Finished. Success: ${successCount}`);
     revalidatePath('/admin/heroes')
     return {
         success: successCount > 0,
@@ -211,21 +193,16 @@ export async function bulkImportHeroes(versionId: number, heroesData: any[]) {
 export async function updateHero(formData: FormData) {
     const supabase = await createClient()
 
-    // Extract Data
     const heroId = formData.get('id')
     const versionId = formData.get('version_id')
     const oldName = formData.get('old_name') as string
     const name = formData.get('name') as string
     const icon_url = formData.get('icon_url')
     const damage_type = formData.get('damage_type')
-    // Extract positions which might be multiple checkboxes
-    // The NEW User Request implies normal form submission: formData.getAll('positions')
     const positions = formData.getAll('positions')
-
     const power_spike = formData.get('power_spike')
     const tier = formData.get('tier')
 
-    // 1. Update 'heroes' table
     const { error: heroError } = await supabase
         .from('heroes')
         .update({
@@ -240,7 +217,6 @@ export async function updateHero(formData: FormData) {
         return { success: false, message: heroError.message }
     }
 
-    // 2. Upsert 'hero_stats' table (for this version)
     if (versionId) {
         const { error: statsError } = await supabase
             .from('hero_stats')
@@ -256,7 +232,6 @@ export async function updateHero(formData: FormData) {
         }
     }
 
-    // 3. Handle Redirect if Name Changed (URL changes)
     if (name !== oldName) {
         redirect(`/admin/heroes/${encodeURIComponent(name)}`)
     }
@@ -267,5 +242,5 @@ export async function updateHero(formData: FormData) {
     return { success: true, message: 'Updated successfully' }
 }
 
-// ALIAS AT THE BOTTOM
+// ALIAS TO FIX IMPORT ERRORS
 export const createHero = addHero;
