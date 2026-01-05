@@ -1,7 +1,7 @@
 'use client'
 
 import { useFormState } from 'react-dom'
-import { addMatchup } from '@/app/admin/matchups/actions'
+import { createNewMatchup } from '@/app/admin/matchups/actions'
 import { Hero, POSITIONS } from '@/utils/types'
 import { Swords } from 'lucide-react'
 import { useState } from 'react'
@@ -16,7 +16,7 @@ const initialState = {
 }
 
 export default function MatchupForm({ heroes }: MatchupFormProps) {
-    const [state, formAction] = useFormState(addMatchup, initialState)
+    const [state, formAction] = useFormState(createNewMatchup, initialState)
     const [winRate, setWinRate] = useState(50)
     const [selectedHeroId, setSelectedHeroId] = useState<string>("")
 

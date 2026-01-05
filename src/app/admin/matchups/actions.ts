@@ -99,35 +99,33 @@ export async function getMatchups(versionId: number, heroId: string, position: s
     return data
 }
 
-export async function addMatchup(prevState: any, formData: FormData) {
+export async function createNewMatchup(prevState: any, formData: FormData) {
     const supabase = await createClient()
 
-    const heroId = formData.get('heroId') as string
-    const opponentId = formData.get('opponentId') as string
-    const description = formData.get('description') as string
+    // MatchupForm.tsx uses: hero_id, opponent_id, lane, win_rate, note
+    // User Prompt asked for: heroId, opponentId, description
+    // I will try to support both to be safe.
+    const heroId = (formData.get('hero_id') || formData.get('heroId')) as string
+    const opponentId = (formData.get('opponent_id') || formData.get('opponentId')) as string
+    const description = (formData.get('note') || formData.get('description')) as string
+
+    // Additional fields from Form
+    const position = (formData.get('lane') || 'Mid') as string
+    const winRate = parseInt((formData.get('win_rate') || '50') as string)
 
     if (!heroId || !opponentId) {
         return { message: 'Hero and Opponent are required', success: false }
     }
 
     try {
-        // This is a simplified insertion relative to the bulk one. 
-        // Assuming default values for positions/version if not provided or just basic linking.
-        // However, the user prompt implies a specific DB schema. 
-        // Given 'saveMatchups' uses versionId, myPosition etc., this simple form might be for a different view or simple log.
-        // I will use a reasonable default or insert what I can.
-        // BUT, looking at 'saveMatchups', the table requires version_id, position, enemy_position.
-        // The user prompt didn't ask to extract those from formData. 
-        // I will try to fetch active version and use default positions if not in formData.
-        // Actually, let's check if formData HAS them.
-
         const { data: activeVersion } = await supabase.from('versions').select('id').eq('is_active', true).single()
         if (!activeVersion) throw new Error("No active version found")
-
         const versionId = activeVersion.id
-        const position = 'Mid' // Default fallback
-        const enemyPosition = 'Mid' // Default fallback
-        const winRate = 50
+
+        // Default enemy position if not provided, assuming same as my lane or 'Mid'
+        // Ideally the form should provide enemy lane too, but it has 'lane' which seemingly applies to 'My Lane' context?
+        // MatchupForm labels it "Lane / Position". In MOBA context, usually implies both are in that lane.
+        const enemyPosition = position
 
         const { error } = await supabase
             .from('matchups')
@@ -138,7 +136,7 @@ export async function addMatchup(prevState: any, formData: FormData) {
                 enemy_hero_id: opponentId,
                 enemy_position: enemyPosition,
                 win_rate: winRate,
-                // description: description // If schema has it. Assuming yes or ignorable.
+                // description: description // Uncomment if column exists
             })
 
         if (error) throw error
