@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #090312;
+  --color-surface: #130a21;
+  --color-surface-highlight: #1f1135;
+  --color-primary: #a855f7;
+  --color-accent: #06b6d4;
+  --color-text-main: #f3e8ff;
+  --color-text-muted: #a78bfa;
+}
+
+@layer base {
+  body {
+    /* Hardcoded background to break the loop, but using CSS variable if available */
+    background-color: #090312;
+    color: #f3e8ff;
+    min-height: 100vh;
+    background-image: radial-gradient(circle at center, #1a0f2e 0%, #090312 100%);
+  }
+}
+
+@layer components {
+  .glass-card {
+    background-color: rgba(19, 10, 33, 0.8);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.75rem;
+    /* rounded-xl */
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  }
+
+  .glow-button {
+    background-color: #a855f7;
+    color: white;
+    font-weight: bold;
+    transition: all 0.3s;
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
+  }
+
+  .glow-button:hover {
+    background-color: #9333ea;
+    /* purple-600 */
+  }
+
+  .dark-input {
+    background-color: #05010a;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.5rem;
+    /* rounded-lg */
+    color: white;
+    padding: 0.5rem;
+    /* p-2 */
+    width: 100%;
+  }
+
+  .dark-input:focus {
+    border-color: #a855f7;
+    outline: 2px solid #a855f7;
+    outline-offset: 1px;
+  }
+}
