@@ -21,11 +21,6 @@ export async function getVersions() {
 export async function getHeroesByVersion(versionId: number) {
     const supabase = await createClient()
 
-    // Fetch heroes and their stats for the specific version
-    // We use !inner join to ensure we only get heroes that have stats for this version (or left join if we want all, but logical requirement implies version specific)
-    // Actually, usually we want to see ALL heroes, and if they don't have stats for this version, maybe show them as unranked?
-    // User said: "Grid of Small Icons for all heroes present in the Selected Version". "Present in" implies they have stats.
-
     const { data, error } = await supabase
         .from('heroes')
         .select(`
@@ -54,13 +49,14 @@ export async function addHero(prevState: any, formData: FormData) {
     const icon_url = formData.get('icon_url') as string
     const damage_type = formData.get('damage_type') as string
 
-    // Handle multiple checkboxes for positions
+    // Fix: Use getAll for multiple checkboxes
     const main_position = formData.getAll('main_position')
 
-    let version_id = formData.get('version_id') as string // ID from selector
+    // Fix: Use let so we can update if missing
+    let version_id = formData.get('version_id') as string
     const power_spike = formData.get('power_spike') as string
 
-    // If version_id is missing, find the active one
+    // Logic Flow: Fetch active version if missing
     if (!version_id) {
         const { data: activeVersion } = await supabase
             .from('versions')
@@ -106,8 +102,6 @@ export async function addHero(prevState: any, formData: FormData) {
     revalidatePath('/admin/heroes')
     return { message: 'Hero created successfully!', success: true }
 }
-
-export const createHero = addHero;
 
 export async function bulkImportHeroes(versionId: number, heroesData: any[]) {
     const supabase = await createClient()
@@ -225,15 +219,11 @@ export async function updateHero(formData: FormData) {
     const icon_url = formData.get('icon_url')
     const damage_type = formData.get('damage_type')
     // Extract positions which might be multiple checkboxes
-    // NOTE: FormData.getAll returns an array of strings. 
-    // If our DB expects a JSON array or text array, we might need to format it.
-    // Based on createHero logic: JSON.parse(formData.get('main_position')) 
-    // It seems previous frontend was sending JSON string. 
     // The NEW User Request implies normal form submission: formData.getAll('positions')
     const positions = formData.getAll('positions')
 
     const power_spike = formData.get('power_spike')
-    const tier = formData.get('tier') // Although user removed tier UI from main page, the Edit Modal typically has it.
+    const tier = formData.get('tier')
 
     // 1. Update 'heroes' table
     const { error: heroError } = await supabase
@@ -242,7 +232,7 @@ export async function updateHero(formData: FormData) {
             name,
             icon_url,
             damage_type,
-            main_position: positions // Supabase TS client should handle string[] to array column
+            main_position: positions
         })
         .eq('id', heroId)
 
@@ -252,16 +242,11 @@ export async function updateHero(formData: FormData) {
 
     // 2. Upsert 'hero_stats' table (for this version)
     if (versionId) {
-        // If tier is empty string, make it null? Or leave as is. 
-        // User logic: tier: tier
         const { error: statsError } = await supabase
             .from('hero_stats')
             .upsert({
                 hero_id: heroId,
                 version_id: parseInt(versionId as string),
-                // Only update if provided? For upsert we need all keys or it might overwrite with null?
-                // But we are upserting on specific id+version.
-                // If the user wants to update stats, we assume the form provides them.
                 tier: tier || null,
                 power_spike: power_spike || 'Balanced'
             }, { onConflict: 'hero_id, version_id' })
@@ -281,3 +266,6 @@ export async function updateHero(formData: FormData) {
 
     return { success: true, message: 'Updated successfully' }
 }
+
+// ALIAS AT THE BOTTOM
+export const createHero = addHero;
