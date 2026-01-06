@@ -46,6 +46,23 @@ export interface Matchup {
     version?: Version;
 }
 
+export interface HeroCombo {
+    id: string; // uuid
+    hero_a_id: string;
+    hero_a_position: string;
+    hero_b_id: string;
+    hero_b_position: string;
+    synergy_score: number; // 1-100
+    description?: string;
+    version_id: number;
+    created_at?: string;
+
+    // Joins
+    hero_a?: Hero;
+    hero_b?: Hero;
+    version?: Version;
+}
+
 export const DAMAGE_TYPES = ['Physical', 'Magic', 'True', 'Mixed'] as const;
 export const POWER_SPIKES = ['Early', 'Mid', 'Late', 'Balanced'] as const; // Re-add Mid as it is in DB check
 export const POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam'] as const;

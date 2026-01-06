@@ -60,5 +60,28 @@ export default async function HeroDetailPage({ params }: Props) {
         }
     }
 
-    return <HeroDetailView hero={hero} matchups={matchups} />
+    // 4. Fetch Hero Combos
+    let combos: any[] = [];
+    if (activeVersion && hero) {
+        const { data } = await supabase
+            .from('hero_combos')
+            .select(`
+            id,
+            hero_a_id,
+            hero_a_position,
+            hero_b_id,
+            hero_b_position,
+            synergy_score,
+            description,
+            hero_a:heroes!hero_combos_hero_a_id_fkey(id, name, icon_url),
+            hero_b:heroes!hero_combos_hero_b_id_fkey(id, name, icon_url)
+        `)
+            .eq('version_id', activeVersion.id)
+            .or(`hero_a_id.eq.${hero.id},hero_b_id.eq.${hero.id}`)
+            .order('synergy_score', { ascending: false });
+
+        if (data) combos = data;
+    }
+
+    return <HeroDetailView hero={hero} matchups={matchups} combos={combos} />
 }

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Users, Swords, LayoutDashboard, Shield, History } from 'lucide-react'
+import { Home, Users, Swords, LayoutDashboard, Shield, History, Handshake } from 'lucide-react'
 
 export default function AdminSidebar() {
     const pathname = usePathname()
@@ -11,6 +11,7 @@ export default function AdminSidebar() {
         { href: '/admin/versions', label: 'Versions', icon: History },
         { href: '/admin/heroes', label: 'Heroes', icon: Users },
         { href: '/admin/matchups', label: 'Matchups', icon: Swords },
+        { href: '/admin/combos', label: 'Combos', icon: Handshake },
         { href: '/', label: 'Draft Analysis', icon: LayoutDashboard },
     ]
 

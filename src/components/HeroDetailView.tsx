@@ -7,8 +7,11 @@ import { ArrowLeft, Edit, ArrowUpCircle, ArrowDownCircle } from 'lucide-react'
 import EditHeroModal from './EditHeroModal'
 import HeroMatchupAnalysis from './HeroMatchupAnalysis'
 
-export default function HeroDetailView({ hero, matchups = [] }: { hero: any, matchups?: any[] }) {
+import { Handshake } from 'lucide-react'
+
+export default function HeroDetailView({ hero, matchups = [], combos = [] }: { hero: any, matchups?: any[], combos?: any[] }) {
     const [isEditOpen, setIsEditOpen] = useState(false)
+    const [activeTab, setActiveTab] = useState<'matchups' | 'combos'>('matchups')
 
     // Current stats logic for display
     const currentStats = Array.isArray(hero.hero_stats) ? (hero.hero_stats[0] || {}) : (hero.hero_stats || {})
@@ -79,11 +82,80 @@ export default function HeroDetailView({ hero, matchups = [] }: { hero: any, mat
                 </div>
             </div>
 
-            {/* Matchup Analysis */}
-            <HeroMatchupAnalysis matchups={matchups} heroPositions={
-                Array.isArray(hero.main_position) ? hero.main_position :
-                    (typeof hero.main_position === 'string' ? JSON.parse(hero.main_position) : [])
-            } />
+            {/* TABS HEADER */}
+            <div className="flex items-center gap-6 border-b border-white/10 mb-8">
+                <button
+                    onClick={() => setActiveTab('matchups')}
+                    className={`pb-4 px-2 text-sm font-bold uppercase tracking-wider transition-colors relative ${activeTab === 'matchups' ? 'text-white' : 'text-text-muted hover:text-white'}`}
+                >
+                    Matchups
+                    {activeTab === 'matchups' && <div className="absolute bottom-0 inset-x-0 h-0.5 bg-primary shadow-[0_0_10px_rgba(168,85,247,0.8)]" />}
+                </button>
+
+                <button
+                    onClick={() => setActiveTab('combos')}
+                    className={`pb-4 px-2 text-sm font-bold uppercase tracking-wider transition-colors relative ${activeTab === 'combos' ? 'text-white' : 'text-text-muted hover:text-white'}`}
+                >
+                    Combo Duo
+                    {activeTab === 'combos' && <div className="absolute bottom-0 inset-x-0 h-0.5 bg-primary shadow-[0_0_10px_rgba(168,85,247,0.8)]" />}
+                </button>
+            </div>
+
+            {/* TAB CONTENT */}
+            <div className="min-h-[300px]">
+                {activeTab === 'matchups' ? (
+                    <HeroMatchupAnalysis matchups={matchups} heroPositions={
+                        Array.isArray(hero.main_position) ? hero.main_position :
+                            (typeof hero.main_position === 'string' ? JSON.parse(hero.main_position) : [])
+                    } />
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        {combos && combos.length > 0 ? (
+                            combos.map(combo => {
+                                const isHeroA = combo.hero_a_id === hero.id
+                                const partner = isHeroA ? combo.hero_b : combo.hero_a
+                                const partnerPos = isHeroA ? combo.hero_b_position : combo.hero_a_position
+
+                                return (
+                                    <div key={combo.id} className="glass-card p-4 flex items-center gap-4 group hover:bg-white/5 transition-colors border border-white/5">
+                                        <div className="relative w-16 h-16 rounded-full border-2 border-primary/50 overflow-hidden shadow-lg shadow-purple-900/20 shrink-0">
+                                            {partner.icon_url ? (
+                                                <Image src={partner.icon_url} alt="" fill className="object-cover" />
+                                            ) : (
+                                                <div className="w-full h-full bg-slate-800" />
+                                            )}
+                                        </div>
+
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                <h3 className="font-bold text-lg text-white truncate">{partner.name}</h3>
+                                                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-primary/20 text-primary border border-primary/20">
+                                                    {partnerPos === 'Any' ? 'Any Lane' : partnerPos}
+                                                </span>
+                                            </div>
+
+                                            {combo.description ? (
+                                                <p className="text-sm text-text-muted line-clamp-2">{combo.description}</p>
+                                            ) : (
+                                                <p className="text-xs text-text-muted italic">Great synergy partner.</p>
+                                            )}
+                                        </div>
+
+                                        <div className="flex flex-col items-center justify-center pl-4 border-l border-white/10 text-primary">
+                                            <Handshake size={20} className="mb-1 opacity-50" />
+                                        </div>
+                                    </div>
+                                )
+                            })
+                        ) : (
+                            <div className="col-span-full py-12 flex flex-col items-center justify-center text-text-muted border border-dashed border-white/10 rounded-xl bg-white/5">
+                                <Handshake size={48} className="mb-4 opacity-20" />
+                                <p>No combo duos found for this patch.</p>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
 
             {/* Render Modal */}
             {isEditOpen && (
