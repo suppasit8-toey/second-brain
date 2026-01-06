@@ -269,7 +269,7 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
             </div>
 
             {/* Content: Hero Grid */}
-            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-2">
+            <div className="grid grid-cols-6 md:grid-cols-[repeat(18,minmax(0,1fr))] gap-1">
                 {isPending ? (
                     <div className="col-span-full text-center py-20 text-text-muted">Loading heroes...</div>
                 ) : filteredHeroes.length === 0 ? (
@@ -284,8 +284,8 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
                         const tier = stats?.tier || '?';
 
                         return (
-                            <Link href={`/admin/heroes/${hero.name}`} key={hero.id} className="block group relative">
-                                <div className="glass-card p-0 overflow-hidden flex flex-col items-center relative hover:bg-surface-highlight transition-all group-hover:shadow-[0_0_20px_rgba(168,85,247,0.3)] border-primary/20 group-hover:border-primary/50">
+                            <Link href={`/admin/heroes/${hero.name}`} key={hero.id} className="block group relative" title={hero.name}>
+                                <div className="glass-card p-0.5 overflow-hidden flex flex-col items-center relative hover:bg-surface-highlight transition-all group-hover:shadow-[0_0_20px_rgba(168,85,247,0.3)] border-primary/20 group-hover:border-primary/50">
                                     <div className="relative w-full aspect-square border-b border-white/5 group-hover:border-primary/30 transition-all">
                                         {hero.icon_url && hero.icon_url.trim() !== '' ? (
                                             <Image
@@ -293,18 +293,13 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
                                                 alt={hero.name}
                                                 fill
                                                 className="object-cover transition-transform duration-500 group-hover:scale-110"
-                                                sizes="(max-width: 768px) 33vw, 20vw"
+                                                sizes="(max-width: 768px) 16vw, 5vw"
                                             />
                                         ) : (
                                             <div className="w-full h-full bg-slate-800 flex items-center justify-center">
-                                                <span className="text-4xl font-bold text-gray-600 group-hover:text-primary transition-colors">{hero.name.charAt(0)}</span>
+                                                <span className="text-[10px] font-bold text-gray-600 group-hover:text-primary transition-colors">{hero.name.charAt(0)}</span>
                                             </div>
                                         )}
-                                    </div>
-                                    <div className="text-center p-1 w-full absolute bottom-0 z-10">
-                                        <h3 className="font-bold text-[10px] leading-tight text-white truncate drop-shadow-[0_1.2px_1.2px_rgba(0,0,0,0.8)]">
-                                            {hero.name}
-                                        </h3>
                                     </div>
                                 </div>
                             </Link>

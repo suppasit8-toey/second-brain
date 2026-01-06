@@ -4,7 +4,7 @@ import { useState, useEffect, useTransition } from 'react'
 import { Version, Hero, POSITIONS } from '@/utils/types'
 import { getHeroesByVersion } from '@/app/admin/heroes/actions'
 import { saveMatchups, getMatchups } from '@/app/admin/matchups/actions'
-import { Plus, Search, Shield, Sword, Save, X, Trash2, Filter, AlertCircle, Pencil, ChevronDown } from 'lucide-react'
+import { Plus, Search, Shield, Sword, Save, X, Trash2, Filter, AlertCircle, Pencil, ChevronDown, Check, CheckCircle2, Minus } from 'lucide-react'
 import Image from 'next/image'
 
 interface MatchupManagerProps {
@@ -57,10 +57,6 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [modalEnemyPosition, setModalEnemyPosition] = useState<string>('Roam') // Default
     const [modalSearch, setModalSearch] = useState('')
-    // Selected enemies in Modal: Map of EnemyID -> WinRate (default 50)
-    // Selected enemies in Modal: Map of EnemyID -> WinRate (default 50)
-    // Selected enemies in Modal: Map of EnemyID -> WinRate (default 50) + Position Context
-    // Selected enemies in Modal: Map of EnemyID -> WinRate (default 50) + Position Context
     const [selectedEnemies, setSelectedEnemies] = useState<SelectedEnemy[]>([])
 
     // Constants
@@ -93,16 +89,13 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
         const hero = heroes.find(h => h.id.toString() === selectedHeroId)
         if (hero) {
             // Robust parsing of position data
-            // Cast to any to access potential 'position' field if it exists in raw DB response but not in interface
             let posData = (hero as any).position || hero.main_position || []
 
             if (typeof posData === 'string') {
                 try {
-                    // Try parsing if it's a JSON string like '["Abyssal"]'
                     if (posData.startsWith('[')) {
                         posData = JSON.parse(posData)
                     } else {
-                        // If it's a plain string like "Abyssal", wrap it
                         posData = [posData]
                     }
                 } catch (e) {
@@ -123,12 +116,12 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
             if (cleanPositions.length === 1) {
                 setSelectedPosition(cleanPositions[0])
             } else {
-                setSelectedPosition('') // Reset if multiple choices to force user choice
+                setSelectedPosition('')
             }
         }
     }, [selectedHeroId, heroes])
 
-    // B. Fetch Matchups when Context Changes
+    // C. Fetch Matchups when Context Changes
     useEffect(() => {
         if (!selectedVersionId || !selectedHeroId || !selectedPosition) {
             setMatchups([])
@@ -161,9 +154,7 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
             setModalEnemyPosition('Mid')
             setSelectedEnemies([])
         }
-        // Improve: Reset search when opening
         setModalSearch('')
-
         setIsModalOpen(true)
     }
 
@@ -181,29 +172,40 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
     }
 
     const toggleEnemySelection = (hero: Hero) => {
-        // Prevent selecting self as enemy (optional? Mirror match exists)
+        // Prevent selecting self as enemy
         if (hero.id === selectedHeroId) return
 
         setSelectedEnemies(prev => {
-            const exists = prev.find(e => e.id === hero.id)
+            // Check if this specific Hero + Position combo is already selected
+            const exists = prev.find(e => e.id === hero.id && e.position === modalEnemyPosition)
+
             if (exists) {
-                // Remove if already selected
-                return prev.filter(e => e.id !== hero.id)
+                // Remove specific combo
+                return prev.filter(e => !(e.id === hero.id && e.position === modalEnemyPosition))
             } else {
-                // ADD LOGIC: Capture current 'enemyPosition' filter context
+                // Check if we have saved data for this specific combo
+                const existingMatchup = matchups.find(m =>
+                    m.enemy_hero_id === hero.id &&
+                    m.enemy_position === modalEnemyPosition
+                );
+
                 return [...prev, {
                     id: hero.id,
                     name: hero.name,
                     icon_url: hero.icon_url,
-                    winRate: 50,
-                    position: modalEnemyPosition // <--- Captured Context
+                    winRate: existingMatchup ? existingMatchup.win_rate : 50,
+                    position: modalEnemyPosition
                 }]
             }
         })
     }
 
-    const updateEnemyWinRate = (id: string, rate: number) => {
-        setSelectedEnemies(prev => prev.map(e => e.id === id ? { ...e, winRate: rate } : e))
+    const updateEnemyWinRate = (id: string, position: string, rate: number) => {
+        setSelectedEnemies(prev => prev.map(e => (e.id === id && e.position === position) ? { ...e, winRate: rate } : e))
+    }
+
+    const removeSelectedEnemy = (id: string, position: string) => {
+        setSelectedEnemies(prev => prev.filter(e => !(e.id === id && e.position === position)))
     }
 
     const handleSaveMatchups = async () => {
@@ -212,10 +214,10 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
             return
         }
 
-        // Prepare Payload - Use the stored position for each enemy
+        // Prepare Payload
         const payload = selectedEnemies.map(e => ({
             enemyId: e.id,
-            enemyPosition: e.position, // <--- Use per-enemy stored position
+            enemyPosition: e.position,
             winRate: e.winRate
         }))
 
@@ -241,39 +243,19 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
         viewFilter === 'All' ? true : m.enemy_position === viewFilter
     )
 
-    // Filter heroes for Modal Selection
-    const modalHeroes = heroes.filter(h => {
-        // 1. Exclude Self
-        // 1. Exclude Self (Strict Type Check)
+    // --- SORTING & FILTERING FOR MODAL ---
+    // 1. Filter heroes first (Exclude self, apply Search, apply Position Filter context)
+    const baseModalHeroes = heroes.filter(h => {
+        // Exclude Self
         if (String(h.id) === String(selectedHeroId)) return false;
 
-        // 2. Exclude Existing Matchups (Duplicate Prevention)
-        // If we are NOT in edit mode (i.e. selectedEnemies is empty OR we are strictly adding new ones), 
-        // we should hide enemies that already have a matchup.
-        // CHECK: If this enemy ID exists in 'matchups' list with the CURRENT modalEnemyPosition?
-        // Actually, 'matchups' contains { opponent: {id...}, enemy_position... }
-        // The uniqueness constraint is (Hero, MyPos, Enemy, EnemyPos).
-        // So we should check if (h.id, modalEnemyPosition) exists in 'matchups'.
-
-        // HOWEVER, the user requirement was simpler: "create an array of enemy_hero_id... exclude them".
-        // This implies: If I have matched against 'Zata' (Mid), I cannot match against 'Zata' (Roam) for this same Hero/Position context?
-        // User text: "create an array of enemy_hero_id that are currently displayed... existingEnemyIds...".
-        // I will follow this strict interpretation for now.
-        const existingEnemyIds = matchups.map(m => m.enemy_hero_id);
-
-        // Allow if we are currently editing THIS specific enemy (in case reusing modal for edit)
-        const isEditingThisEnemy = selectedEnemies.some(e => e.id === h.id);
-
-        if (existingEnemyIds.includes(h.id) && !isEditingThisEnemy) return false;
-
-        // 2. Search Filter
+        // Search Filter
         if (!h.name.toLowerCase().includes(modalSearch.toLowerCase())) return false;
 
-        // 2. Position Filter (Strict based on User Request)
+        // Position Filter (Strict based on User Request)
         if (!modalEnemyPosition) return true;
 
         let posData = (h as any).position || h.main_position || [];
-        // Robust handling
         let heroPositions: string[] = [];
 
         if (typeof posData === 'string') {
@@ -290,23 +272,38 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
             heroPositions = posData;
         }
 
-        // Case-insensitive check
-        // Handle "Abyssal" vs "Abyssal Dragon" mismatch if necessary regarding UI filter vs Data
-        // If modalEnemyPosition is "Abyssal", check if hero has "Abyssal" or "Abyssal Dragon"
-        // To be safe, checking includes or exact map? 
-        // User request: "Rename 'Abyssal Dragon' to 'Abyssal'" in options. 
-        // So modalEnemyPosition will be 'Abyssal'.
-        // Data might be 'Abyssal Dragon'.
         const targetPos = modalEnemyPosition.toLowerCase() === 'abyssal' ? 'abyssal' : modalEnemyPosition.toLowerCase();
 
         return heroPositions.some(p => {
             const pLow = p.toLowerCase();
             if (targetPos === 'abyssal') {
-                return pLow.includes('abyssal'); // Matches 'Abyssal' and 'Abyssal Dragon'
+                return pLow.includes('abyssal');
             }
             return pLow === targetPos;
         });
-    })
+    });
+
+    // 2. Split into Pending and Completed
+    const completedHeroes: Hero[] = [];
+    const pendingHeroes: Hero[] = [];
+
+    baseModalHeroes.forEach(h => {
+        // Check if I have a matchup recorded for this hero AT THE CURRENT modalEnemyPosition
+        const isCompleted = matchups.some(m =>
+            m.enemy_hero_id === h.id &&
+            m.enemy_position === modalEnemyPosition
+        );
+
+        if (isCompleted) {
+            completedHeroes.push(h);
+        } else {
+            pendingHeroes.push(h);
+        }
+    });
+
+    // 3. Combine for render (Pending first)
+    const displayHeroes = [...pendingHeroes, ...completedHeroes];
+
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
@@ -328,9 +325,7 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                         </select>
                     </div>
 
-                    {/* 2. My Hero Selector (Custom Dropdown) */}
-                    {/* 2. My Hero Selector (Custom Dropdown) */}
-                    {/* 2. My Hero Selector (Simple Styled) */}
+                    {/* My Hero Selector */}
                     <div className="min-w-[200px] w-full md:w-64">
                         <label className="block text-xs font-bold text-text-muted uppercase tracking-wider mb-1">
                             My Hero
@@ -348,17 +343,13 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                                     </option>
                                 ))}
                             </select>
-
-                            {/* Chevron Icon */}
                             <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="m6 9 6 6 6-6" />
-                                </svg>
+                                <ChevronDown size={16} />
                             </div>
                         </div>
                     </div>
 
-                    {/* 3. My Position Selector (Filtered) */}
+                    {/* My Position Selector */}
                     <div className="w-full md:w-auto">
                         <label className="text-xs font-bold text-text-muted uppercase mb-1 block">My Position</label>
                         <select
@@ -388,17 +379,14 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                     </button>
                 </div>
 
-                {/* Decorative BG */}
                 <div className="absolute top-0 right-0 w-96 h-96 bg-primary/5 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none"></div>
             </div>
 
             {/* 2. MAIN CONTENT AREA (Grid) */}
             <div>
-                {/* NEW: View Filter Bar */}
+                {/* View Filter Bar */}
                 {selectedHeroId && matchups.length > 0 && (
                     <div className="mt-8 flex flex-col md:flex-row md:items-center gap-6 border-b border-white/5 pb-6 animate-in slide-in-from-top-2">
-
-                        {/* 1. Context Badge (My Hero) */}
                         <div className="flex items-center gap-4 pr-0 md:pr-6 md:border-r border-white/10 border-b md:border-b-0 pb-4 md:pb-0 w-full md:w-auto">
                             <div className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.3)]">
                                 {myHero?.icon_url ? (
@@ -415,7 +403,6 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                             </div>
                         </div>
 
-                        {/* 2. Filter Buttons */}
                         <div className="flex flex-wrap gap-2 items-center">
                             <span className="text-xs font-bold text-gray-500 mr-2 uppercase tracking-wider">VS ENEMY:</span>
                             {['All', 'Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam'].map(pos => (
@@ -434,6 +421,7 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                     </div>
                 )}
 
+                {/* Matchup Grid */}
                 {!selectedHeroId ? (
                     <div className="text-center py-20 text-text-muted opacity-50 flex flex-col items-center">
                         <Filter size={48} className="mb-4" />
@@ -449,54 +437,46 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                        {filteredMatchups.length > 0 ? (
-                            filteredMatchups.map(m => (
-                                <div key={m.id} className="glass-card p-4 flex items-center gap-4 hover:bg-white/5 transition-all group relative overflow-hidden border-l-4"
-                                    style={{ borderLeftColor: m.win_rate >= 50 ? '#4ade80' : '#f87171' }}>
+                        {filteredMatchups.map(m => (
+                            <div key={m.id} className="glass-card p-4 flex items-center gap-4 hover:bg-white/5 transition-all group relative overflow-hidden border-l-4"
+                                style={{ borderLeftColor: m.win_rate >= 50 ? '#4ade80' : '#f87171' }}>
 
-                                    {/* Opponent Icon */}
-                                    <div className="relative w-12 h-12 rounded-full overflow-hidden border border-white/10 shrink-0">
-                                        {m.opponent?.icon_url ? (
-                                            <Image src={m.opponent.icon_url} alt={m.opponent.name} fill className="object-cover" />
-                                        ) : (
-                                            <div className="w-full h-full bg-slate-800" />
-                                        )}
+                                <div className="relative w-12 h-12 rounded-full overflow-hidden border border-white/10 shrink-0">
+                                    {m.opponent?.icon_url ? (
+                                        <Image src={m.opponent.icon_url} alt={m.opponent.name} fill className="object-cover" />
+                                    ) : (
+                                        <div className="w-full h-full bg-slate-800" />
+                                    )}
+                                </div>
+
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEdit(m);
+                                    }}
+                                    className="absolute top-2 right-2 p-1.5 rounded-full bg-black/40 text-gray-400 opacity-0 group-hover:opacity-100 hover:bg-purple-600 hover:text-white transition-all z-20"
+                                    title="Edit Win Rate"
+                                >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                </button>
+
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex items-center justify-between">
+                                        <h4 className="font-bold text-white truncate">{m.opponent?.name}</h4>
+                                        <span className="text-xs text-text-muted bg-black/30 px-1.5 py-0.5 rounded">{m.enemy_position}</span>
                                     </div>
-
-                                    {/* Edit Button */}
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleEdit(m);
-                                        }}
-                                        className="absolute top-2 right-2 p-1.5 rounded-full bg-black/40 text-gray-400 opacity-0 group-hover:opacity-100 hover:bg-purple-600 hover:text-white transition-all z-20"
-                                        title="Edit Win Rate"
-                                    >
-                                        <Pencil className="w-3.5 h-3.5" />
-                                    </button>
-
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center justify-between">
-                                            <h4 className="font-bold text-white truncate">{m.opponent?.name}</h4>
-                                            <span className="text-xs text-text-muted bg-black/30 px-1.5 py-0.5 rounded">{m.enemy_position}</span>
+                                    <div className="flex items-center mt-1 gap-2">
+                                        <div className="flex-1 h-1.5 bg-black/50 rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full ${m.win_rate >= 50 ? 'bg-green-500' : 'bg-red-500'}`}
+                                                style={{ width: `${m.win_rate}%` }}
+                                            />
                                         </div>
-                                        <div className="flex items-center mt-1 gap-2">
-                                            <div className="flex-1 h-1.5 bg-black/50 rounded-full overflow-hidden">
-                                                <div
-                                                    className={`h-full rounded-full ${m.win_rate >= 50 ? 'bg-green-500' : 'bg-red-500'}`}
-                                                    style={{ width: `${m.win_rate}%` }}
-                                                />
-                                            </div>
-                                            <span className={`text-xs font-bold ${m.win_rate >= 50 ? 'text-green-400' : 'text-red-400'}`}>{m.win_rate}%</span>
-                                        </div>
+                                        <span className={`text-xs font-bold ${m.win_rate >= 50 ? 'text-green-400' : 'text-red-400'}`}>{m.win_rate}%</span>
                                     </div>
                                 </div>
-                            ))
-                        ) : (
-                            <div className="col-span-full text-center py-10 text-gray-500 italic">
-                                No matchups found for this filter.
                             </div>
-                        )}
+                        ))}
                     </div>
                 )}
             </div>
@@ -505,23 +485,15 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
             {isModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
                     <div className="glass-card w-full max-w-4xl max-h-[90vh] flex flex-col outline-none shadow-2xl animate-in zoom-in-95 duration-200">
-                        {/* NEW HEADER SECTION (Replaces old title/subtitle) */}
+                        {/* Header */}
                         <div className="flex items-center gap-4 p-4 md:p-6 bg-white/5 border-b border-white/10 shrink-0 relative">
-                            {/* Hero Image */}
                             <div className="relative w-14 h-14 rounded-full overflow-hidden border-2 border-primary/40 shadow-sm shrink-0">
                                 {myHero?.icon_url ? (
-                                    <Image
-                                        src={myHero.icon_url}
-                                        alt={myHero.name}
-                                        fill
-                                        className="object-cover"
-                                    />
+                                    <Image src={myHero.icon_url} alt={myHero.name} fill className="object-cover" />
                                 ) : (
                                     <div className="w-full h-full bg-slate-700 animate-pulse" />
                                 )}
                             </div>
-
-                            {/* Hero Name & Position */}
                             <div>
                                 <h2 className="text-2xl font-bold text-white leading-tight">
                                     {myHero?.name}
@@ -530,8 +502,6 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                                     Playing as <span className="text-primary font-bold uppercase">{selectedPosition}</span>
                                 </p>
                             </div>
-
-                            {/* Close Button */}
                             <button
                                 onClick={() => setIsModalOpen(false)}
                                 className="absolute right-6 top-6 text-text-muted hover:text-white p-1 rounded-md hover:bg-white/10 transition-colors"
@@ -540,10 +510,9 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                             </button>
                         </div>
 
-                        {/* Modal Content - Split View */}
+                        {/* Split View */}
                         <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
-
-                            {/* Left: Hero Selection */}
+                            {/* Left: Hero Selection with Custom Grid */}
                             <div className="w-full md:w-1/2 p-4 md:p-6 border-r-0 md:border-r border-b md:border-b-0 border-white/10 flex flex-col gap-4 overflow-y-auto max-h-[40vh] md:max-h-full">
                                 <div className="space-y-4">
                                     <div>
@@ -572,47 +541,114 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                                     </div>
                                 </div>
 
-                                <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 content-start">
-                                    {modalHeroes.map(h => {
-                                        const isSelected = selectedEnemies.some(e => e.id === h.id)
-                                        if (h.id === selectedHeroId) return null; // Skip self
+                                {/* SCROLLABLE GRID CONTAINER */}
+                                <div className="flex-1 overflow-y-auto min-h-0 pr-2">
+                                    <div className="grid grid-cols-6 gap-2">
+                                        {displayHeroes.map(h => {
+                                            // Check if selected for the CURRENT modal position
+                                            const isSelected = selectedEnemies.some(e => e.id === h.id && e.position === modalEnemyPosition);
 
-                                        return (
-                                            <button
-                                                key={h.id}
-                                                onClick={() => toggleEnemySelection(h)}
-                                                className={`relative aspect-square rounded-md overflow-hidden border-2 transition-all group ${isSelected ? 'border-primary ring-2 ring-primary/30' : 'border-transparent hover:border-white/20'
-                                                    }`}
-                                            >
-                                                {h.icon_url ? (
-                                                    <Image src={h.icon_url} alt={h.name} fill className="object-cover" />
-                                                ) : (
-                                                    <div className="w-full h-full bg-slate-800 flex items-center justify-center text-xs text-white">{h.name[0]}</div>
-                                                )}
-                                                {isSelected && <div className="absolute inset-0 bg-primary/20 flex items-center justify-center"><div className="w-2 h-2 bg-primary rounded-full shadow-[0_0_10px_white]"></div></div>}
-                                                <div className="absolute bottom-0 inset-x-0 bg-black/60 p-0.5 text-[8px] text-center text-white truncate">{h.name}</div>
-                                            </button>
-                                        )
-                                    })}
+                                            // Check Completed Status (Database)
+                                            const existingMatchup = matchups.find(m =>
+                                                m.enemy_hero_id === h.id &&
+                                                m.enemy_position === modalEnemyPosition
+                                            );
+                                            const isCompleted = !!existingMatchup;
+                                            const winRate = existingMatchup?.win_rate || 50;
+
+                                            // 3-State Logic
+                                            let borderClass = 'border-transparent hover:border-white/20';
+                                            let iconColorClass = 'text-white';
+                                            let statusIcon = null;
+
+                                            if (isCompleted) {
+                                                if (winRate > 50) {
+                                                    // WIN
+                                                    borderClass = 'border-green-500 opacity-100 shadow-[0_0_10px_rgba(34,197,94,0.3)]';
+                                                    iconColorClass = 'text-green-500';
+                                                    statusIcon = <Check size={12} className={iconColorClass} strokeWidth={4} />;
+                                                } else if (winRate === 50) {
+                                                    // DRAW
+                                                    borderClass = 'border-white opacity-100 shadow-[0_0_10px_rgba(255,255,255,0.3)]';
+                                                    iconColorClass = 'text-white';
+                                                    statusIcon = <Minus size={12} className={iconColorClass} strokeWidth={4} />; // Changed to Minus for Draw
+                                                } else {
+                                                    // LOSE
+                                                    borderClass = 'border-red-500 opacity-100 shadow-[0_0_10px_rgba(239,68,68,0.3)]';
+                                                    iconColorClass = 'text-red-500';
+                                                    statusIcon = <X size={12} className={iconColorClass} strokeWidth={4} />; // Changed to X for Lose
+                                                }
+                                            }
+
+                                            return (
+                                                <button
+                                                    key={h.id}
+                                                    onClick={() => toggleEnemySelection(h)}
+                                                    className={`
+                                                        relative aspect-square rounded-md overflow-hidden border-2 transition-all group
+                                                        ${isSelected
+                                                            ? 'border-primary ring-2 ring-primary/30 z-10'
+                                                            : borderClass
+                                                        }
+                                                    `}
+                                                    title={isCompleted ? `${h.name} (${winRate}%)` : h.name}
+                                                >
+                                                    {h.icon_url ? (
+                                                        <Image src={h.icon_url} alt={h.name} fill className="object-cover" />
+                                                    ) : (
+                                                        <div className="w-full h-full bg-slate-800 flex items-center justify-center text-xs text-white">{h.name[0]}</div>
+                                                    )}
+
+                                                    {/* Selection Overlay */}
+                                                    {isSelected && (
+                                                        <div className="absolute inset-0 bg-primary/40 flex items-center justify-center backdrop-blur-[1px]">
+                                                            <div className="w-2.5 h-2.5 bg-white rounded-full shadow-[0_0_10px_white]"></div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Completed Checkmark Badge */}
+                                                    {isCompleted && !isSelected && (
+                                                        <div className="absolute top-0 right-0 p-1 bg-black/60 rounded-bl-md backdrop-blur-[2px] z-20">
+                                                            {statusIcon}
+                                                        </div>
+                                                    )}
+
+                                                    <div className="absolute bottom-0 inset-x-0 p-0.5 text-[9px] font-bold text-center text-white truncate drop-shadow-[0_1.2px_1.2px_rgba(0,0,0,0.8)] z-10">{h.name}</div>
+                                                </button>
+                                            )
+                                        })}
+
+                                        {displayHeroes.length === 0 && (
+                                            <div className="col-span-full text-center py-8 text-text-muted text-xs">
+                                                No heroes found.
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
 
                             {/* Right: Review & Settings */}
                             <div className="w-full md:w-1/2 p-4 md:p-6 flex flex-col bg-surface/20 max-h-[40vh] md:max-h-full">
                                 <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
-                                    Selected Enemies <span className="bg-primary px-1.5 rounded text-[10px]">{selectedEnemies.length}</span>
+                                    {selectedEnemies.length > 0 ? (
+                                        <>Editing <span className="bg-primary px-1.5 rounded text-[10px]">{selectedEnemies.length}</span> Matchups</>
+                                    ) : (
+                                        "Select Enemies"
+                                    )}
                                 </h3>
 
                                 <div className="flex-1 overflow-y-auto space-y-2 pr-2">
                                     {selectedEnemies.length === 0 ? (
-                                        <div className="text-center py-10 text-text-muted text-sm italic">
-                                            Select enemies from the left...
+                                        <div className="text-center py-10 text-text-muted text-sm italic flex flex-col items-center gap-2">
+                                            <ArrowUpLeftIcon className="w-6 h-6 rotate-45" />
+                                            <p>Select enemies from the grid to add or update matchups.</p>
                                         </div>
                                     ) : (
                                         selectedEnemies.map(enemy => (
-                                            <div key={enemy.id} className="bg-white/5 rounded-lg p-3 flex items-center gap-3 animate-in slide-in-from-left-2 duration-200">
+                                            <div key={`${enemy.id}-${enemy.position}`} className="bg-white/5 rounded-lg p-3 flex items-center gap-3 animate-in slide-in-from-left-2 duration-200">
                                                 <div className="relative w-10 h-10 rounded-full overflow-hidden border border-white/10 shrink-0">
-                                                    {enemy.icon_url && <Image src={enemy.icon_url} alt={enemy.name} fill className="object-cover" />}
+                                                    {enemy.icon_url && <Image src={enemy.icon_url} alt={enemy.name} fill className="object-cover" />
+                                                    }
                                                 </div>
                                                 <div className="flex-1 min-w-0">
                                                     <div className="font-medium text-white text-sm truncate">{enemy.name}</div>
@@ -620,11 +656,10 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                                                 </div>
                                                 <div className="flex flex-col items-end gap-1">
                                                     <div className="flex items-center gap-3">
-                                                        {/* Minus Button */}
                                                         <button
                                                             onClick={() => {
                                                                 const newVal = Math.max(0, enemy.winRate - 5);
-                                                                updateEnemyWinRate(enemy.id, newVal);
+                                                                updateEnemyWinRate(enemy.id, enemy.position, newVal);
                                                             }}
                                                             className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
                                                             type="button"
@@ -632,16 +667,14 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                                                             -
                                                         </button>
 
-                                                        {/* Value Display */}
-                                                        <span className="text-lg font-bold text-primary w-12 text-center">
+                                                        <span className={`text-lg font-bold w-12 text-center ${enemy.winRate > 50 ? 'text-green-400' : enemy.winRate < 50 ? 'text-red-400' : 'text-gray-200'}`}>
                                                             {enemy.winRate}%
                                                         </span>
 
-                                                        {/* Plus Button */}
                                                         <button
                                                             onClick={() => {
                                                                 const newVal = Math.min(100, enemy.winRate + 5);
-                                                                updateEnemyWinRate(enemy.id, newVal);
+                                                                updateEnemyWinRate(enemy.id, enemy.position, newVal);
                                                             }}
                                                             className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
                                                             type="button"
@@ -650,7 +683,7 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                                                         </button>
                                                     </div>
                                                 </div>
-                                                <button onClick={() => toggleEnemySelection({ id: enemy.id } as Hero)} className="text-text-muted hover:text-red-400 p-1"><X size={16} /></button>
+                                                <button onClick={() => removeSelectedEnemy(enemy.id, enemy.position)} className="text-text-muted hover:text-red-400 p-1"><X size={16} /></button>
                                             </div>
                                         ))
                                     )}
@@ -662,7 +695,11 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                                         onClick={handleSaveMatchups}
                                         className="glow-button px-6 py-2 rounded-lg text-sm flex items-center gap-2"
                                     >
-                                        <Save size={16} /> Save Changes
+                                        <Save size={16} />
+                                        {selectedEnemies.some(e => matchups.some(m => m.enemy_hero_id === e.id && m.enemy_position === e.position))
+                                            ? "Update Matchups"
+                                            : "Save New Matchups"
+                                        }
                                     </button>
                                 </div>
                             </div>
@@ -671,5 +708,14 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                 </div>
             )}
         </div>
+    )
+}
+
+function ArrowUpLeftIcon({ className }: { className?: string }) {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+            <path d="M7 17V7h10" />
+            <path d="M17 17 7 7" />
+        </svg>
     )
 }
