@@ -67,3 +67,52 @@ export const DAMAGE_TYPES = ['Physical', 'Magic', 'True', 'Mixed'] as const;
 export const POWER_SPIKES = ['Early', 'Mid', 'Late', 'Balanced'] as const; // Re-add Mid as it is in DB check
 export const POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam'] as const;
 export const TIERS = ['S', 'A', 'B', 'C', 'D'] as const;
+
+export type DraftMode = 'BO1' | 'BO2' | 'BO3' | 'BO5' | 'BO7';
+export type DraftPhase = 'BAN_1' | 'PICK_1' | 'BAN_2' | 'PICK_2' | 'FINISHED';
+export type DraftSide = 'BLUE' | 'RED';
+
+export interface DraftMatch {
+    id: string; // uuid
+    version_id: number;
+    team_a_name: string;
+    team_b_name: string;
+    mode: DraftMode;
+    status: 'ongoing' | 'finished';
+    winner?: 'Team A' | 'Team B';
+    created_at?: string;
+
+    // Joins
+    version?: Version;
+    games?: DraftGame[];
+}
+
+export interface DraftGame {
+    id: string; // uuid
+    match_id: string;
+    game_number: number;
+    blue_team_name: string;
+    red_team_name: string;
+    winner?: 'Blue' | 'Red';
+    mvp_hero_id?: string;
+    created_at?: string;
+
+    // Joins
+    picks?: DraftPick[];
+    mvp_hero?: Hero;
+}
+
+export interface DraftPick {
+    id: string;
+    game_id: string;
+    hero_id: string;
+    type: 'BAN' | 'PICK';
+    side: DraftSide;
+    position_index: number;
+    assigned_role?: string;
+    created_at?: string;
+
+    // Joins
+    hero?: Hero;
+}
+
