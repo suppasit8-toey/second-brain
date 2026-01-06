@@ -26,7 +26,6 @@ export async function getHeroesByVersion(versionId: number) {
         .select(`
       *,
       hero_stats!inner (
-        tier,
         power_spike,
         win_rate,
         version_id
@@ -91,7 +90,6 @@ export async function addHero(prevState: any, formData: FormData) {
             hero_id: heroData.id,
             version_id: parseInt(version_id),
             power_spike: power_spike || 'Balanced',
-            tier: null,
             win_rate: 50
         }])
 
@@ -170,7 +168,6 @@ export async function bulkImportHeroes(versionId: number, heroesData: any[]) {
                 hero_id: heroId,
                 version_id: versionId,
                 power_spike: power_spike,
-                tier: null,
                 win_rate: 50
             }, { onConflict: 'hero_id, version_id' })
 
@@ -201,7 +198,6 @@ export async function updateHero(formData: FormData) {
     const damage_type = formData.get('damage_type')
     const positions = formData.getAll('positions')
     const power_spike = formData.get('power_spike')
-    const tier = formData.get('tier')
 
     const { error: heroError } = await supabase
         .from('heroes')
@@ -223,7 +219,6 @@ export async function updateHero(formData: FormData) {
             .upsert({
                 hero_id: heroId,
                 version_id: parseInt(versionId as string),
-                tier: tier || null,
                 power_spike: power_spike || 'Balanced'
             }, { onConflict: 'hero_id, version_id' })
 

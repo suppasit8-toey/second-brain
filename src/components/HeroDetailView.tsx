@@ -25,61 +25,62 @@ export default function HeroDetailView({ hero, matchups = [], combos = [] }: { h
                 Back to Roster
             </Link>
 
-            {/* Hero Header Card */}
-            <div className="glass-card p-8 flex flex-col md:flex-row items-center gap-8 mb-8 relative group">
-                {/* Large Icon */}
-                <div className="relative w-32 h-32 rounded-full border-4 border-primary shadow-[0_0_30px_rgba(168,85,247,0.4)] overflow-hidden bg-black/40">
-                    {hero.icon_url ? (
-                        <Image src={hero.icon_url} alt={hero.name} fill className="object-cover" />
-                    ) : (
-                        <div className="w-full h-full bg-slate-800 flex items-center justify-center text-4xl font-bold">{hero.name[0]}</div>
-                    )}
-                </div>
+            {/* Unified Hero Header */}
+            <div className="glass-card p-6 flex flex-col xl:flex-row items-center justify-between gap-8 mb-8 relative group">
 
-                {/* Info */}
-                <div className="text-center md:text-left flex-1">
-                    <h1 className="text-4xl font-bold text-white mb-2">{hero.name}</h1>
-                    <div className="flex gap-2 justify-center md:justify-start">
-                        <span className="px-3 py-1 rounded-full bg-purple-900/50 border border-purple-500/30 text-purple-300 text-sm">
-                            {hero.damage_type || 'Physical'}
-                        </span>
-                        <span className="px-3 py-1 rounded-full bg-blue-900/50 border border-blue-500/30 text-blue-300 text-sm">
-                            {hero.main_position ? (Array.isArray(hero.main_position) ? hero.main_position.join(', ') : hero.main_position) : 'Flex'}
-                        </span>
+                {/* Left: Identity Section */}
+                <div className="flex flex-col md:flex-row items-center gap-6 text-center md:text-left w-full xl:w-auto justify-center xl:justify-start">
+                    {/* Icon */}
+                    <div className="relative w-24 h-24 rounded-full border-2 border-primary shadow-[0_0_20px_rgba(168,85,247,0.3)] overflow-hidden bg-black/40 shrink-0">
+                        {hero.icon_url ? (
+                            <Image src={hero.icon_url} alt={hero.name} fill className="object-cover" />
+                        ) : (
+                            <div className="w-full h-full bg-slate-800 flex items-center justify-center text-3xl font-bold">{hero.name[0]}</div>
+                        )}
+                    </div>
+
+                    {/* Name & Roles */}
+                    <div>
+                        <h1 className="text-3xl font-bold text-white mb-3">{hero.name}</h1>
+                        <div className="flex flex-wrap gap-2 justify-center md:justify-start">
+                            {(hero.main_position ? (Array.isArray(hero.main_position) ? hero.main_position : [hero.main_position]) : ['Flex']).map((pos: string) => (
+                                <span key={pos} className="px-3 py-1 rounded-md bg-purple-600/20 border border-purple-500/30 text-purple-300 text-xs font-bold uppercase tracking-wide cursor-default select-none hover:bg-purple-600/30 transition-colors">
+                                    {pos}
+                                </span>
+                            ))}
+                        </div>
                     </div>
                 </div>
 
-                {/* Edit Button */}
+                {/* Right: Stats Widgets */}
+                <div className="flex flex-wrap items-center justify-center xl:justify-end gap-3 w-full xl:w-auto">
+                    {/* Power Spike */}
+                    <div className="px-6 py-2 rounded-lg bg-white/5 border border-white/5 text-center min-w-[110px] group-hover:border-white/10 transition-colors">
+                        <h3 className="text-[10px] font-bold text-text-muted uppercase tracking-widest mb-0.5">Power Spike</h3>
+                        <p className="text-lg font-bold text-primary">{currentStats.power_spike || 'Balanced'}</p>
+                    </div>
+
+                    {/* Damage Type */}
+                    <div className="px-6 py-2 rounded-lg bg-white/5 border border-white/5 text-center min-w-[110px] group-hover:border-white/10 transition-colors">
+                        <h3 className="text-[10px] font-bold text-text-muted uppercase tracking-widest mb-0.5">Damage Type</h3>
+                        <p className="text-lg font-bold text-blue-300">{hero.damage_type || 'Physical'}</p>
+                    </div>
+
+                    {/* Win Rate */}
+                    <div className="px-6 py-2 rounded-lg bg-white/5 border border-white/5 text-center min-w-[110px] group-hover:border-white/10 transition-colors">
+                        <h3 className="text-[10px] font-bold text-text-muted uppercase tracking-widest mb-0.5">Win Rate</h3>
+                        <p className="text-lg font-bold text-green-400">{currentStats.win_rate || 50}%</p>
+                    </div>
+                </div>
+
+                {/* Edit Button (Absolute Top Right) */}
                 <button
                     onClick={() => setIsEditOpen(true)}
-                    className="absolute top-8 right-8 p-2 rounded-lg bg-white/5 hover:bg-white/10 text-text-muted hover:text-white transition-colors border border-white/5 hover:border-white/20"
+                    className="absolute top-4 right-4 p-2 rounded-lg text-text-muted hover:text-white hover:bg-white/5 transition-all opacity-0 group-hover:opacity-100"
                     title="Edit Hero"
                 >
-                    <Edit size={20} />
+                    <Edit size={16} />
                 </button>
-            </div>
-
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="glass-card p-6 text-center">
-                    <h3 className="text-text-muted text-sm uppercase tracking-wider mb-2">Power Spike</h3>
-                    <p className="text-2xl font-bold text-primary">{currentStats.power_spike || 'Balanced'}</p>
-                </div>
-                <div className="glass-card p-6 text-center">
-                    <h3 className="text-text-muted text-sm uppercase tracking-wider mb-2">Current Tier</h3>
-                    <span className={`text-2xl font-bold px-3 py-1 rounded ${currentStats.tier === 'S' ? 'text-yellow-400 bg-yellow-400/10' :
-                        currentStats.tier === 'A' ? 'text-red-400 bg-red-400/10' :
-                            currentStats.tier === 'B' ? 'text-blue-400 bg-blue-400/10' :
-                                'text-gray-400'
-                        }`}>
-                        {currentStats.tier || 'Unranked'}
-                    </span>
-                </div>
-                {/* Stats for debugging or future expansion */}
-                <div className="glass-card p-6 text-center">
-                    <h3 className="text-text-muted text-sm uppercase tracking-wider mb-2">Win Rate</h3>
-                    <p className="text-2xl font-bold text-green-400">{currentStats.win_rate || 50}%</p>
-                </div>
             </div>
 
             {/* TABS HEADER */}

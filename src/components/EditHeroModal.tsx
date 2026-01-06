@@ -10,7 +10,6 @@ import Image from 'next/image'
 // We need to define the Stats type since it's joined
 interface HeroWithStats extends Hero {
     hero_stats?: {
-        tier: string | null;
         power_spike: string | null;
         win_rate: number;
         version_id: number;
@@ -20,7 +19,6 @@ interface HeroWithStats extends Hero {
 const DAMAGE_TYPES = ['Physical', 'Magic', 'True']
 const POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
 const POWER_SPIKES = ['Early', 'Mid', 'Late', 'Balanced']
-const TIERS = ['S', 'A', 'B', 'C', 'D']
 
 export default function EditHeroModal({ hero, versionId, onClose }: { hero: HeroWithStats, versionId: number, onClose: () => void }) {
     const stats = Array.isArray(hero.hero_stats) ? hero.hero_stats[0] : hero.hero_stats
@@ -157,13 +155,6 @@ export default function EditHeroModal({ hero, versionId, onClose }: { hero: Hero
                                 <label className="text-sm font-medium text-text-muted">Power Spike</label>
                                 <select name="power_spike" defaultValue={stats?.power_spike || 'Balanced'} className="dark-input w-full">
                                     {POWER_SPIKES.map(p => <option key={p} value={p}>{p}</option>)}
-                                </select>
-                            </div>
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium text-text-muted">Tier (Current Patch)</label>
-                                <select name="tier" defaultValue={stats?.tier || ''} className="dark-input w-full">
-                                    <option value="">Unranked</option>
-                                    {TIERS.map(t => <option key={t} value={t}>{t} Tier</option>)}
                                 </select>
                             </div>
                         </div>
