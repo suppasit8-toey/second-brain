@@ -76,7 +76,7 @@ export default function HeroDetailView({ hero, matchups = [], combos = [] }: { h
                 {/* Edit Button (Absolute Top Right) */}
                 <button
                     onClick={() => setIsEditOpen(true)}
-                    className="absolute top-4 right-4 p-2 rounded-lg text-text-muted hover:text-white hover:bg-white/5 transition-all opacity-0 group-hover:opacity-100"
+                    className="absolute top-4 right-4 p-2 rounded-lg text-text-muted hover:text-white hover:bg-white/5 transition-all z-10"
                     title="Edit Hero"
                 >
                     <Edit size={16} />

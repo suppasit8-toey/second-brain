@@ -4,7 +4,7 @@ import { useState, useEffect, useTransition } from 'react'
 import { Version, Hero, POSITIONS, HeroCombo } from '@/utils/types'
 import { getHeroesByVersion } from '@/app/admin/heroes/actions'
 import { getCombos, saveCombo, deleteCombo, updateCombo } from '@/app/admin/combos/actions'
-import { Plus, Search, Save, X, Trash2, Link as LinkIcon, Handshake, RefreshCw, AlertCircle, Check, Minus, Edit2 } from 'lucide-react'
+import { Plus, Search, Save, X, Trash2, Link as LinkIcon, Handshake, RefreshCw, AlertCircle, Check, Minus, Edit2, Sliders } from 'lucide-react'
 import Image from 'next/image'
 
 interface ComboManagerProps {
@@ -271,29 +271,29 @@ export default function ComboManager({ initialVersions }: ComboManagerProps) {
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
             {/* TOP BAR */}
-            <div className="glass-card p-4 flex flex-col md:flex-row items-center justify-between gap-4 sticky top-4 z-30 backdrop-blur-md bg-black/40">
-                <div className="flex items-center gap-4">
-                    <Handshake className="text-primary w-8 h-8" />
-                    <h1 className="text-2xl font-bold text-white">Combo Duo System</h1>
+            <div className="glass-card p-4 md:p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">Combo Duo System</h1>
+                    <p className="text-text-muted mt-1">Manage synergy pairs for the selected patch.</p>
                 </div>
 
-                <div className="flex items-center gap-4 w-full md:w-auto">
-                    <div className="flex flex-col">
-                        <label className="text-[10px] font-bold text-text-muted uppercase">Active Version</label>
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                    <div className="relative w-full md:w-auto flex-1 md:flex-none">
                         <select
                             value={selectedVersionId}
                             onChange={(e) => setSelectedVersionId(Number(e.target.value))}
-                            className="dark-input w-48 py-1.5 text-sm"
+                            className="dark-input pl-10 pr-4 py-2 w-full md:w-48 appearance-none cursor-pointer"
                         >
                             {initialVersions.map(v => (
                                 <option key={v.id} value={v.id}>{v.name} {v.is_active ? '(Active)' : ''}</option>
                             ))}
                         </select>
+                        <Sliders size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
                     </div>
 
                     <button
                         onClick={openModal}
-                        className="glow-button px-6 py-2 rounded-lg font-bold flex items-center gap-2 whitespace-nowrap ml-auto"
+                        className="glow-button px-6 py-2 rounded-lg flex items-center gap-2 whitespace-nowrap"
                     >
                         <Plus size={20} /> Add Combo Duo
                     </button>
@@ -319,55 +319,56 @@ export default function ComboManager({ initialVersions }: ComboManagerProps) {
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {combos.map(combo => (
-                            <div key={combo.id} className="glass-card p-4 flex flex-col gap-3 hover:bg-white/5 transition-all group border-l-4 border-l-primary relative overflow-hidden">
-                                <div className="flex items-center justify-between relative z-10">
-                                    {/* Hero A */}
-                                    <div className="flex flex-col items-center w-1/3">
-                                        <div className="relative w-12 h-12 rounded-full border-2 border-primary/50 overflow-hidden shadow-lg shadow-purple-900/20 mb-1">
-                                            {combo.hero_a?.icon_url && <Image src={combo.hero_a.icon_url} alt="" fill className="object-cover" />}
-                                        </div>
-                                        <span className="text-xs font-bold text-white truncate max-w-full">{combo.hero_a?.name}</span>
-                                        <span className="text-[10px] text-primary uppercase bg-primary/10 px-1.5 rounded">
+                            <div key={combo.id} className="glass-card p-4 flex items-center gap-4 hover:bg-white/5 transition-all group border-l-4 border-l-primary relative overflow-hidden">
+                                {/* Hero A */}
+                                <div className="flex items-center gap-3 w-[40%]">
+                                    <div className="relative w-10 h-10 rounded-full border-2 border-primary/50 overflow-hidden shadow-lg shadow-purple-900/20 shrink-0">
+                                        {combo.hero_a?.icon_url && <Image src={combo.hero_a.icon_url} alt="" fill className="object-cover" />}
+                                    </div>
+                                    <div className="flex flex-col min-w-0">
+                                        <span className="text-sm font-bold text-white truncate">{combo.hero_a?.name}</span>
+                                        <span className="text-[10px] text-primary uppercase font-bold tracking-wide">
                                             {combo.hero_a_position === 'Any' ? 'Any Lane' : combo.hero_a_position}
-                                        </span>
-                                    </div>
-
-                                    {/* Link */}
-                                    <div className="flex flex-col items-center justify-center w-1/5 opacity-50">
-                                        <LinkIcon size={16} className="text-white/50" />
-                                        <div className="h-0.5 w-full bg-white/10 mt-1"></div>
-                                    </div>
-
-                                    {/* Hero B */}
-                                    <div className="flex flex-col items-center w-1/3">
-                                        <div className="relative w-12 h-12 rounded-full border-2 border-blue-500/50 overflow-hidden shadow-lg shadow-blue-900/20 mb-1">
-                                            {combo.hero_b?.icon_url && <Image src={combo.hero_b.icon_url} alt="" fill className="object-cover" />}
-                                        </div>
-                                        <span className="text-xs font-bold text-white truncate max-w-full">{combo.hero_b?.name}</span>
-                                        <span className="text-[10px] text-blue-400 uppercase bg-blue-500/10 px-1.5 rounded">
-                                            {combo.hero_b_position === 'Any' ? 'Any Lane' : combo.hero_b_position}
                                         </span>
                                     </div>
                                 </div>
 
-                                {/* Description Preview */}
+                                {/* Link */}
+                                <div className="flex items-center justify-center w-[20%] opacity-30 group-hover:opacity-100 transition-opacity">
+                                    <LinkIcon size={16} className="text-white transform rotate-45" />
+                                </div>
+
+                                {/* Hero B */}
+                                <div className="flex items-center justify-end gap-3 w-[40%] text-right">
+                                    <div className="flex flex-col min-w-0 items-end">
+                                        <span className="text-sm font-bold text-white truncate">{combo.hero_b?.name}</span>
+                                        <span className="text-[10px] text-blue-400 uppercase font-bold tracking-wide">
+                                            {combo.hero_b_position === 'Any' ? 'Any Lane' : combo.hero_b_position}
+                                        </span>
+                                    </div>
+                                    <div className="relative w-10 h-10 rounded-full border-2 border-blue-500/50 overflow-hidden shadow-lg shadow-blue-900/20 shrink-0">
+                                        {combo.hero_b?.icon_url && <Image src={combo.hero_b.icon_url} alt="" fill className="object-cover" />}
+                                    </div>
+                                </div>
+
+                                {/* Hover Analysis Text */}
                                 {combo.description && (
-                                    <div className="bg-black/20 p-2 rounded text-xs text-text-muted italic line-clamp-2 relative z-10">
-                                        "{combo.description}"
+                                    <div className="absolute inset-x-0 bottom-0 bg-black/90 text-text-muted text-[10px] italic p-2 transform translate-y-full group-hover:translate-y-0 transition-transform">
+                                        {combo.description}
                                     </div>
                                 )}
 
                                 <button
                                     onClick={(e) => handleDelete(combo.id, e)}
-                                    className="absolute top-2 right-2 p-1.5 rounded-full bg-black/40 hover:bg-red-500 text-white/50 hover:text-white opacity-0 group-hover:opacity-100 transition-all z-20"
+                                    className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 hover:bg-red-500 text-white/50 hover:text-white opacity-0 group-hover:opacity-100 transition-all z-20"
                                 >
-                                    <Trash2 size={14} />
+                                    <Trash2 size={12} />
                                 </button>
                                 <button
                                     onClick={(e) => { e.stopPropagation(); handleEdit(combo); }}
-                                    className="absolute top-2 right-8 p-1.5 rounded-full bg-black/40 hover:bg-primary text-white/50 hover:text-white opacity-0 group-hover:opacity-100 transition-all z-20"
+                                    className="absolute top-2 right-8 p-1.5 rounded-full bg-black/60 hover:bg-primary text-white/50 hover:text-white opacity-0 group-hover:opacity-100 transition-all z-20"
                                 >
-                                    <Edit2 size={14} />
+                                    <Edit2 size={12} />
                                 </button>
                             </div>
                         ))}
@@ -417,11 +418,11 @@ export default function ComboManager({ initialVersions }: ComboManagerProps) {
                                                 </select>
                                             </div>
                                             <div className="flex-1 overflow-y-auto custom-scrollbar pr-1">
-                                                <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-4 lg:grid-cols-5 gap-2">
+                                                <div className="grid grid-cols-6 gap-1.5">
                                                     {getFilteredHeroes(searchA, filterPosA, heroB?.id).map(h => (
-                                                        <button key={h.id} onClick={() => handleSetHeroA(h)} className="relative aspect-square rounded overflow-hidden border border-transparent hover:border-white/30 group bg-surface">
-                                                            {h.icon_url ? <Image src={h.icon_url} alt="" fill className="object-cover" /> : <div className="w-full h-full bg-slate-800" />}
-                                                            <div className="absolute bottom-0 inset-x-0 p-0.5 text-[9px] font-bold text-center text-white truncate drop-shadow-md z-10">{h.name}</div>
+                                                        <button key={h.id} onClick={() => handleSetHeroA(h)} className="relative aspect-square rounded overflow-hidden border border-transparent hover:border-white/50 group bg-surface shadow-black shadow-md">
+                                                            {h.icon_url ? <Image src={h.icon_url} alt="" fill className="object-cover transition-transform group-hover:scale-110" /> : <div className="w-full h-full bg-slate-800" />}
+                                                            <div className="absolute bottom-0 inset-x-0 pb-0.5 text-[8px] font-bold text-center text-white truncate drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] z-10">{h.name}</div>
                                                         </button>
                                                     ))}
                                                 </div>
@@ -479,11 +480,11 @@ export default function ComboManager({ initialVersions }: ComboManagerProps) {
                                                 </select>
                                             </div>
                                             <div className="flex-1 overflow-y-auto custom-scrollbar pr-1">
-                                                <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-4 lg:grid-cols-5 gap-2">
+                                                <div className="grid grid-cols-6 gap-1.5">
                                                     {getFilteredHeroes(searchB, filterPosB, heroA?.id).map(h => (
-                                                        <button key={h.id} onClick={() => handleSetHeroB(h)} className="relative aspect-square rounded overflow-hidden border border-transparent hover:border-white/30 group bg-surface">
-                                                            {h.icon_url ? <Image src={h.icon_url} alt="" fill className="object-cover" /> : <div className="w-full h-full bg-slate-800" />}
-                                                            <div className="absolute bottom-0 inset-x-0 p-0.5 text-[9px] font-bold text-center text-white truncate drop-shadow-md z-10">{h.name}</div>
+                                                        <button key={h.id} onClick={() => handleSetHeroB(h)} className="relative aspect-square rounded overflow-hidden border border-transparent hover:border-white/50 group bg-surface shadow-black shadow-md">
+                                                            {h.icon_url ? <Image src={h.icon_url} alt="" fill className="object-cover transition-transform group-hover:scale-110" /> : <div className="w-full h-full bg-slate-800" />}
+                                                            <div className="absolute bottom-0 inset-x-0 pb-0.5 text-[8px] font-bold text-center text-white truncate drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] z-10">{h.name}</div>
                                                         </button>
                                                     ))}
                                                 </div>
