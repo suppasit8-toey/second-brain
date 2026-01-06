@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Label } from '@/components/ui/label'
 import Image from 'next/image'
+import { Badge } from '@/components/ui/badge'
 import { Loader2, Save, Trophy, AlertTriangle } from 'lucide-react'
 import { finishGame } from '@/app/actions/draftActions'
 import { useRouter } from 'next/navigation'
@@ -36,7 +37,9 @@ export default function PostDraftResult({
     const router = useRouter()
     const [assignments, setAssignments] = useState<Record<string, string>>({})
     const [winner, setWinner] = useState<'Blue' | 'Red' | null>(null)
-    const [mvpId, setMvpId] = useState<string>("")
+    const [blueKeyPlayer, setBlueKeyPlayer] = useState<string>("")
+    const [redKeyPlayer, setRedKeyPlayer] = useState<string>("")
+    const [winPrediction, setWinPrediction] = useState<number>(50) // Blue Win %
     const [notes, setNotes] = useState("")
     const [submitting, setSubmitting] = useState(false)
 
@@ -55,50 +58,47 @@ export default function PostDraftResult({
             }
         })
         setAssignments(newAssignments)
-    }, []) // Run once on mount
+    }, [])
 
     const handleAssignmentChange = (heroId: string, role: string) => {
         setAssignments(prev => ({ ...prev, [heroId]: role }))
     }
 
-    // Check for duplicates
-    const getDuplicateWarning = (teamPickIds: string[]) => {
-        const roles = teamPickIds.map(id => assignments[id]).filter(Boolean)
+    // Validation: Check for duplicates within a team
+    const getUsedRoles = (teamPickIds: string[]) => {
+        return teamPickIds.map(id => assignments[id]).filter(Boolean)
+    }
+
+    const hasDuplicateRoles = (teamPickIds: string[]) => {
+        const roles = getUsedRoles(teamPickIds)
         const uniqueRoles = new Set(roles)
-        if (roles.length !== uniqueRoles.size) {
-            return (
-                <div className="flex items-center gap-2 text-amber-400 text-xs mt-2 bg-amber-400/10 p-2 rounded">
-                    <AlertTriangle className="w-4 h-4" />
-                    <span>Duplicate roles detected!</span>
-                </div>
-            )
-        }
-        return null
+        return roles.length !== uniqueRoles.size
     }
 
     const handleSubmit = async () => {
-        if (!winner || !mvpId) {
-            alert("Please select a Winner and an MVP.")
+        if (!winner || !blueKeyPlayer || !redKeyPlayer) {
+            alert("Please select a Winner and Key Players for BOTH teams.")
             return
+        }
+
+        const blueIds = Object.values(bluePicks)
+        const redIds = Object.values(redPicks)
+
+        if (hasDuplicateRoles(blueIds) || hasDuplicateRoles(redIds)) {
+            if (!confirm("Warning: Duplicate roles detected. Do you want to proceed?")) return;
         }
 
         setSubmitting(true)
 
         // Compile Data
-        const picksData: {
-            hero_id: string;
-            type: 'BAN' | 'PICK';
-            side: 'BLUE' | 'RED';
-            position_index: number;
-            assigned_role?: string;
-        }[] = []
+        const picksData: any[] = []
 
         // Process Blue Picks
         Object.entries(bluePicks).forEach(([idx, heroId]) => {
             picksData.push({
                 hero_id: heroId,
-                type: 'PICK' as const,
-                side: 'BLUE' as const,
+                type: 'PICK',
+                side: 'BLUE',
                 position_index: parseInt(idx) + 1,
                 assigned_role: assignments[heroId] || 'Flex'
             })
@@ -108,40 +108,30 @@ export default function PostDraftResult({
         Object.entries(redPicks).forEach(([idx, heroId]) => {
             picksData.push({
                 hero_id: heroId,
-                type: 'PICK' as const,
-                side: 'RED' as const,
+                type: 'PICK',
+                side: 'RED',
                 position_index: parseInt(idx) + 1,
                 assigned_role: assignments[heroId] || 'Flex'
             })
         })
 
-        // Process Bans
-        blueBans.forEach((heroId, idx) => {
-            picksData.push({
-                hero_id: heroId,
-                type: 'BAN' as const,
-                side: 'BLUE' as const,
-                position_index: idx + 1
-            })
-        })
-        redBans.forEach((heroId, idx) => {
-            picksData.push({
-                hero_id: heroId,
-                type: 'BAN' as const,
-                side: 'RED' as const,
-                position_index: idx + 1
-            })
-        })
+        // Process Bans (Standard)
+        blueBans.forEach((heroId, idx) => picksData.push({ hero_id: heroId, type: 'BAN', side: 'BLUE', position_index: idx + 1 }))
+        redBans.forEach((heroId, idx) => picksData.push({ hero_id: heroId, type: 'BAN', side: 'RED', position_index: idx + 1 }))
 
         const res = await finishGame({
             gameId,
             winner,
-            mvpHeroId: mvpId,
+            blueKeyPlayer,
+            redKeyPlayer,
+            winPrediction: { blue: winPrediction, red: 100 - winPrediction },
             notes,
             picks: picksData
         })
 
         if (res.success) {
+            // Check if there's a next game or just reload
+            // For now, reload to show "Completed" state or redirect
             window.location.reload()
         } else {
             alert("Error saving: " + res.message)
@@ -149,115 +139,196 @@ export default function PostDraftResult({
         }
     }
 
-    const renderTeamColumn = (side: 'Blue' | 'Red', teamName: string, pickMap: Record<number, string>) => (
-        <div className={`flex-1 rounded-xl p-4 border ${side === 'Blue' ? 'bg-blue-900/10 border-blue-500/30' : 'bg-red-900/10 border-red-500/30'}`}>
-            <h3 className={`text-xl font-bold mb-4 text-center ${side === 'Blue' ? 'text-blue-400' : 'text-red-400'}`}>{teamName}</h3>
-            <div className="space-y-3">
-                {Object.values(pickMap).map(heroId => {
-                    const hero = getHero(heroId)
-                    if (!hero) return null
-                    return (
-                        <div key={heroId} className="flex items-center gap-3 bg-slate-900/50 p-2 rounded-lg border border-slate-800">
-                            <Image src={hero.icon_url} alt={hero.name} width={40} height={40} className="rounded border border-slate-700" />
-                            <div className="flex-1 min-w-0">
-                                <p className="font-bold text-sm truncate">{hero.name}</p>
+    const renderTeamColumn = (side: 'Blue' | 'Red', teamName: string, pickMap: Record<number, string>) => {
+        const pickIds = Object.values(pickMap)
+        const usedRoles = getUsedRoles(pickIds)
+        const isDupe = hasDuplicateRoles(pickIds)
+
+        return (
+            <div className={`flex-1 rounded-xl p-4 border ${side === 'Blue' ? 'bg-blue-900/10 border-blue-500/30' : 'bg-red-900/10 border-red-500/30'}`}>
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className={`text-xl font-bold ${side === 'Blue' ? 'text-blue-400' : 'text-red-400'}`}>{teamName}</h3>
+                    {isDupe && <Badge variant="destructive" className="animate-pulse">Duplicate Roles!</Badge>}
+                </div>
+
+                <div className="space-y-3">
+                    {pickIds.map(heroId => {
+                        const hero = getHero(heroId)
+                        if (!hero) return null
+                        const currentRole = assignments[heroId]
+
+                        return (
+                            <div key={heroId} className="flex items-center gap-3 bg-slate-900/50 p-2 rounded-lg border border-slate-800">
+                                <Image src={hero.icon_url} alt={hero.name} width={40} height={40} className="rounded border border-slate-700" />
+                                <div className="flex-1 min-w-0">
+                                    <p className="font-bold text-sm truncate">{hero.name}</p>
+                                </div>
+                                <div className="w-40">
+                                    <Select value={currentRole} onValueChange={(val) => handleAssignmentChange(heroId, val)}>
+                                        <SelectTrigger className={`h-8 text-xs border-slate-700 ${!currentRole ? 'text-yellow-500 border-yellow-500/50' : 'bg-slate-800'}`}>
+                                            <SelectValue placeholder="Position" />
+                                        </SelectTrigger>
+                                        <SelectContent className="max-h-60 overflow-y-auto">
+                                            {POSITIONS.map(p => {
+                                                const isTaken = usedRoles.includes(p) && currentRole !== p
+                                                return (
+                                                    <SelectItem key={p} value={p} disabled={isTaken} className={isTaken ? 'opacity-50' : ''}>
+                                                        {p} {isTaken && '(Taken)'}
+                                                    </SelectItem>
+                                                )
+                                            })}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                             </div>
-                            <div className="w-40">
-                                <Select value={assignments[heroId]} onValueChange={(val) => handleAssignmentChange(heroId, val)}>
-                                    <SelectTrigger className="h-8 text-xs bg-slate-800 border-slate-700">
-                                        <SelectValue placeholder="Position" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {POSITIONS.map(p => (
-                                            <SelectItem key={p} value={p}>{p}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-                    )
-                })}
+                        )
+                    })}
+                </div>
             </div>
-            {getDuplicateWarning(Object.values(pickMap))}
-        </div>
-    )
+        )
+    }
 
     return (
-        <div className="max-w-5xl mx-auto p-4 animate-in fade-in zoom-in-95 duration-500">
-            <Card className="bg-slate-900 border-slate-800 text-white">
-                <CardHeader className="text-center border-b border-slate-800 bg-slate-950/50 rounded-t-xl pb-8 pt-8">
-                    <Trophy className="w-12 h-12 mx-auto text-yellow-500 mb-4" />
-                    <CardTitle className="text-3xl font-black uppercase text-white">Match Complete</CardTitle>
-                    <p className="text-slate-400">Assign roles and record the final result</p>
-                </CardHeader>
-                <CardContent className="p-6">
-                    {/* Role Assignment */}
-                    <div className="flex flex-col md:flex-row gap-8 mb-8">
-                        {renderTeamColumn('Blue', blueTeamName, bluePicks)}
-                        {renderTeamColumn('Red', redTeamName, redPicks)}
-                    </div>
+        <div className="h-full overflow-y-auto p-4 animate-in fade-in zoom-in-95 duration-500">
+            <div className="max-w-6xl mx-auto space-y-4 pb-20">
+                <Card className="bg-slate-900 border-slate-800 text-white shadow-2xl">
+                    <CardHeader className="text-center border-b border-slate-800 bg-slate-950/50 rounded-t-xl py-6">
+                        <Trophy className="w-10 h-10 mx-auto text-yellow-500 mb-2" />
+                        <CardTitle className="text-2xl font-black uppercase text-white">Match Analysis & Result</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-6">
+                        {/* 1. Role Assignment */}
+                        <div className="flex flex-col xl:flex-row gap-6 mb-8">
+                            {renderTeamColumn('Blue', blueTeamName, bluePicks)}
+                            {renderTeamColumn('Red', redTeamName, redPicks)}
+                        </div>
 
-                    {/* Result Entry */}
-                    <div className="bg-slate-950 rounded-xl p-6 border border-slate-800 space-y-6">
-                        <div className="grid grid-cols-2 gap-8">
+                        {/* 2. Analysis & Result */}
+                        <div className="bg-slate-950 rounded-xl p-6 border border-slate-800 space-y-8">
+
+                            {/* Win Prediction */}
                             <div>
-                                <Label className="text-base mb-3 block">Winning Side</Label>
+                                <div className="flex justify-between mb-2">
+                                    <Label className="text-base text-blue-400">Blue Win % prediction</Label>
+                                    <span className="text-xl font-bold">{winPrediction}%</span>
+                                    <Label className="text-base text-red-400">Red Win % prediction</Label>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="0" max="100"
+                                    value={winPrediction}
+                                    onChange={(e) => setWinPrediction(Number(e.target.value))}
+                                    className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                />
+                                <div className="flex justify-between text-xs text-slate-500 mt-1">
+                                    <span>Red Favored</span>
+                                    <span>Equal</span>
+                                    <span>Blue Favored</span>
+                                </div>
+                            </div>
+
+                            {/* Key Players */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div>
+                                    <Label className="text-sm mb-2 block text-blue-400 font-bold uppercase">Blue Team Key Player</Label>
+                                    <Select value={blueKeyPlayer} onValueChange={setBlueKeyPlayer}>
+                                        <SelectTrigger className="bg-slate-900 border-blue-900/50 h-12">
+                                            <SelectValue placeholder="Select Blue MVP">
+                                                {blueKeyPlayer ? getHero(blueKeyPlayer)?.name : "Select Blue MVP"}
+                                            </SelectValue>
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {Object.values(bluePicks).map(id => {
+                                                const h = getHero(id); if (!h) return null;
+                                                return <SelectItem key={id} value={id}>
+                                                    <div className="flex items-center gap-2">
+                                                        <Image src={h.icon_url} alt={h.name} width={24} height={24} className="rounded" />
+                                                        <span>{h.name}</span>
+                                                    </div>
+                                                </SelectItem>
+                                            })}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div>
+                                    <Label className="text-sm mb-2 block text-red-400 font-bold uppercase">Red Team Key Player</Label>
+                                    <Select value={redKeyPlayer} onValueChange={setRedKeyPlayer}>
+                                        <SelectTrigger className="bg-slate-900 border-red-900/50 h-12">
+                                            <SelectValue placeholder="Select Red MVP">
+                                                {redKeyPlayer ? getHero(redKeyPlayer)?.name : "Select Red MVP"}
+                                            </SelectValue>
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {Object.values(redPicks).map(id => {
+                                                const h = getHero(id); if (!h) return null;
+                                                return <SelectItem key={id} value={id}>
+                                                    <div className="flex items-center gap-2">
+                                                        <Image src={h.icon_url} alt={h.name} width={24} height={24} className="rounded" />
+                                                        <span>{h.name}</span>
+                                                    </div>
+                                                </SelectItem>
+                                            })}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+
+                            {/* Winner Selection */}
+                            <div className="pt-4 border-t border-slate-800">
+                                <Label className="text-base mb-4 block text-center uppercase tracking-widest text-slate-500 font-bold">Official Result</Label>
                                 <RadioGroup value={winner || ""} onValueChange={(v) => setWinner(v as 'Blue' | 'Red')} className="grid grid-cols-2 gap-4">
+                                    {/* BLUE OPTION */}
                                     <div>
                                         <RadioGroupItem value="Blue" id="r-blue" className="peer sr-only" />
-                                        <Label htmlFor="r-blue" className="flex flex-col items-center justify-center p-4 rounded-lg border-2 border-slate-800 bg-slate-900 hover:bg-slate-800 peer-data-[state=checked]:border-blue-500 peer-data-[state=checked]:text-blue-500 cursor-pointer">
-                                            <span className="font-bold">Blue Team</span>
+                                        <Label htmlFor="r-blue" className={`
+                                            flex flex-col items-center justify-center p-6 rounded-xl border-2 cursor-pointer transition-all duration-300
+                                            ${winner === 'Blue'
+                                                ? 'bg-blue-600/20 border-blue-500 scale-105 shadow-[0_0_30px_rgba(37,99,235,0.3)]'
+                                                : winner === 'Red'
+                                                    ? 'bg-slate-900/50 border-slate-800 opacity-50 grayscale'
+                                                    : 'bg-slate-900 border-slate-800 hover:border-blue-500/50'
+                                            }
+                                        `}>
+                                            <div className="text-center">
+                                                <div className={`text-3xl font-black uppercase mb-1 ${winner === 'Blue' ? 'text-blue-400 drop-shadow-lg' : 'text-slate-500'}`}>
+                                                    {winner === 'Blue' ? 'VICTORY' : winner === 'Red' ? 'DEFEAT' : 'BLUE WIN'}
+                                                </div>
+                                                <div className="text-xs font-bold tracking-wider opacity-70">BLUE TEAM</div>
+                                            </div>
                                         </Label>
                                     </div>
+
+                                    {/* RED OPTION */}
                                     <div>
                                         <RadioGroupItem value="Red" id="r-red" className="peer sr-only" />
-                                        <Label htmlFor="r-red" className="flex flex-col items-center justify-center p-4 rounded-lg border-2 border-slate-800 bg-slate-900 hover:bg-slate-800 peer-data-[state=checked]:border-red-500 peer-data-[state=checked]:text-red-500 cursor-pointer">
-                                            <span className="font-bold">Red Team</span>
+                                        <Label htmlFor="r-red" className={`
+                                            flex flex-col items-center justify-center p-6 rounded-xl border-2 cursor-pointer transition-all duration-300
+                                            ${winner === 'Red'
+                                                ? 'bg-red-600/20 border-red-500 scale-105 shadow-[0_0_30px_rgba(220,38,38,0.3)]'
+                                                : winner === 'Blue'
+                                                    ? 'bg-slate-900/50 border-slate-800 opacity-50 grayscale'
+                                                    : 'bg-slate-900 border-slate-800 hover:border-red-500/50'
+                                            }
+                                        `}>
+                                            <div className="text-center">
+                                                <div className={`text-3xl font-black uppercase mb-1 ${winner === 'Red' ? 'text-red-400 drop-shadow-lg' : 'text-slate-500'}`}>
+                                                    {winner === 'Red' ? 'VICTORY' : winner === 'Blue' ? 'DEFEAT' : 'RED WIN'}
+                                                </div>
+                                                <div className="text-xs font-bold tracking-wider opacity-70">RED TEAM</div>
+                                            </div>
                                         </Label>
                                     </div>
                                 </RadioGroup>
                             </div>
 
-                            <div>
-                                <Label className="text-base mb-3 block">Key Player (MVP)</Label>
-                                <Select value={mvpId} onValueChange={setMvpId}>
-                                    <SelectTrigger className="h-14 bg-slate-900 border-slate-700 text-lg">
-                                        <SelectValue placeholder="Select MVP Hero" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <div className="p-2 text-xs font-bold text-slate-500 uppercase tracking-wider">Blue Team</div>
-                                        {Object.values(bluePicks).map(id => {
-                                            const h = getHero(id); if (!h) return null;
-                                            return <SelectItem key={id} value={id}>{h.name}</SelectItem>
-                                        })}
-                                        <div className="p-2 text-xs font-bold text-slate-500 uppercase tracking-wider mt-2">Red Team</div>
-                                        {Object.values(redPicks).map(id => {
-                                            const h = getHero(id); if (!h) return null;
-                                            return <SelectItem key={id} value={id}>{h.name}</SelectItem>
-                                        })}
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                            <Button size="lg" className="w-full h-16 text-xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 shadow-lg shadow-green-900/20" onClick={handleSubmit} disabled={submitting}>
+                                {submitting ? <Loader2 className="w-6 h-6 animate-spin mr-2" /> : <Save className="w-6 h-6 mr-2" />}
+                                SAVE & NEXT GAME
+                            </Button>
                         </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="notes">Match Notes</Label>
-                            <textarea
-                                id="notes"
-                                className="flex min-h-[80px] w-full rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-sm placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
-                                placeholder="Enter any key moments or comments about the match..."
-                                value={notes}
-                                onChange={(e) => setNotes(e.target.value)}
-                            />
-                        </div>
-
-                        <Button size="lg" className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700" onClick={handleSubmit} disabled={submitting}>
-                            {submitting ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Save className="w-5 h-5 mr-2" />}
-                            Save Game Record
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
+                    </CardContent>
+                </Card>
+            </div>
         </div>
     )
 }

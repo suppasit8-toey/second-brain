@@ -40,9 +40,9 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
     // Form State
     const [state, formAction] = useActionState(createMatch, initialState)
 
-    // Local state for Select inputs to sync with hidden fields
-    const [selectedVersion, setSelectedVersion] = useState<string>(activeVersion?.id.toString() || '')
+    // UI States
     const [selectedMode, setSelectedMode] = useState<string>('BO5')
+    const [isCustomTeams, setIsCustomTeams] = useState(false)
 
     // Handle Success Redirect
     useEffect(() => {
@@ -72,43 +72,64 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
                     )}
 
                     <div className="grid gap-2">
-                        <Label htmlFor="version">Patch Version</Label>
-                        <input type="hidden" name="version_id" value={selectedVersion} />
-                        <Select value={selectedVersion} onValueChange={setSelectedVersion}>
-                            <SelectTrigger className="bg-slate-800 border-slate-700">
-                                <SelectValue placeholder="Select Version" />
-                            </SelectTrigger>
-                            <SelectContent className="bg-slate-800 border-slate-700">
-                                {versions.map((v) => (
-                                    <SelectItem key={v.id} value={v.id.toString()}>
-                                        {v.name} {v.is_active && '(Active)'}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                        <Label>Patch Version</Label>
+                        {/* Hidden input to ensure version_id is sent */}
+                        <input type="hidden" name="version_id" value={activeVersion?.id} />
+                        <Input
+                            readOnly
+                            disabled
+                            value={activeVersion?.name || 'Unknown Version'}
+                            className="bg-slate-900 border-slate-700 text-slate-400 cursor-not-allowed font-medium"
+                        />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="grid gap-2">
-                            <Label htmlFor="team_a">Team A Name</Label>
-                            <Input
-                                id="team_a"
-                                name="team_a_name"
-                                placeholder="e.g. Bacon Time"
-                                className="bg-slate-800 border-slate-700"
-                                required
-                            />
+                    <div className="space-y-4 rounded-lg bg-slate-950/50 p-4 border border-slate-800">
+                        <div className="flex items-center justify-between">
+                            <Label className="text-sm font-medium text-slate-300">Team Names</Label>
+                            <Button
+                                type="button"
+                                variant="link"
+                                onClick={() => setIsCustomTeams(!isCustomTeams)}
+                                className="h-auto p-0 text-xs text-blue-400 hover:text-blue-300"
+                            >
+                                {isCustomTeams ? 'Reset to Default' : 'Customize Team Names'}
+                            </Button>
                         </div>
-                        <div className="grid gap-2">
-                            <Label htmlFor="team_b">Team B Name</Label>
-                            <Input
-                                id="team_b"
-                                name="team_b_name"
-                                placeholder="e.g. Buriram"
-                                className="bg-slate-800 border-slate-700"
-                                required
-                            />
-                        </div>
+
+                        {!isCustomTeams ? (
+                            <div className="flex items-center justify-center gap-3 text-lg font-bold bg-slate-900 p-3 rounded border border-slate-800/50">
+                                <span className="text-blue-400">Team A</span>
+                                <span className="text-slate-600 text-sm font-normal">VS</span>
+                                <span className="text-red-400">Team B</span>
+                                <input type="hidden" name="team_a_name" value="Team A" />
+                                <input type="hidden" name="team_b_name" value="Team B" />
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2">
+                                <div className="grid gap-2">
+                                    <Label htmlFor="team_a" className="text-xs text-blue-400">Blue Side</Label>
+                                    <Input
+                                        id="team_a"
+                                        name="team_a_name"
+                                        placeholder="Team A Name"
+                                        defaultValue="Team A"
+                                        className="bg-slate-800 border-slate-700"
+                                        required
+                                    />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="team_b" className="text-xs text-red-400">Red Side</Label>
+                                    <Input
+                                        id="team_b"
+                                        name="team_b_name"
+                                        placeholder="Team B Name"
+                                        defaultValue="Team B"
+                                        className="bg-slate-800 border-slate-700"
+                                        required
+                                    />
+                                </div>
+                            </div>
+                        )}
                     </div>
 
                     <div className="grid gap-2">

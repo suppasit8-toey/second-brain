@@ -71,7 +71,11 @@ export function useDraftEngine() {
             } else {
                 newState.stepIndex = nextIndex
                 const nextStep = DRAFT_SEQUENCE[nextIndex]
-                newState.timer = nextStep.type === 'BAN' ? PHASE_TIMERS.BAN : PHASE_TIMERS.PICK
+                if (nextStep.isContinuation) {
+                    newState.timer = prev.timer
+                } else {
+                    newState.timer = nextStep.type === 'BAN' ? PHASE_TIMERS.BAN : PHASE_TIMERS.PICK
+                }
             }
 
             return newState

@@ -6,7 +6,10 @@ import { revalidatePath } from 'next/cache'
 interface FinishGameData {
     gameId: string;
     winner: 'Blue' | 'Red';
-    mvpHeroId?: string;
+    mvpHeroId?: string; // Optional (legacy) or mapped to winner
+    blueKeyPlayer?: string;
+    redKeyPlayer?: string;
+    winPrediction?: { blue: number; red: number };
     notes?: string;
     picks: {
         hero_id: string;
@@ -21,21 +24,40 @@ export async function finishGame(data: FinishGameData) {
     const supabase = await createClient()
 
     // 1. Update Game Result
+    const updatePayload: any = {
+        winner: data.winner,
+        notes: data.notes,
+        status: 'finished',
+        // Map new fields if columns exist, or put in analysis_data
+        blue_key_player_id: data.blueKeyPlayer,
+        red_key_player_id: data.redKeyPlayer,
+        analysis_data: data.winPrediction
+    }
+
+    // Set MVP based on winner for backward compatibility if needed, or simple logic
+    if (data.winner === 'Blue') updatePayload.mvp_hero_id = data.blueKeyPlayer
+    else updatePayload.mvp_hero_id = data.redKeyPlayer
+
     const { error: gameError } = await supabase
         .from('draft_games')
-        .update({
-            winner: data.winner,
-            mvp_hero_id: data.mvpHeroId,
-            notes: data.notes,
-            status: 'finished'
-        })
+        .update(updatePayload)
         .eq('id', data.gameId)
 
     if (gameError) {
-        return { success: false, message: 'From Game Update: ' + gameError.message }
+        return { success: false, message: 'Game Update Error: ' + gameError.message }
     }
 
-    // 2. Insert Draft Picks (Bans & Picks)
+    // 2. Delete Existing Picks (Clean state for this game)
+    const { error: deleteError } = await supabase
+        .from('draft_picks')
+        .delete()
+        .eq('game_id', data.gameId)
+
+    if (deleteError) {
+        return { success: false, message: 'From Picks Cleanup: ' + deleteError.message }
+    }
+
+    // 3. Insert Draft Picks (Bans & Picks)
     // We map them to the DB structure
     const picksToInsert = data.picks.map(p => ({
         game_id: data.gameId,

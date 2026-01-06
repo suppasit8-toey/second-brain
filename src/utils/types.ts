@@ -65,7 +65,7 @@ export interface HeroCombo {
 
 export const DAMAGE_TYPES = ['Physical', 'Magic', 'True', 'Mixed'] as const;
 export const POWER_SPIKES = ['Early', 'Mid', 'Late', 'Balanced'] as const; // Re-add Mid as it is in DB check
-export const POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam'] as const;
+export const POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam'] as const;
 export const TIERS = ['S', 'A', 'B', 'C', 'D'] as const;
 
 export type DraftMode = 'BO1' | 'BO2' | 'BO3' | 'BO5' | 'BO7';
@@ -95,6 +95,9 @@ export interface DraftGame {
     red_team_name: string;
     winner?: 'Blue' | 'Red';
     mvp_hero_id?: string;
+    blue_key_player_id?: string;
+    red_key_player_id?: string;
+    analysis_data?: any;
     created_at?: string;
 
     // Joins

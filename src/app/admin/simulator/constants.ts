@@ -8,6 +8,7 @@ export interface DraftStep {
     type: DraftActionType;
     count: number;
     phase: 'PHASE_1_BAN' | 'PHASE_1_PICK' | 'PHASE_2_BAN' | 'PHASE_2_PICK';
+    isContinuation?: boolean;
 }
 
 export const DRAFT_SEQUENCE: DraftStep[] = [
@@ -20,9 +21,9 @@ export const DRAFT_SEQUENCE: DraftStep[] = [
     // PHASE 1 PICKS (6 Total)
     { orderIndex: 4, side: 'BLUE', type: 'PICK', count: 1, phase: 'PHASE_1_PICK' }, // B1
     { orderIndex: 5, side: 'RED', type: 'PICK', count: 1, phase: 'PHASE_1_PICK' },  // R1
-    { orderIndex: 6, side: 'RED', type: 'PICK', count: 1, phase: 'PHASE_1_PICK' },  // R2
+    { orderIndex: 6, side: 'RED', type: 'PICK', count: 1, phase: 'PHASE_1_PICK', isContinuation: true },  // R2 (Linked to R1)
     { orderIndex: 7, side: 'BLUE', type: 'PICK', count: 1, phase: 'PHASE_1_PICK' }, // B2
-    { orderIndex: 8, side: 'BLUE', type: 'PICK', count: 1, phase: 'PHASE_1_PICK' }, // B3
+    { orderIndex: 8, side: 'BLUE', type: 'PICK', count: 1, phase: 'PHASE_1_PICK', isContinuation: true }, // B3 (Linked to B2)
     { orderIndex: 9, side: 'RED', type: 'PICK', count: 1, phase: 'PHASE_1_PICK' },  // R3
 
     // PHASE 2 BANS (4 Total)
@@ -34,7 +35,7 @@ export const DRAFT_SEQUENCE: DraftStep[] = [
     // PHASE 2 PICKS (4 Total)
     { orderIndex: 14, side: 'RED', type: 'PICK', count: 1, phase: 'PHASE_2_PICK' },  // R4
     { orderIndex: 15, side: 'BLUE', type: 'PICK', count: 1, phase: 'PHASE_2_PICK' }, // B4
-    { orderIndex: 16, side: 'BLUE', type: 'PICK', count: 1, phase: 'PHASE_2_PICK' }, // B5
+    { orderIndex: 16, side: 'BLUE', type: 'PICK', count: 1, phase: 'PHASE_2_PICK', isContinuation: true }, // B5 (Linked to B4)
     { orderIndex: 17, side: 'RED', type: 'PICK', count: 1, phase: 'PHASE_2_PICK' },  // R5
 ];
 

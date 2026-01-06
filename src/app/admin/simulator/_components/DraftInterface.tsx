@@ -13,6 +13,7 @@ import { Card } from '@/components/ui/card'
 import { Pause, Play, Check } from 'lucide-react'
 import Image from 'next/image'
 import PostDraftResult from '@/components/draft/PostDraftResult'
+import { Input } from '@/components/ui/input'
 
 interface DraftInterfaceProps {
     match: DraftMatch;
@@ -24,6 +25,11 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
     const { state, currentStep, lockIn, togglePause } = useDraftEngine()
     const [selectedHero, setSelectedHero] = useState<Hero | null>(null)
     const [recommendations, setRecommendations] = useState<any>({ analyst: [], history: [], hybrid: [] })
+
+    // UI Filters
+    const [searchQuery, setSearchQuery] = useState('')
+    const [selectedRole, setSelectedRole] = useState('All')
+    const [activeTab, setActiveTab] = useState('analyst')
 
     // Derived Lists for filtering
     const bannedIds = [...state.blueBans, ...state.redBans]
@@ -56,6 +62,18 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
     // Helper to get hero object
     const getHero = (id: string) => initialHeroes.find(h => h.id === id)
 
+    // Filtering Logic
+    // Filtering Logic
+    const filteredHeroes = initialHeroes.filter(hero => {
+        const matchesSearch = hero.name.toLowerCase().includes(searchQuery.toLowerCase())
+
+        // Exact match for the new specific roles which match DB values
+        // hero.main_position is string[]
+        const matchesRole = selectedRole === 'All' || hero.main_position.includes(selectedRole)
+
+        return matchesSearch && matchesRole
+    })
+
     // Render POST-DRAFT Screen if finished
     if (state.isFinished) {
         return (
@@ -73,16 +91,16 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
     }
 
     return (
-        <div className="flex h-full gap-4 p-4 text-white">
-            {/* LEFT: BLUE TEAM */}
-            <div className="w-1/4 flex flex-col gap-2">
+        <div className="flex flex-col lg:flex-row h-full gap-4 p-4 text-white overflow-y-auto lg:overflow-hidden">
+            {/* LEFT: BLUE TEAM (Mobile: Order 2) */}
+            <div className="w-full lg:w-1/4 flex flex-col gap-2 order-2 lg:order-none">
                 <div className="p-4 bg-blue-900/20 border border-blue-500/30 rounded-lg text-center">
                     <h3 className="text-xl font-bold text-blue-400">{match.team_a_name}</h3>
                 </div>
 
                 {/* Bans */}
                 <div className="flex gap-2 justify-center">
-                    {[0, 2, 11, 13].map((stepIdx, i) => ( // Mapping ban steps relevant to blue if needed, simpler to just list state.blueBans
+                    {[0, 2, 11, 13].map((stepIdx, i) => (
                         <div key={i} className="w-10 h-10 border border-slate-700 bg-slate-800 rounded flex items-center justify-center overflow-hidden">
                             {state.blueBans[i] ? (
                                 <Image src={getHero(state.blueBans[i])?.icon_url || ''} alt="ban" width={40} height={40} className="grayscale opacity-60" />
@@ -92,12 +110,12 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                 </div>
 
                 {/* Picks */}
-                <div className="flex-1 space-y-2">
+                <div className="flex-1 space-y-2 min-h-[300px] lg:min-h-0">
                     {[0, 1, 2, 3, 4].map((i) => {
                         const heroId = state.bluePicks[i]
                         const hero = getHero(heroId || '')
                         return (
-                            <div key={i} className="h-20 border border-blue-500/20 bg-blue-900/10 rounded-lg flex items-center px-4 relative overflow-hidden">
+                            <div key={i} className="h-16 lg:h-20 border border-blue-500/20 bg-blue-900/10 rounded-lg flex items-center px-4 relative overflow-hidden">
                                 {hero ? (
                                     <>
                                         <Image src={hero.icon_url} alt={hero.name} fill className="object-cover opacity-20" />
@@ -115,20 +133,19 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                 </div>
             </div>
 
-            {/* CENTER: BOARD & CONTROLS */}
-            <div className="flex-1 flex flex-col gap-4">
+            {/* CENTER: BOARD & CONTROLS (Mobile: Order 1 - Top) */}
+            <div className="w-full lg:flex-1 flex flex-col gap-4 order-1 lg:order-none">
                 {/* Header / Timer */}
-                <div className="h-24 bg-slate-900 border border-slate-700 rounded-xl flex items-center justify-between px-8 relative overflow-hidden">
-                    {/* Progress Bar background could go here */}
+                <div className="h-20 lg:h-24 bg-slate-900 border border-slate-700 rounded-xl flex items-center justify-between px-4 lg:px-8 relative overflow-hidden shrink-0">
                     <div className="z-10 flex flex-col items-center w-full">
                         {state.isFinished ? (
-                            <h2 className="text-3xl font-black text-green-400">DRAFT COMPLETE</h2>
+                            <h2 className="text-2xl lg:text-3xl font-black text-green-400">DRAFT COMPLETE</h2>
                         ) : (
                             <>
-                                <span className={`text-sm font-bold tracking-wider ${currentStep?.side === 'BLUE' ? 'text-blue-400' : 'text-red-400'}`}>
+                                <span className={`text-xs lg:text-sm font-bold tracking-wider ${currentStep?.side === 'BLUE' ? 'text-blue-400' : 'text-red-400'}`}>
                                     {currentStep?.side} SIDE {currentStep?.type}
                                 </span>
-                                <div className="text-5xl font-mono font-bold mt-1">{state.timer}</div>
+                                <div className="text-4xl lg:text-5xl font-mono font-bold mt-1">{state.timer}</div>
                             </>
                         )}
                     </div>
@@ -139,39 +156,65 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                     </div>
                 </div>
 
-                {/* Hero Selector Grid */}
-                <div className="flex-1 bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex flex-col">
-                    <ScrollArea className="flex-1 h-[400px]">
-                        <div className="grid grid-cols-6 gap-2">
-                            {initialHeroes.map(hero => {
-                                const isUnavailable = unavailableIds.includes(hero.id)
-                                const isSelected = selectedHero?.id === hero.id
-                                return (
-                                    <button
-                                        key={hero.id}
-                                        disabled={isUnavailable}
-                                        onClick={() => handleHeroClick(hero)}
-                                        className={`
-                                            relative aspect-square rounded-lg overflow-hidden border-2 transition-all
-                                            ${isUnavailable ? 'grayscale opacity-30 border-slate-800' : 'hover:scale-105'}
-                                            ${isSelected ? 'border-yellow-400 ring-2 ring-yellow-400/50 scale-105 z-10' : 'border-transparent'}
-                                        `}
-                                    >
-                                        <Image src={hero.icon_url} alt={hero.name} fill className="object-cover" />
-                                        <div className="absolute bottom-0 inset-x-0 bg-black/60 p-1 text-[10px] text-center truncate">
-                                            {hero.name}
-                                        </div>
-                                    </button>
-                                )
-                            })}
+                {/* Filters */}
+                <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-2 flex flex-col gap-2 flex-1 overflow-hidden">
+                    <div className="flex gap-2">
+                        <div className="relative flex-1">
+                            <Input
+                                placeholder="Search heroes..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="bg-slate-950 border-slate-800 text-white h-8 text-sm"
+                            />
                         </div>
+                        <div className="flex gap-1 flex-wrap justify-center">
+                            {['All', 'Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam'].map(role => (
+                                <Button
+                                    key={role}
+                                    size="sm"
+                                    variant={selectedRole === role ? 'default' : 'outline'}
+                                    onClick={() => setSelectedRole(role)}
+                                    className={`h-8 px-2 text-[10px] lg:text-xs ${selectedRole === role ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-transparent border-slate-700 hover:bg-slate-800 text-slate-400'}`}
+                                >
+                                    {role}
+                                </Button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <ScrollArea className="flex-1 bg-slate-950/30 rounded-lg p-2">
+                        {filteredHeroes.length === 0 ? (
+                            <div className="flex items-center justify-center h-full text-slate-500">
+                                No heroes found.
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-8 sm:grid-cols-10 lg:grid-cols-[repeat(15,minmax(0,1fr))] gap-1">
+                                {filteredHeroes.map(hero => {
+                                    const isUnavailable = unavailableIds.includes(hero.id)
+                                    const isSelected = selectedHero?.id === hero.id
+                                    return (
+                                        <button
+                                            key={hero.id}
+                                            disabled={isUnavailable}
+                                            onClick={() => handleHeroClick(hero)}
+                                            className={`
+                                                relative aspect-square rounded overflow-hidden border transition-all
+                                                ${isUnavailable ? 'grayscale opacity-30 border-slate-800 cursor-not-allowed' : 'hover:scale-110 cursor-pointer z-0 hover:z-10'}
+                                                ${isSelected ? 'border-yellow-400 ring-1 ring-yellow-400/50 scale-110 z-20' : 'border-transparent'}
+                                            `}
+                                        >
+                                            <Image src={hero.icon_url} alt={hero.name} fill className="object-cover" sizes="5vw" />
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        )}
                     </ScrollArea>
 
-                    {/* Action Bar */}
-                    <div className="mt-4 pt-4 border-t border-slate-800 flex justify-center">
+                    <div className="mt-1 pt-1 border-t border-slate-800 flex justify-center shrink-0">
                         <Button
-                            size="lg"
-                            className={`w-64 font-bold text-lg ${state.isPaused || !selectedHero ? 'opacity-50' : 'animate-pulse'}`}
+                            size="sm"
+                            className={`w-full lg:w-48 font-bold ${state.isPaused || !selectedHero ? 'opacity-50' : 'animate-pulse'}`}
                             disabled={state.isPaused || !selectedHero}
                             onClick={handleLockIn}
                         >
@@ -181,26 +224,26 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                 </div>
 
                 {/* Recommendation Panel */}
-                <div className="h-64 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col">
-                    <Tabs defaultValue="analyst" className="flex-1 flex flex-col">
-                        <div className="bg-slate-950 px-4 py-2 border-b border-slate-800">
-                            <TabsList className="bg-transparent h-auto p-0 gap-4">
-                                <TabsTrigger value="analyst" className="data-[state=active]:bg-transparent data-[state=active]:text-indigo-400 data-[state=active]:border-b-2 border-indigo-400 rounded-none pb-2">
-                                    Analyst (Data)
+                <div className="h-40 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col shrink-0">
+                    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
+                        <div className="bg-slate-950 px-4 py-1 border-b border-slate-800">
+                            <TabsList className="bg-transparent h-auto p-0 gap-4 w-full flex justify-between overflow-x-auto">
+                                <TabsTrigger value="analyst" className="data-[state=active]:bg-transparent data-[state=active]:text-indigo-400 data-[state=active]:border-b-2 border-indigo-400 rounded-none pb-1 text-xs flex-1">
+                                    Analyst
                                 </TabsTrigger>
-                                <TabsTrigger value="history" className="data-[state=active]:bg-transparent data-[state=active]:text-indigo-400 data-[state=active]:border-b-2 border-indigo-400 rounded-none pb-2">
-                                    History (Trends)
+                                <TabsTrigger value="history" className="data-[state=active]:bg-transparent data-[state=active]:text-indigo-400 data-[state=active]:border-b-2 border-indigo-400 rounded-none pb-1 text-xs flex-1">
+                                    History
                                 </TabsTrigger>
-                                <TabsTrigger value="hybrid" className="data-[state=active]:bg-transparent data-[state=active]:text-purple-400 data-[state=active]:border-b-2 border-purple-400 rounded-none pb-2">
+                                <TabsTrigger value="hybrid" className="data-[state=active]:bg-transparent data-[state=active]:text-purple-400 data-[state=active]:border-b-2 border-purple-400 rounded-none pb-1 text-xs flex-1">
                                     AI Hybrid
                                 </TabsTrigger>
                             </TabsList>
                         </div>
 
-                        <div className="flex-1 p-4 bg-slate-900/50">
+                        <div className="flex-1 p-2 bg-slate-900/50 overflow-y-auto">
                             {['analyst', 'history', 'hybrid'].map(tab => (
                                 <TabsContent key={tab} value={tab} className="mt-0 h-full">
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                                         {recommendations[tab]?.length > 0 ? recommendations[tab].slice(0, 3).map((rec: any) => (
                                             <div key={rec.hero.id}
                                                 onClick={() => handleHeroClick(rec.hero)}
@@ -210,7 +253,7 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center justify-between">
                                                         <span className="font-bold text-sm truncate">{rec.hero.name}</span>
-                                                        <Badge variant="secondary" className="text-[10px] h-4 px-1">{rec.score.toFixed(1)}</Badge>
+                                                        <Badge variant="secondary" className="text-[10px] h-4 px-1">{(rec.score || 0).toFixed(1)}</Badge>
                                                     </div>
                                                     <p className="text-xs text-slate-400 truncate">{rec.reason}</p>
                                                 </div>
@@ -228,15 +271,15 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                 </div>
             </div>
 
-            {/* RIGHT: RED TEAM */}
-            <div className="w-1/4 flex flex-col gap-2">
+            {/* RIGHT: RED TEAM (Mobile: Order 3) */}
+            <div className="w-full lg:w-1/4 flex flex-col gap-2 order-3 lg:order-none">
                 <div className="p-4 bg-red-900/20 border border-red-500/30 rounded-lg text-center">
                     <h3 className="text-xl font-bold text-red-400">{match.team_b_name}</h3>
                 </div>
 
                 {/* Bans */}
                 <div className="flex gap-2 justify-center">
-                    {[1, 3, 10, 12].map((stepIdx, i) => ( // Mapping ban steps relevant to red
+                    {[1, 3, 10, 12].map((stepIdx, i) => (
                         <div key={i} className="w-10 h-10 border border-slate-700 bg-slate-800 rounded flex items-center justify-center overflow-hidden">
                             {state.redBans[i] ? (
                                 <Image src={getHero(state.redBans[i])?.icon_url || ''} alt="ban" width={40} height={40} className="grayscale opacity-60" />
@@ -246,12 +289,12 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                 </div>
 
                 {/* Picks */}
-                <div className="flex-1 space-y-2">
+                <div className="flex-1 space-y-2 min-h-[300px] lg:min-h-0">
                     {[0, 1, 2, 3, 4].map((i) => {
                         const heroId = state.redPicks[i]
                         const hero = getHero(heroId || '')
                         return (
-                            <div key={i} className="h-20 border border-red-500/20 bg-red-900/10 rounded-lg flex items-center px-4 relative overflow-hidden flex-row-reverse text-right">
+                            <div key={i} className="h-16 lg:h-20 border border-red-500/20 bg-red-900/10 rounded-lg flex items-center px-4 relative overflow-hidden flex-row-reverse text-right">
                                 {hero ? (
                                     <>
                                         <Image src={hero.icon_url} alt={hero.name} fill className="object-cover opacity-20" />

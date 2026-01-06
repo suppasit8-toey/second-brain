@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -19,6 +20,8 @@ export default function NewGameModal({ match, nextGameNumber }: NewGameModalProp
     const [blueSide, setBlueSide] = useState<string>(match.team_a_name)
     const [loading, setLoading] = useState(false)
 
+    const router = useRouter()
+
     const handleCreate = async () => {
         setLoading(true)
         const redSide = blueSide === match.team_a_name ? match.team_b_name : match.team_a_name
@@ -28,6 +31,7 @@ export default function NewGameModal({ match, nextGameNumber }: NewGameModalProp
 
         if (res.success) {
             setOpen(false)
+            router.push(`/admin/simulator/${match.id}/draft/${res.gameId}`)
         }
     }
 

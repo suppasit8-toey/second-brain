@@ -104,3 +104,20 @@ export async function createGame(matchId: string, gameNumber: number, blueTeam: 
     revalidatePath(`/admin/simulator/${matchId}`)
     return { success: true, message: 'Game created', gameId: data.id }
 }
+
+export async function getGame(gameId: string) {
+    const supabase = await createClient()
+
+    const { data, error } = await supabase
+        .from('draft_games')
+        .select('*')
+        .eq('id', gameId)
+        .single()
+
+    if (error) {
+        console.error('Error fetching game:', error)
+        return null
+    }
+
+    return data
+}
