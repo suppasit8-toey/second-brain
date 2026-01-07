@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { Pause, Play, Check, ShieldBan } from 'lucide-react'
+import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown } from 'lucide-react'
 import Image from 'next/image'
 import PostDraftResult from '@/components/draft/PostDraftResult'
 import { Input } from '@/components/ui/input'
@@ -27,13 +27,46 @@ export default function DraftInterface({ match, game, initialHeroes, teamAGlobal
     const { state, currentStep, lockIn, togglePause } = useDraftEngine()
     const [selectedHero, setSelectedHero] = useState<Hero | null>(null)
     const [recommendations, setRecommendations] = useState<any>({ analyst: [], history: [], hybrid: [], smartBan: [] })
+    const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false)
     const [showSummary, setShowSummary] = useState(false)
     const [showGlobalBans, setShowGlobalBans] = useState(false)
-    const [manualLanes, setManualLanes] = useState<Record<string, string>>({})
+    const [manualLanes, setManualLanes] = useState<Record<string, string[]>>({})
+    const [isAiOpen, setIsAiOpen] = useState(true)
 
     const handleLaneAssign = (heroId: string, lane: string) => {
-        setManualLanes(prev => ({ ...prev, [heroId]: lane }))
+        setManualLanes(prev => {
+            const current = prev[heroId] || []
+            if (current.includes(lane)) {
+                return { ...prev, [heroId]: current.filter(l => l !== lane) }
+            } else {
+                return { ...prev, [heroId]: [...current, lane] }
+            }
+        })
     }
+
+    // Auto-fill defaults from Roster (Multi-role support)
+    useEffect(() => {
+        const allPicks = [...Object.values(state.bluePicks), ...Object.values(state.redPicks)].filter(Boolean) as string[]
+
+        setManualLanes(prev => {
+            const next = { ...prev }
+            let hasChanges = false
+
+            allPicks.forEach(id => {
+                if (!next[id]) {
+                    const hero = getHero(id)
+                    // If hero has main_position stats, use them. Otherwise default empty or 'Mid' etc.
+                    // Assuming hero.main_position is string[] from DB/Types
+                    if (hero && hero.main_position && hero.main_position.length > 0) {
+                        next[id] = hero.main_position
+                        hasChanges = true
+                    }
+                }
+            })
+
+            return hasChanges ? next : prev
+        })
+    }, [state.bluePicks, state.redPicks, initialHeroes])
 
     // UI Filters
     const [searchQuery, setSearchQuery] = useState('')
@@ -93,7 +126,33 @@ export default function DraftInterface({ match, game, initialHeroes, teamAGlobal
         ? [...bannedIds, ...pickedIds, ...opponentGlobalBans] // Can ban global bans, but NOT opponent's global bans (waste)
         : [...bannedIds, ...pickedIds, ...currentGlobalBans] // Cannot pick global bans
 
-    // ... (useEffect remains same) ...
+    // Fetch Recommendations when step changes
+    useEffect(() => {
+        if (!currentStep || state.isFinished) return;
+
+        const allyPicks = currentStep.side === 'BLUE' ? Object.values(state.bluePicks) : Object.values(state.redPicks)
+        const enemyPicks = currentStep.side === 'BLUE' ? Object.values(state.redPicks) : Object.values(state.bluePicks)
+
+        const currentPhase = (currentStep?.type === 'BAN' ? 'BAN' : 'PICK') as 'BAN' | 'PICK'
+        const context = {
+            matchId: match.id,
+            phase: currentPhase,
+            side: currentStep?.side
+        }
+
+        setIsLoadingRecommendations(true)
+        getRecommendations(match.version_id, allyPicks, enemyPicks, bannedIds, [], context)
+            .then(data => {
+                setRecommendations(data)
+                setIsLoadingRecommendations(false)
+            })
+            .catch(err => {
+                console.error("Cerebro failed:", err)
+                setRecommendations({ analyst: [], history: [], hybrid: [], smartBan: [] })
+                setIsLoadingRecommendations(false)
+            })
+
+    }, [state.stepIndex])
 
     const handleHeroClick = (hero: Hero) => {
         if (unavailableIds.includes(hero.id)) return
@@ -191,6 +250,7 @@ export default function DraftInterface({ match, game, initialHeroes, teamAGlobal
     const isGameFinished = !!game.winner
 
     if (isGameFinished && game.picks) {
+        const manualLanes: Record<string, string> = {}
         const bluePicks: Record<number, string> = {}
         const redPicks: Record<number, string> = {}
         const blueBans: string[] = []
@@ -201,6 +261,10 @@ export default function DraftInterface({ match, game, initialHeroes, teamAGlobal
                 const idx = p.position_index - 1
                 if (p.side === 'BLUE') bluePicks[idx] = p.hero_id
                 else redPicks[idx] = p.hero_id
+
+                if (p.assigned_role) {
+                    manualLanes[p.hero_id] = p.assigned_role
+                }
             } else {
                 if (p.side === 'BLUE') blueBans.push(p.hero_id)
                 else redBans.push(p.hero_id)
@@ -215,24 +279,65 @@ export default function DraftInterface({ match, game, initialHeroes, teamAGlobal
             notes: game.analysis_data?.notes
         }
 
+        const nextGameNum = game.game_number + 1
+        const nextExistingGame = match.games?.find(g => g.game_number === nextGameNum)
+        const nextGameTab = nextExistingGame ? nextExistingGame.id : `new-${nextGameNum}`
+
+        const currentBlueWins = match.games?.filter(g => (g.winner === 'Blue' && g.blue_team_name === match.team_a_name) || (g.winner === 'Red' && g.red_team_name === match.team_a_name)).length || 0
+        const currentRedWins = match.games?.filter(g => (g.winner === 'Blue' && g.blue_team_name === match.team_b_name) || (g.winner === 'Red' && g.red_team_name === match.team_b_name)).length || 0
+
+        // IMPORTANT: The above counts Team A vs Team B wins, but PostDraftResult needs "Blue" vs "Red" context relative to the SERIES? 
+        // No, PostDraftResult seriesScore should probably be Team A vs Team B.
+        // Or better: Let's pass the raw numbers.
+        // Wait, the logic in PostDraftResult assumes seriesScore.blue and seriesScore.red. 
+        // But "Blue" in PostDraftResult refers to `blueTeamName`. 
+        // If `blueTeamName` is Team A, we should pass Team A's score as blue. 
+        // If `blueTeamName` is Team B, we should pass Team B's score as blue.
+
+        const isBlueTeamA = game.blue_team_name === match.team_a_name
+        const blueScore = isBlueTeamA ? currentBlueWins : currentRedWins
+        const redScore = isBlueTeamA ? currentRedWins : currentBlueWins
+
         return (
             <PostDraftResult
                 gameId={game.id}
-                blueTeamName={match.team_a_name}
-                redTeamName={match.team_b_name}
+                blueTeamName={game.blue_team_name}
+                redTeamName={game.red_team_name}
                 bluePicks={bluePicks}
                 redPicks={redPicks}
                 blueBans={blueBans}
                 redBans={redBans}
                 heroes={initialHeroes}
                 matchId={match.id}
+                manualLanes={manualLanes}
                 initialData={initialData}
+                nextGameId={nextGameTab}
+                matchMode={match.mode || 'BO1'}
+                seriesScore={{ blue: blueScore, red: redScore }}
             />
         )
     }
 
     // Render POST-DRAFT Screen if finished AND user clicked the button
     if (state.isFinished && showSummary) {
+        const nextGameNum = game.game_number + 1
+        const nextExistingGame = match.games?.find(g => g.game_number === nextGameNum)
+        const nextGameTab = nextExistingGame ? nextExistingGame.id : `new-${nextGameNum}`
+
+        const currentBlueWins = match.games?.filter(g => (g.winner === 'Blue' && g.blue_team_name === match.team_a_name) || (g.winner === 'Red' && g.red_team_name === match.team_a_name)).length || 0
+        const currentRedWins = match.games?.filter(g => (g.winner === 'Blue' && g.blue_team_name === match.team_b_name) || (g.winner === 'Red' && g.red_team_name === match.team_b_name)).length || 0
+
+        const isBlueTeamA = game.blue_team_name === match.team_a_name
+        const blueScore = isBlueTeamA ? currentBlueWins : currentRedWins
+        const redScore = isBlueTeamA ? currentRedWins : currentBlueWins
+
+        // Convert multi-lanes to single lane for PostDraftResult (Game Record uses 1 position)
+        // Taking the first selected lane as primary
+        const primaryLanes: Record<string, string> = {}
+        Object.entries(manualLanes).forEach(([k, v]) => {
+            if (v && v.length > 0) primaryLanes[k] = v[0]
+        })
+
         return (
             <PostDraftResult
                 gameId={game.id}
@@ -244,7 +349,10 @@ export default function DraftInterface({ match, game, initialHeroes, teamAGlobal
                 redBans={state.redBans}
                 heroes={initialHeroes}
                 matchId={match.id}
-                manualLanes={manualLanes}
+                manualLanes={primaryLanes}
+                nextGameId={nextGameTab}
+                seriesScore={{ blue: blueScore, red: redScore }}
+                matchMode={match.mode || 'BO1'}
             />
         )
     }
@@ -304,7 +412,7 @@ export default function DraftInterface({ match, game, initialHeroes, teamAGlobal
                                 {hero && (
                                     <div className="flex bg-slate-900/50 border-t border-blue-500/20 divide-x divide-slate-800">
                                         {lanes.map(lane => {
-                                            const isSelected = manualLanes[hero.id] === lane.id
+                                            const isSelected = manualLanes[hero.id]?.includes(lane.id)
                                             return (
                                                 <button
                                                     key={lane.id}
@@ -551,63 +659,85 @@ export default function DraftInterface({ match, game, initialHeroes, teamAGlobal
                 </div>
 
                 {/* Recommendation Panel */}
-                <div className="h-40 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col shrink-0">
-                    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-                        <div className="bg-slate-950 px-4 py-1 border-b border-slate-800">
-                            <TabsList className="bg-transparent h-auto p-0 gap-4 w-full flex justify-between overflow-x-auto">
-                                <TabsTrigger value="analyst" className="data-[state=active]:bg-transparent data-[state=active]:text-indigo-400 data-[state=active]:border-b-2 border-indigo-400 rounded-none pb-1 text-xs flex-1">
-                                    Analyst
-                                </TabsTrigger>
-                                <TabsTrigger value="history" className="data-[state=active]:bg-transparent data-[state=active]:text-indigo-400 data-[state=active]:border-b-2 border-indigo-400 rounded-none pb-1 text-xs flex-1">
-                                    History
-                                </TabsTrigger>
-                                <TabsTrigger value="hybrid" className="data-[state=active]:bg-transparent data-[state=active]:text-purple-400 data-[state=active]:border-b-2 border-purple-400 rounded-none pb-1 text-xs flex-1">
-                                    AI Hybrid
-                                </TabsTrigger>
-                                {isBanPhase && (
-                                    <TabsTrigger value="smartBan" className="data-[state=active]:bg-transparent data-[state=active]:text-red-400 data-[state=active]:border-b-2 border-red-400 rounded-none pb-1 text-xs flex-1 animate-pulse font-bold">
-                                        Smart Ban
-                                    </TabsTrigger>
-                                )}
-                            </TabsList>
+                {/* Recommendation Panel: Cerebro AI */}
+                <div className={`bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col transition-all duration-300 ${isAiOpen ? 'h-52' : 'h-10'} shrink-0`}>
+                    <div
+                        className="bg-slate-950 px-4 py-2 border-b border-slate-800 flex items-center justify-between cursor-pointer hover:bg-slate-900/80 transition-colors"
+                        onClick={() => setIsAiOpen(!isAiOpen)}
+                    >
+                        <div className="flex items-center gap-2">
+                            <Brain className={`w-4 h-4 text-indigo-400 ${isAiOpen ? 'animate-pulse' : ''}`} />
+                            <h3 className="font-bold text-indigo-100 tracking-wider text-xs">CEREBRO AI</h3>
+                            <span className="text-[10px] text-slate-500 ml-2 font-mono">{isBanPhase ? '[BAN PROTOCOL]' : '[PICK ANALYSIS]'}</span>
                         </div>
+                        <div className="flex items-center gap-3">
+                            <Badge variant="outline" className="bg-slate-900 border-slate-700 text-slate-400 text-[10px] h-5">
+                                {isAiOpen ? (isBanPhase ? '🛡️ Smart Ban' : '⚡ Smart Pick') : 'Minimize'}
+                            </Badge>
+                            {isAiOpen ? <ChevronDown className="w-3 h-3 text-slate-500" /> : <ChevronUp className="w-3 h-3 text-slate-500" />}
+                        </div>
+                    </div>
 
-                        <div className="flex-1 p-2 bg-slate-900/50 overflow-y-auto">
-                            {['analyst', 'history', 'hybrid', 'smartBan'].map(tab => {
-                                // Don't show smartBan tab content if not in ban phase (though logic above handles tab switching)
-                                if (tab === 'smartBan' && !isBanPhase) return null
+                    {recommendations.warning && isAiOpen && (
+                        <div className="bg-yellow-900/20 border-b border-yellow-900/30 px-4 py-1 flex items-center gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse" />
+                            <span className="text-[10px] text-yellow-500/80 font-mono tracking-tight">{recommendations.warning}</span>
+                        </div>
+                    )}
 
+                    <div className="flex-1 p-2 bg-slate-900/50 overflow-y-auto">
+                        {(() => {
+                            const activeRecs = isBanPhase
+                                ? recommendations.smartBan
+                                : recommendations.hybrid;
+
+                            if (isLoadingRecommendations) {
                                 return (
-                                    <TabsContent key={tab} value={tab} className="mt-0 h-full">
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                                            {recommendations[tab]?.length > 0 ? recommendations[tab].slice(0, 3).map((rec: any) => (
-                                                <div key={rec.hero.id}
-                                                    onClick={() => handleHeroClick(rec.hero)}
-                                                    className={`
-                                                    bg-slate-800 p-3 rounded-lg flex items-center gap-3 hover:bg-slate-700 cursor-pointer transition-colors border 
-                                                    ${tab === 'smartBan' ? 'border-red-900/50 hover:border-red-500/50' : 'border-slate-700 hover:border-indigo-500/50'}
-                                                `}
-                                                >
-                                                    <Image src={rec.hero.icon_url} alt={rec.hero.name} width={40} height={40} className="rounded" />
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center justify-between">
-                                                            <span className="font-bold text-sm truncate">{rec.hero.name}</span>
-                                                            <Badge variant="secondary" className="text-[10px] h-4 px-1">{(rec.score || 0).toFixed(1)}</Badge>
-                                                        </div>
-                                                        <p className="text-xs text-slate-400 truncate">{rec.reason}</p>
-                                                    </div>
-                                                </div>
-                                            )) : (
-                                                <div className="col-span-3 text-center text-slate-500 py-8">
-                                                    {tab === 'smartBan' ? 'No specific smart bans found.' : 'Waiting for draft to progress for recommendations...'}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </TabsContent>
+                                    <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-1 opacity-60">
+                                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-500/30"></div>
+                                        <span className="text-[10px]">Analyzing Draft Context...</span>
+                                    </div>
                                 )
-                            })}
-                        </div>
-                    </Tabs>
+                            }
+
+                            if (!activeRecs || activeRecs.length === 0) {
+                                return (
+                                    <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-1 opacity-60">
+                                        <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center">
+                                            <Brain className="w-4 h-4 text-slate-600" />
+                                        </div>
+                                        <span className="text-[10px]">No specific recommendations found.</span>
+                                    </div>
+                                )
+                            }
+
+                            return (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+                                    {activeRecs.slice(0, 6).map((rec: any) => (
+                                        <div key={rec.hero.id}
+                                            onClick={() => handleHeroClick(rec.hero)}
+                                            className="bg-slate-800 p-2 rounded-lg flex items-center gap-2 hover:bg-slate-700 cursor-pointer transition-colors border border-slate-700 hover:border-indigo-500/50 group"
+                                        >
+                                            <div className="relative w-8 h-8 rounded overflow-hidden border border-slate-600 group-hover:border-indigo-400 transition-colors shrink-0">
+                                                <Image src={rec.hero.icon_url} alt={rec.hero.name} fill className="object-cover" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="font-bold text-xs truncate text-slate-200 group-hover:text-white">{rec.hero.name}</span>
+                                                    <Badge variant="secondary" className={`text-[9px] h-3 px-1 ${rec.score > 30 ? 'bg-green-900/50 text-green-400' : 'bg-slate-700 text-slate-300'}`}>
+                                                        {rec.score.toFixed(0)}
+                                                    </Badge>
+                                                </div>
+                                                <p className="text-[10px] text-slate-400 truncate group-hover:text-indigo-300 transition-colors">
+                                                    {rec.reason}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )
+                        })()}
+                    </div>
                 </div>
             </div>
 
@@ -663,7 +793,7 @@ export default function DraftInterface({ match, game, initialHeroes, teamAGlobal
                                 {hero && (
                                     <div className="flex bg-slate-900/50 border-t border-red-500/20 divide-x divide-slate-800">
                                         {lanes.map(lane => {
-                                            const isSelected = manualLanes[hero.id] === lane.id
+                                            const isSelected = manualLanes[hero.id]?.includes(lane.id)
                                             return (
                                                 <button
                                                     key={lane.id}

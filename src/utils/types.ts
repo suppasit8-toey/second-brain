@@ -16,6 +16,36 @@ export interface HeroStats {
     created_at?: string;
 }
 
+export interface Tournament {
+    id: string; // uuid
+    name: string;
+    slug?: string;
+    start_date?: string;
+    end_date?: string;
+    status: 'upcoming' | 'ongoing' | 'completed';
+    created_at?: string;
+}
+
+export interface Team {
+    id: string; // uuid
+    tournament_id: string;
+    name: string;
+    short_name?: string;
+    logo_url?: string;
+    created_at?: string;
+
+    // Joins
+    players?: Player[];
+}
+
+export interface Player {
+    id: string;
+    team_id: string;
+    name: string;
+    positions: string[]; // e.g. ["Jungle", "Coach"]
+    created_at?: string;
+}
+
 export interface Hero {
     id: string; // uuid
     name: string;
@@ -82,9 +112,11 @@ export interface DraftMatch {
     winner?: 'Team A' | 'Team B';
     slug?: string;
     created_at?: string;
+    tournament_id?: string;
 
     // Joins
     version?: Version;
+    tournament?: Tournament;
     games?: DraftGame[];
 }
 

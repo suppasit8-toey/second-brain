@@ -1,18 +1,20 @@
 'use client'
 
-import { useState, useEffect, useActionState } from 'react'
+import { useState, useEffect, useActionState, useTransition } from 'react'
 import { useFormStatus } from 'react-dom'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
-import { Version } from '@/utils/types'
+import { Version, Tournament, Team } from '@/utils/types'
 import { createMatch } from '../actions'
+import { getTeams } from '../../tournaments/actions'
 import { useRouter } from 'next/navigation'
 
 interface CreateMatchModalProps {
     versions: Version[]
+    tournaments: Tournament[]
 }
 
 const initialState = {
@@ -30,9 +32,10 @@ function SubmitButton() {
     )
 }
 
-export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
+export default function CreateMatchModal({ versions, tournaments }: CreateMatchModalProps) {
     const [open, setOpen] = useState(false)
     const router = useRouter()
+    const [isPending, startTransition] = useTransition()
 
     // Setup initial version if available
     const activeVersion = versions.find(v => v.is_active) || versions[0]
@@ -43,6 +46,30 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
     // UI States
     const [selectedMode, setSelectedMode] = useState<string>('BO5')
     const [isCustomTeams, setIsCustomTeams] = useState(false)
+
+    // Tournament Logic
+    const [selectedTournament, setSelectedTournament] = useState<string>('none')
+    const [tournamentTeams, setTournamentTeams] = useState<Team[]>([])
+    const [loadingTeams, setLoadingTeams] = useState(false)
+    const [teamA, setTeamA] = useState('')
+    const [teamB, setTeamB] = useState('')
+
+
+    // Fetch teams when tournament changes
+    useEffect(() => {
+        if (selectedTournament && selectedTournament !== 'none') {
+            startTransition(async () => {
+                setLoadingTeams(true)
+                const teams = await getTeams(selectedTournament)
+                setTournamentTeams(teams)
+                setLoadingTeams(false)
+            })
+        } else {
+            setTournamentTeams([])
+            setTeamA('')
+            setTeamB('')
+        }
+    }, [selectedTournament])
 
     // Handle Success Redirect
     useEffect(() => {
@@ -59,12 +86,12 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
                     + Create New Match
                 </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px] bg-slate-900 border-slate-800 text-white">
+            <DialogContent className="sm:max-w-[500px] bg-slate-900 border-slate-800 text-white">
                 <DialogHeader>
                     <DialogTitle className="text-xl font-bold">Setup New Match</DialogTitle>
                 </DialogHeader>
 
-                <form action={formAction} className="grid gap-4 py-4">
+                <form action={formAction} className="grid gap-4 py-4 max-h-[80vh] overflow-y-auto">
                     {state.message && !state.success && (
                         <div className="text-red-400 text-sm bg-red-900/20 p-2 rounded border border-red-900/50">
                             {state.message}
@@ -83,20 +110,71 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
                         />
                     </div>
 
+                    {/* Tournament Selection */}
+                    <div className="grid gap-2">
+                        <Label>Tournament (Optional)</Label>
+                        <input type="hidden" name="tournament_id" value={selectedTournament === 'none' ? '' : selectedTournament} />
+                        <Select value={selectedTournament} onValueChange={setSelectedTournament}>
+                            <SelectTrigger className="bg-slate-800 border-slate-700">
+                                <SelectValue placeholder="Select Tournament" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-slate-800 border-slate-700 hover:!bg-slate-800">
+                                <SelectItem value="none">None (Friendly Match)</SelectItem>
+                                {tournaments.map(t => (
+                                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
                     <div className="space-y-4 rounded-lg bg-slate-950/50 p-4 border border-slate-800">
                         <div className="flex items-center justify-between">
                             <Label className="text-sm font-medium text-slate-300">Team Names</Label>
-                            <Button
-                                type="button"
-                                variant="link"
-                                onClick={() => setIsCustomTeams(!isCustomTeams)}
-                                className="h-auto p-0 text-xs text-blue-400 hover:text-blue-300"
-                            >
-                                {isCustomTeams ? 'Reset to Default' : 'Customize Team Names'}
-                            </Button>
+                            {selectedTournament === 'none' && (
+                                <Button
+                                    type="button"
+                                    variant="link"
+                                    onClick={() => setIsCustomTeams(!isCustomTeams)}
+                                    className="h-auto p-0 text-xs text-blue-400 hover:text-blue-300"
+                                >
+                                    {isCustomTeams ? 'Reset to Default' : 'Customize Team Names'}
+                                </Button>
+                            )}
                         </div>
 
-                        {!isCustomTeams ? (
+                        {/* Team Selection Logic */}
+                        {selectedTournament !== 'none' ? (
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="grid gap-2">
+                                    <Label className="text-xs text-slate-400">Team A</Label>
+                                    <input type="hidden" name="team_a_name" value={teamA} />
+                                    <Select value={teamA} onValueChange={setTeamA}>
+                                        <SelectTrigger className="bg-slate-800 border-slate-700" disabled={loadingTeams}>
+                                            <SelectValue placeholder={loadingTeams ? "Loading..." : "Select Team A"} />
+                                        </SelectTrigger>
+                                        <SelectContent className="bg-slate-800 border-slate-700">
+                                            {tournamentTeams.map(t => (
+                                                <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label className="text-xs text-slate-400">Team B</Label>
+                                    <input type="hidden" name="team_b_name" value={teamB} />
+                                    <Select value={teamB} onValueChange={setTeamB}>
+                                        <SelectTrigger className="bg-slate-800 border-slate-700" disabled={loadingTeams}>
+                                            <SelectValue placeholder={loadingTeams ? "Loading..." : "Select Team B"} />
+                                        </SelectTrigger>
+                                        <SelectContent className="bg-slate-800 border-slate-700">
+                                            {tournamentTeams.map(t => (
+                                                <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        ) : !isCustomTeams ? (
                             <div className="space-y-4">
                                 <div className="flex items-center justify-center gap-3 text-lg font-bold bg-slate-900 p-3 rounded border border-slate-800/50">
                                     <span className="text-blue-400">Team A</span>

@@ -15,180 +15,275 @@ export async function getRecommendations(
     allyHeroIds: string[],
     enemyHeroIds: string[],
     bannedHeroIds: string[],
-    allyGlobalBans: string[] = []
+    allyGlobalBans: string[] = [],
+    context?: {
+        matchId?: string;
+        side?: 'BLUE' | 'RED';
+        phase?: 'BAN' | 'PICK'; // 'BAN_1' (1-2), 'BAN_2' (3-4), 'PICK_1', 'PICK_2' could be inferred
+        pickOrder?: number; // 0-19?
+    }
 ) {
     const supabase = await createClient()
 
+    console.log("--- GET RECOMMENDATIONS CALL ---")
+    console.log("Version ID:", versionId)
+    console.log("Context:", context)
+
     // 1. Fetch all Heroes for this version (base pool)
-    const { data: heroes } = await supabase
+    let { data: heroes, error } = await supabase
         .from('heroes')
         .select(`
             *,
-            hero_stats!inner(tier, win_rate, power_spike)
+            hero_stats!inner(tier, win_rate, pick_rate, ban_rate, power_spike)
         `)
         .eq('hero_stats.version_id', versionId)
 
-    if (!heroes) return { data: [], history: [], hybrid: [] }
+    let warningMessage = null
+
+    // FALLBACK: If no heroes found for this version, try the latest version with stats
+    if (!heroes || heroes.length === 0) {
+        console.warn(`No stats found for version ${versionId}. Attempting fallback...`)
+
+        // Find latest patch with stats (simplified: just get latest hero_stats version)
+        const { data: latestStats } = await supabase
+            .from('hero_stats')
+            .select('version_id')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single()
+
+        if (latestStats) {
+            const { data: fallbackHeroes } = await supabase
+                .from('heroes')
+                .select(`
+                    *,
+                    hero_stats!inner(tier, win_rate, pick_rate, ban_rate, power_spike)
+                `)
+                .eq('hero_stats.version_id', latestStats.version_id)
+
+            if (fallbackHeroes && fallbackHeroes.length > 0) {
+                heroes = fallbackHeroes
+                warningMessage = `Data from previous patch used (Version ID: ${latestStats.version_id})`
+            }
+        }
+    }
+
+    if (error) console.error("Supabase Error:", error)
+    console.log("Heroes found:", heroes?.length)
+
+    if (!heroes || heroes.length === 0) return { analyst: [], history: [], hybrid: [], smartBan: [], warning: "No data available in any patch." }
 
     const availableHeroes = heroes.filter(h =>
         !allyHeroIds.includes(h.id) &&
         !enemyHeroIds.includes(h.id) &&
         !bannedHeroIds.includes(h.id)
     )
+    console.log("Available Heroes:", availableHeroes.length)
 
-    // --- ANALYST TAB (Synergy/Counters) ---
-    // Fetch Combos for Allies
+    // --- CONTEXT PREP ---
+    // Fetch Key Players from previous games if matchId exists
+    const enemyKeyPlayerIds = new Set<string>()
+    const allyKeyPlayerIds = new Set<string>()
+    let previousGames = []
+
+    if (context?.matchId) {
+        const { data: matchData } = await supabase
+            .from('draft_matches')
+            .select(`
+                games:draft_games(
+                   blue_team_name, red_team_name,
+                   blue_key_player_id, red_key_player_id,
+                   winner
+                )
+            `)
+            .eq(context.matchId.includes('-') && context.matchId.length > 20 ? 'id' : 'slug', context.matchId)
+            .single()
+
+        if (matchData?.games) {
+            previousGames = matchData.games
+            // Determine which team we are (Ally)
+            // Ideally we need to know if 'side' (BLUE/RED) corresponds to Team A or Team B.
+            // But usually DraftInterface knows. Assuming context.side is 'BLUE' or 'RED' for the current game.
+            // Wait, Key Players are tied to Team Name, not Side.
+            // We need to know if we are Team A or Team B to track OUR key players.
+            // Since we don't have team names passed in context easily, let's just collect ALL key players for now as "Meta Threats"
+            // Or better: pass team names. For now, simplifiction:
+            // "Enemy Key Players" -> Logic: Whoever was Key Player on the opposing team in previous games.
+            // We'll trust the caller or just filter generally.
+
+            // Simpler approach: Collect ALL frequent MVPs as "Threats"
+            matchData.games.forEach((g: any) => {
+                if (g.blue_key_player_id) enemyKeyPlayerIds.add(g.blue_key_player_id) // Add both for now as potential targets
+                if (g.red_key_player_id) enemyKeyPlayerIds.add(g.red_key_player_id)
+            })
+        }
+    }
+
+    // --- SMART BAN LOGIC ---
+    // 1. Global Data (Ban Rate)
+    // 2. Counter First Pick (if we are 2nd pick, ban what counters us? No, if we are 1st pick, ban counters to us. If we are 2nd pick, ban OP heroes)
+    // 3. Phase 2: Predict Missing Roles
+
+    const smartBanScores: Record<string, { score: number, reasons: string[] }> = {}
+
+    // Calculate Global Ban Score
+    availableHeroes.forEach(h => {
+        let score = h.hero_stats[0].ban_rate || 0
+        const reasons: string[] = []
+
+        // Base: Ban Rate
+        if (score > 30) {
+            score += 10
+            reasons.push(`High Ban Rate (${h.hero_stats[0].ban_rate}%)`)
+        }
+
+        // Logic 3: Phase 2 (If many heroes already banned/picked)
+        const totalPicks = allyHeroIds.length + enemyHeroIds.length
+        if (totalPicks >= 6) { // Phase 2
+            // 3.1 Predict Enemy Missing Roles
+            const enemyHeroes = heroes.filter(eh => enemyHeroIds.includes(eh.id))
+            const enemyRolesFilled = new Set<string>()
+            enemyHeroes.forEach(eh => eh.main_position.forEach((p: string) => enemyRolesFilled.add(p)))
+
+            const roles = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
+            const missingRoles = roles.filter(r => !enemyRolesFilled.has(r))
+
+            if (h.main_position.some((p: string) => missingRoles.includes(p))) {
+                score += 20
+                reasons.push(`Deny ${h.main_position[0]} (Enemy needs role)`)
+            }
+        }
+
+        // Logic 1: No Data -> Ban Frequent
+        if (totalPicks === 0 && h.hero_stats[0].tier === 'S') {
+            score += 15
+            reasons.push('S Tier (Meta Ban)')
+        }
+
+        smartBanScores[h.id] = { score, reasons }
+    })
+
+    // Logic 2: Counter First Pick / Counter Us
+    if (context?.phase === 'BAN') {
+        // Fetch counters to OUR likely picks or our Key Players
+        // Since we don't know our picks yet in Ban Phase 1, we protect our Key Players
+        if (allyGlobalBans.length > 0) { // If we have global bans/favs
+            // ...
+        }
+    }
+
+
+    // --- AI ANALYST (PICK) LOGIC ---
+    const analystScores: Record<string, { score: number, reasons: string[] }> = {}
+
+    // Bulk Fetch Matchups & Combos
+    const { data: matchups } = await supabase
+        .from('matchups')
+        .select('*')
+        .eq('version_id', versionId)
+        .or(`opponent_id.in.(${enemyHeroIds.join(',')}),hero_id.in.(${enemyHeroIds.join(',')})`)
+    // We want: 
+    // 1. Hero VS Enemy (Us countering them) -> hero_id=Candidate, opponent_id=Enemy
+    // 2. Enemy VS Hero (Them countering us) -> hero_id=Enemy, opponent_id=Candidate (to avoid self-countering?) - No, usually we look for winning matchups.
+
+    // Filter for "Good for Ally" (Candidate winrate > 50 vs Enemy)
+    const goodMatchups = matchups?.filter(m => enemyHeroIds.includes(m.enemy_hero_id) && m.win_rate > 50) || []
+
     const { data: combos } = await supabase
         .from('hero_combos')
         .select('*')
         .eq('version_id', versionId)
         .in('hero_a_id', allyHeroIds)
 
-    // Fetch Matchups against Enemies
-    const { data: matchups } = await supabase
-        .from('matchups')
-        .select('*')
-        .eq('version_id', versionId)
-        .in('opponent_id', enemyHeroIds) // Heroes who are opponents to current enemies
-        .gt('win_rate', 50)
-
-    const analystScores: Record<string, { score: number, reasons: string[] }> = {}
-
-    // Score based on Synergy
-    combos?.forEach(c => {
-        if (!analystScores[c.hero_b_id]) analystScores[c.hero_b_id] = { score: 0, reasons: [] }
-        analystScores[c.hero_b_id].score += (c.synergy_score / 10)
-        analystScores[c.hero_b_id].reasons.push(`Synergy with teammate (Score: ${c.synergy_score})`)
-    })
-
-    // Score based on Counters
-    matchups?.forEach(m => {
-        if (!analystScores[m.hero_id]) analystScores[m.hero_id] = { score: 0, reasons: [] }
-        analystScores[m.hero_id].score += ((m.win_rate - 50) / 2) // Bonus for winrate > 50
-        analystScores[m.hero_id].reasons.push(`Counters enemy`)
-    })
-
-    const analystRecs: Recommendation[] = availableHeroes
-        .map(h => ({
-            hero: h,
-            score: analystScores[h.id]?.score || 0,
-            reason: analystScores[h.id]?.reasons.join(', ') || 'General pool',
-            type: 'synergy' as const
-        }))
-        .filter(r => r.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 5)
-
-
-    // --- HISTORY TAB (Trends) ---
-    const historyRecs: Recommendation[] = availableHeroes
-        .map(h => {
-            const stats = h.hero_stats[0]
-            let score = stats.win_rate
-            if (stats.tier === 'S') score += 10
-            if (stats.tier === 'A') score += 5
-            return {
-                hero: h,
-                score: score,
-                reason: `${stats.tier} Tier, ${stats.win_rate}% WR`,
-                type: 'history' as const
-            }
-        })
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 5)
-
-    // --- HYBRID TAB ---
-    const hybridRecs: Recommendation[] = availableHeroes
-        .map(h => {
-            const anaScore = analystScores[h.id]?.score || 0
-            const stats = h.hero_stats[0]
-            const histScore = stats.win_rate / 10 // Normalize roughly
-
-            return {
-                hero: h,
-                score: anaScore + histScore,
-                reason: 'Combined Analysis',
-                type: 'hybrid' as const
-            }
-        })
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 5)
-
-    // --- SMART BAN LOGIC ---
-    const smartBanScores: Record<string, { score: number, reasons: string[] }> = {}
-
-    // 1. Analyze Enemy Needs
-    const enemyHeroes = heroes.filter(h => enemyHeroIds.includes(h.id))
-    const enemyRolesFilled = new Set<string>()
-    enemyHeroes.forEach(h => {
-        h.main_position.forEach((p: string) => enemyRolesFilled.add(p))
-    })
-
-    // Standard Roles to check
-    const roles = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
-    const missingRoles = roles.filter(r => !enemyRolesFilled.has(r))
-
-    // 2. Score Candidates
     availableHeroes.forEach(h => {
         let score = h.hero_stats[0].win_rate
         const reasons: string[] = []
 
-        // A. Does it fill an enemy missing role?
-        const fillsNeed = h.main_position.some((p: string) => missingRoles.includes(p))
-        if (fillsNeed) {
-            score += 15
-            reasons.push(`Enemy needs ${h.main_position.find((p: string) => missingRoles.includes(p))}`)
+        // 1. Key Player Analysis (Phase 1)
+        if (enemyKeyPlayerIds.has(h.id)) {
+            // If this hero IS an enemy key player, and we can pick it -> Deny pick!
+            score += 25
+            reasons.push('Deny Enemy Key Player')
         }
 
-        // B. Does it counter us? (Using Matchups data we fetched earlier)
-        // We need matchups where opponent is US and hero is THEM. 
-        // NOTE: The previous fetch was 'opponent_id' IN enemyHeroIds (Heroes good AGAINST enemy).
-        // We need 'opponent_id' IN allyHeroIds (Heroes good AGAINST US).
-        // For efficiency, we'll likely need another fetch or just reuse general winrate for now.
-        // Let's stick to what we have or do a small extra fetch if critical? 
-        // For now, let's use the 'Analyst' scores which show what is good for US. 
-        // A Smart Ban is banning what is BAD for us (i.e. good for enemy).
+        // 2. Counter Logic (Draft to win vs Enemy)
+        const myMatchups = goodMatchups.filter(m => m.hero_id === h.id)
+        myMatchups.forEach(m => {
+            const winDiff = m.win_rate - 50
+            score += winDiff
+            reasons.push(`Counters ${heroes.find(eh => eh.id === m.enemy_hero_id)?.name}`)
+        })
 
-        // C. Denial (Global Ban)
-        if (allyGlobalBans.includes(h.id)) {
-            score += 10
-            reasons.push("Deny Pick (Global Banned for us)")
-        }
+        // 3. Synergy Logic
+        const myCombos = combos?.filter(c => c.hero_b_id === h.id)
+        myCombos?.forEach(c => {
+            score += (c.synergy_score / 5)
+            reasons.push(`Synergy with ${heroes.find(ah => ah.id === c.hero_a_id)?.name}`)
+        })
 
-        smartBanScores[h.id] = { score, reasons }
+        // 4. Position Logic (Simple check if role needed)
+        const allyHeroes = heroes.filter(ah => allyHeroIds.includes(ah.id))
+        const allyRoles = new Set<string>()
+        allyHeroes.forEach(ah => ah.main_position.forEach((p: string) => allyRoles.add(p)))
+        // If this hero fills a missing role, boost slightly
+        // (This is complex because flex picks exist, simplified here)
+
+        analystScores[h.id] = { score, reasons }
     })
 
-    // Fetch specific counters to US (Heroes that beat Ally Picks)
-    if (allyHeroIds.length > 0) {
-        const { data: threatMatchups } = await supabase
-            .from('matchups')
-            .select('*')
-            .eq('version_id', versionId)
-            .in('opponent_id', allyHeroIds)
-            .gt('win_rate', 50)
 
-        threatMatchups?.forEach(m => {
-            if (!smartBanScores[m.hero_id]) smartBanScores[m.hero_id] = { score: 0, reasons: [] }
-            smartBanScores[m.hero_id].score += ((m.win_rate - 50)) // Add raw winrate diff
-            smartBanScores[m.hero_id].reasons.push(`Counters our composition`)
-        })
-    }
+    // --- COMPILE RESULTS ---
 
-    const smartBanRecs: Recommendation[] = availableHeroes
+    let smartBanRecs = availableHeroes
         .map(h => ({
             hero: h,
             score: smartBanScores[h.id]?.score || 0,
-            reason: smartBanScores[h.id]?.reasons.join(', ') || 'Metagame Ban',
+            reason: smartBanScores[h.id]?.reasons.join(', ') || 'Meta Ban',
             type: 'counter' as const
         }))
-        .filter(r => r.score > 50) // Threshold
+        .filter(r => r.score > 20 || r.reason.includes('Meta') || r.reason.includes('Deny')) // Relaxed threshold
         .sort((a, b) => b.score - a.score)
-        .slice(0, 5)
+        .slice(0, 6)
+
+    // Fallback: If no specific smart bans, just suggest high tier/winrate
+    if (smartBanRecs.length === 0) {
+        smartBanRecs = availableHeroes
+            .sort((a, b) => b.hero_stats[0].win_rate - a.hero_stats[0].win_rate)
+            .slice(0, 5)
+            .map(h => ({
+                hero: h,
+                score: h.hero_stats[0].win_rate,
+                reason: `High Win Rate (${h.hero_stats[0].win_rate}%)`,
+                type: 'counter'
+            }))
+    }
+
+    const analystRecs = availableHeroes
+        .map(h => ({
+            hero: h,
+            score: analystScores[h.id]?.score || 0,
+            reason: analystScores[h.id]?.reasons.join(', ') || 'Solid Pick',
+            type: 'hybrid' as const
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 6)
+
+    // History (Trends) - Keep simple
+    const historyRecs = availableHeroes
+        .map(h => ({
+            hero: h,
+            score: h.hero_stats[0].win_rate,
+            reason: `${h.hero_stats[0].win_rate}% WR`,
+            type: 'history' as const
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 6)
 
     return {
         analyst: analystRecs,
         history: historyRecs,
-        hybrid: hybridRecs,
-        smartBan: smartBanRecs
+        smartBan: smartBanRecs,
+        hybrid: analystRecs,
+        warning: warningMessage
     }
 }

@@ -7,10 +7,9 @@ import { getRecommendations } from '../recommendations'
 import { getHeroesByVersion } from '../../heroes/actions'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { Pause, Play, Check } from 'lucide-react'
+import { Pause, Play, Check, Brain, ChevronUp, ChevronDown } from 'lucide-react'
 import Image from 'next/image'
 import PostDraftResult from '@/components/draft/PostDraftResult' // Updated import
 
@@ -23,8 +22,8 @@ interface DraftInterfaceProps {
 export default function DraftInterface({ match, game, initialHeroes }: DraftInterfaceProps) {
     const { state, currentStep, lockIn, togglePause } = useDraftEngine({ initialPicks: game.picks })
     const [selectedHero, setSelectedHero] = useState<Hero | null>(null)
-    const [recommendations, setRecommendations] = useState<any>({ analyst: [], history: [], hybrid: [] })
-    const [activeTab, setActiveTab] = useState('analyst')
+    const [recommendations, setRecommendations] = useState<any>({ analyst: [], history: [], hybrid: [], smartBan: [] })
+    const [isAiOpen, setIsAiOpen] = useState(true)
 
     // Navigate to next game logic
     const games = match.games || []
@@ -44,8 +43,16 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
         const allyPicks = currentStep.side === 'BLUE' ? Object.values(state.bluePicks) : Object.values(state.redPicks)
         const enemyPicks = currentStep.side === 'BLUE' ? Object.values(state.redPicks) : Object.values(state.bluePicks)
 
-        getRecommendations(match.version_id, allyPicks, enemyPicks, bannedIds)
+        const currentPhase = currentStep?.type === 'BAN' ? 'BAN' : 'PICK'
+        const context = {
+            matchId: match.id,
+            phase: currentPhase,
+            side: currentStep?.side
+        }
+
+        getRecommendations(match.version_id, allyPicks, enemyPicks, bannedIds, [], context)
             .then(setRecommendations)
+
     }, [state.stepIndex])
 
     const handleHeroClick = (hero: Hero) => {
@@ -84,6 +91,8 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                     winPrediction: game.analysis_data?.winPrediction?.blue || 50,
                     notes: game.analysis_data?.notes
                 }}
+                seriesScore={{ blue: 0, red: 0 }} // TODO: Calculate actual score
+                matchMode={match.mode}
             />
         )
     }
@@ -197,50 +206,68 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                 </div>
 
                 {/* Recommendation Panel */}
-                <div className="h-64 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col">
-                    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-                        <div className="bg-slate-950 px-4 py-2 border-b border-slate-800">
-                            <TabsList className="bg-transparent h-auto p-0 gap-4">
-                                <TabsTrigger value="analyst" className="data-[state=active]:bg-transparent data-[state=active]:text-indigo-400 data-[state=active]:border-b-2 border-indigo-400 rounded-none pb-2">
-                                    Analyst (Data)
-                                </TabsTrigger>
-                                <TabsTrigger value="history" className="data-[state=active]:bg-transparent data-[state=active]:text-indigo-400 data-[state=active]:border-b-2 border-indigo-400 rounded-none pb-2">
-                                    History (Trends)
-                                </TabsTrigger>
-                                <TabsTrigger value="hybrid" className="data-[state=active]:bg-transparent data-[state=active]:text-purple-400 data-[state=active]:border-b-2 border-purple-400 rounded-none pb-2">
-                                    AI Hybrid
-                                </TabsTrigger>
-                            </TabsList>
+                {/* Recommendation Panel: Cerebro AI */}
+                {/* Recommendation Panel: Cerebro AI */}
+                <div className={`bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col transition-all duration-300 ${isAiOpen ? 'h-64' : 'h-12'}`}>
+                    <div
+                        className="bg-slate-950 px-4 py-3 border-b border-slate-800 flex items-center justify-between cursor-pointer hover:bg-slate-900/80 transition-colors"
+                        onClick={() => setIsAiOpen(!isAiOpen)}
+                    >
+                        <div className="flex items-center gap-2">
+                            <Brain className={`w-5 h-5 text-indigo-400 ${isAiOpen ? 'animate-pulse' : ''}`} />
+                            <h3 className="font-bold text-indigo-100 tracking-wider">CEREBRO AI</h3>
+                            <span className="text-xs text-slate-500 ml-2 font-mono">{currentStep?.type === 'BAN' ? '[BAN PROTOCOL]' : '[PICK ANALYSIS]'}</span>
                         </div>
+                        <div className="flex items-center gap-3">
+                            <Badge variant="outline" className="bg-slate-900 border-slate-700 text-slate-400">
+                                {isAiOpen ? (currentStep?.type === 'BAN' ? '🛡️ Smart Ban' : '⚡ Smart Pick') : 'Minimize'}
+                            </Badge>
+                            {isAiOpen ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronUp className="w-4 h-4 text-slate-500" />}
+                        </div>
+                    </div>
 
-                        <div className="flex-1 p-4 bg-slate-900/50">
-                            {['analyst', 'history', 'hybrid'].map(tab => (
-                                <TabsContent key={tab} value={tab} className="mt-0 h-full">
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        {recommendations[tab]?.length > 0 ? recommendations[tab].slice(0, 3).map((rec: any) => (
-                                            <div key={rec.hero.id}
-                                                onClick={() => handleHeroClick(rec.hero)}
-                                                className="bg-slate-800 p-3 rounded-lg flex items-center gap-3 hover:bg-slate-700 cursor-pointer transition-colors border border-slate-700 hover:border-indigo-500/50"
-                                            >
-                                                <Image src={rec.hero.icon_url} alt={rec.hero.name} width={40} height={40} className="rounded" />
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center justify-between">
-                                                        <span className="font-bold text-sm truncate">{rec.hero.name}</span>
-                                                        <Badge variant="secondary" className="text-[10px] h-4 px-1">{rec.score.toFixed(1)}</Badge>
-                                                    </div>
-                                                    <p className="text-xs text-slate-400 truncate">{rec.reason}</p>
-                                                </div>
-                                            </div>
-                                        )) : (
-                                            <div className="col-span-3 text-center text-slate-500 py-8">
-                                                Waiting for draft to progress for recommendations...
-                                            </div>
-                                        )}
+                    <div className="flex-1 p-4 bg-slate-900/50 overflow-y-auto">
+                        {(() => {
+                            const activeRecs = currentStep?.type === 'BAN'
+                                ? recommendations.smartBan
+                                : recommendations.hybrid;
+
+                            if (!activeRecs || activeRecs.length === 0) {
+                                return (
+                                    <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
+                                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500/30"></div>
+                                        <span className="text-xs">Analyzing Draft Context...</span>
                                     </div>
-                                </TabsContent>
-                            ))}
-                        </div>
-                    </Tabs>
+                                )
+                            }
+
+                            return (
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    {activeRecs.slice(0, 6).map((rec: any) => (
+                                        <div key={rec.hero.id}
+                                            onClick={() => handleHeroClick(rec.hero)}
+                                            className="bg-slate-800 p-3 rounded-lg flex items-center gap-3 hover:bg-slate-700 cursor-pointer transition-colors border border-slate-700 hover:border-indigo-500/50 group"
+                                        >
+                                            <div className="relative w-10 h-10 rounded overflow-hidden border border-slate-600 group-hover:border-indigo-400 transition-colors">
+                                                <Image src={rec.hero.icon_url} alt={rec.hero.name} fill className="object-cover" />
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="font-bold text-sm truncate text-slate-200 group-hover:text-white">{rec.hero.name}</span>
+                                                    <Badge variant="secondary" className={`text-[10px] h-4 px-1 ${rec.score > 30 ? 'bg-green-900/50 text-green-400' : 'bg-slate-700 text-slate-300'}`}>
+                                                        {rec.score.toFixed(0)}
+                                                    </Badge>
+                                                </div>
+                                                <p className="text-xs text-slate-400 truncate group-hover:text-indigo-300 transition-colors">
+                                                    {rec.reason}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )
+                        })()}
+                    </div>
                 </div>
             </div>
 

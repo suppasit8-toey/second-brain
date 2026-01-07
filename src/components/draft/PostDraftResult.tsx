@@ -9,7 +9,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Label } from '@/components/ui/label'
 import Image from 'next/image'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Save, Trophy, AlertTriangle } from 'lucide-react'
+import { Loader2, Save, Trophy, AlertTriangle, CheckCircle, ArrowRight } from 'lucide-react'
 import { finishGame } from '@/app/actions/draftActions'
 import { useRouter } from 'next/navigation'
 
@@ -32,6 +32,8 @@ interface PostDraftResultProps {
         winPrediction?: number;
         notes?: string;
     }
+    seriesScore: { blue: number, red: number };
+    matchMode: string;
 }
 
 export default function PostDraftResult({
@@ -46,7 +48,9 @@ export default function PostDraftResult({
     nextGameId,
     matchId,
     manualLanes = {},
-    initialData
+    initialData,
+    seriesScore = { blue: 0, red: 0 },
+    matchMode
 }: PostDraftResultProps) {
     const router = useRouter()
     const [assignments, setAssignments] = useState<Record<string, string>>(manualLanes)
@@ -70,8 +74,12 @@ export default function PostDraftResult({
             // Only auto-assign if NOT manually set during draft
             if (!newAssignments[id]) {
                 const h = getHero(id)
-                if (h && h.main_position && h.main_position.length === 1) {
-                    newAssignments[id] = h.main_position[0]
+                // Filter main_position to find one that matches valid POSITIONS
+                // This prevents assigning "Mage" or "Marksman" if they are not in POSITIONS
+                const validRole = h?.main_position?.find(p => (POSITIONS as readonly string[]).includes(p))
+
+                if (validRole) {
+                    newAssignments[id] = validRole
                 }
             }
         })
@@ -93,12 +101,18 @@ export default function PostDraftResult({
         return roles.length !== uniqueRoles.size
     }
 
+    const [showSuccess, setShowSuccess] = useState(false)
+
+    // ... existing helper ...
+
+    // ... existing logic ...
+
     const handleSubmit = async () => {
+        // ... (validation) ...
         if (!winner || !blueKeyPlayer || !redKeyPlayer) {
             alert("Please select a Winner and Key Players for BOTH teams.")
             return
         }
-
         const blueIds = Object.values(bluePicks)
         const redIds = Object.values(redPicks)
 
@@ -149,7 +163,8 @@ export default function PostDraftResult({
 
         if (res.success) {
             router.refresh()
-            // Optional: Show success toast
+            setShowSuccess(true)
+            setSubmitting(false)
         } else {
             alert("Error saving: " + res.message)
             setSubmitting(false)
@@ -189,7 +204,7 @@ export default function PostDraftResult({
                                             {POSITIONS.map(p => {
                                                 const isTaken = usedRoles.includes(p) && currentRole !== p
                                                 return (
-                                                    <SelectItem key={p} value={p} disabled={isTaken} className={isTaken ? 'opacity-50' : ''}>
+                                                    <SelectItem key={p} value={p} className={isTaken ? 'text-yellow-500' : ''}>
                                                         {p} {isTaken && '(Taken)'}
                                                     </SelectItem>
                                                 )
@@ -339,10 +354,66 @@ export default function PostDraftResult({
                                 </RadioGroup>
                             </div>
 
-                            <Button size="lg" className="w-full h-16 text-xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 shadow-lg shadow-green-900/20" onClick={handleSubmit} disabled={submitting}>
-                                {submitting ? <Loader2 className="w-6 h-6 animate-spin mr-2" /> : <Save className="w-6 h-6 mr-2" />}
-                                SAVE RESULT
-                            </Button>
+                            {showSuccess ? (
+                                <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                    <div className="bg-green-500/20 border border-green-500/50 rounded-xl p-4 flex items-center justify-center gap-3 text-green-400">
+                                        <CheckCircle className="w-6 h-6" />
+                                        <span className="font-bold text-lg">Result Saved Successfully!</span>
+                                    </div>
+                                    <Button
+                                        size="lg"
+                                        className="w-full h-16 text-xl font-bold bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-900/20"
+                                        onClick={() => {
+                                            if (matchId) {
+                                                const matchThresholds: Record<string, number> = { 'BO1': 1, 'BO3': 2, 'BO5': 3, 'BO7': 4 };
+                                                const threshold = matchThresholds[matchMode] || 1;
+
+                                                let isFinished = false
+                                                if (matchMode === 'BO2') {
+                                                    // This is tricky without game count. But typically if nextGameId is missing it might mean end.
+                                                    // Let's rely on checking if this was the last game?
+                                                    // Actually, we can check specific BO2 rule: if seriesScore + this game = 2 games played.
+                                                    // seriesScore.blue + seriesScore.red = games played BEFORE this one.
+                                                    // So total games = (blue + red) + 1. If == 2, then finished.
+                                                    if ((seriesScore.blue + seriesScore.red + 1) >= 2) isFinished = true
+                                                } else {
+                                                    const newBlueScore = seriesScore.blue + (winner === 'Blue' ? 1 : 0)
+                                                    const newRedScore = seriesScore.red + (winner === 'Red' ? 1 : 0)
+                                                    if (newBlueScore >= threshold || newRedScore >= threshold) isFinished = true
+                                                }
+
+                                                if (isFinished) {
+                                                    router.push(`/admin/simulator/${matchId}?game=summary`)
+                                                } else {
+                                                    router.push(`/admin/simulator/${matchId}${nextGameId ? `?game=${nextGameId}` : ''}`)
+                                                }
+                                            }
+                                        }}
+                                    >
+                                        {((matchMode === 'BO2' && (seriesScore.blue + seriesScore.red + 1) >= 2) ||
+                                            (matchMode !== 'BO2' && (
+                                                (seriesScore.blue + (winner === 'Blue' ? 1 : 0)) >= (({ 'BO1': 1, 'BO3': 2, 'BO5': 3, 'BO7': 4 } as Record<string, number>)[matchMode] || 1) ||
+                                                (seriesScore.red + (winner === 'Red' ? 1 : 0)) >= (({ 'BO1': 1, 'BO3': 2, 'BO5': 3, 'BO7': 4 } as Record<string, number>)[matchMode] || 1)
+                                            )))
+                                            ? "VIEW MATCH SUMMARY"
+                                            : "GO TO NEXT GAME"
+                                        }
+                                        {((matchMode === 'BO2' && (seriesScore.blue + seriesScore.red + 1) >= 2) ||
+                                            (matchMode !== 'BO2' && (
+                                                (seriesScore.blue + (winner === 'Blue' ? 1 : 0)) >= (({ 'BO1': 1, 'BO3': 2, 'BO5': 3, 'BO7': 4 } as Record<string, number>)[matchMode] || 1) ||
+                                                (seriesScore.red + (winner === 'Red' ? 1 : 0)) >= (({ 'BO1': 1, 'BO3': 2, 'BO5': 3, 'BO7': 4 } as Record<string, number>)[matchMode] || 1)
+                                            )))
+                                            ? <Trophy className="w-6 h-6 ml-2 text-yellow-500" />
+                                            : <ArrowRight className="w-6 h-6 ml-2" />
+                                        }
+                                    </Button>
+                                </div>
+                            ) : (
+                                <Button size="lg" className="w-full h-16 text-xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 shadow-lg shadow-green-900/20" onClick={handleSubmit} disabled={submitting}>
+                                    {submitting ? <Loader2 className="w-6 h-6 animate-spin mr-2" /> : <Save className="w-6 h-6 mr-2" />}
+                                    {initialData ? "UPDATE RESULT" : "SAVE RESULT"}
+                                </Button>
+                            )}
                         </div>
                     </CardContent>
                 </Card>

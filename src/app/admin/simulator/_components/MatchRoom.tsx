@@ -5,9 +5,12 @@ import { DraftMatch, DraftGame, Hero } from '@/utils/types'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import DraftInterface from './DraftInterface'
 import NewGameButton from '../../draft/_components/NewGameButton'
+import MatchSummary from './MatchSummary'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
-import { Lock } from 'lucide-react'
+import Link from 'next/link'
+import { Lock, Trophy, ArrowLeft } from 'lucide-react'
 
 // Reuse types or ensure they are compatible
 interface MatchRoomProps {
@@ -41,13 +44,34 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
 
     // 3. Tab Logic
     const gameIdParam = searchParams.get('game')
+
+    // Determine Winner / Series End
+    // BO1: 1 win
+    // BO3: 2 wins
+    // BO5: 3 wins
+    // BO7: 4 wins
+    // BO2: Play ALL 2 games (Draw possible)
+    let winningThreshold = 1
+    if (match.mode === 'BO3') winningThreshold = 2
+    if (match.mode === 'BO5') winningThreshold = 3
+    if (match.mode === 'BO7') winningThreshold = 4
+
+    const isMatchFinished =
+        (match.mode === 'BO2' && games.filter(g => g.winner).length === 2) ||
+        (teamAScore >= winningThreshold) ||
+        (teamBScore >= winningThreshold)
+
     const latestGameId = games.length > 0 ? games[games.length - 1].id : (games.length === 0 ? 'new-1' : `new-${games.length + 1}`)
 
     const resolveInitialTab = () => {
         if (gameIdParam) {
             if (games.some(g => g.id === gameIdParam)) return gameIdParam
             if (gameIdParam.startsWith('new-')) return gameIdParam
+            if (gameIdParam === 'summary' && isMatchFinished) return 'summary'
         }
+        // If match is finished and no specific game selected, go to summary
+        if (isMatchFinished) return 'summary'
+
         return latestGameId
     }
 
@@ -121,6 +145,14 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                 </div>
 
                 <div className="flex items-center gap-4">
+                    {/* Back to Lobby Button */}
+                    <Link href="/admin/simulator">
+                        <Button size="sm" variant="ghost" className="text-slate-400 hover:text-white">
+                            <ArrowLeft className="w-4 h-4 mr-2" />
+                            Back to Lobby
+                        </Button>
+                    </Link>
+
                     <Badge variant="outline" className="h-8 px-3 border-indigo-500/30 text-indigo-300 bg-indigo-500/10">
                         Patch {match.version?.name}
                     </Badge>
@@ -133,8 +165,16 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                     <div className="shrink-0 px-6 py-2 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2 overflow-x-auto">
                         <TabsList className="bg-slate-800 text-slate-400 h-10 p-1">
                             {seriesArray.map((num) => {
+                                // If match is already finished, do we show future unplayed games?
+                                // e.g. BO5 finished 3-0. Should we show Game 4/5?
+                                // User flow: Just show Summary.
+                                // Logic: If game is created OR it's the immediate next game AND match not finished
                                 const game = games.find(g => g.game_number === num)
                                 const isCreated = !!game
+
+                                // Hiding unplayed games if match finished
+                                if (!isCreated && isMatchFinished) return null
+
                                 const prevGame = games.find(g => g.game_number === num - 1)
                                 const isLocked = !isCreated && (num > 1 && (!prevGame || !prevGame.winner))
 
@@ -152,6 +192,14 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                                     </TabsTrigger>
                                 )
                             })}
+
+                            {/* Summary Tab - Only if finished */}
+                            {isMatchFinished && (
+                                <TabsTrigger value="summary" className="data-[state=active]:bg-yellow-600 data-[state=active]:text-white px-4">
+                                    <Trophy className="w-3 h-3 mr-2" />
+                                    Summary
+                                </TabsTrigger>
+                            )}
                         </TabsList>
                     </div>
 
@@ -159,6 +207,9 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                         {seriesArray.map((num) => {
                             const game = games.find(g => g.game_number === num)
                             const isCreated = !!game
+
+                            if (!isCreated && isMatchFinished) return null
+
                             const value = isCreated ? game.id : `new-${num}`
 
                             const prevGame = games.find(g => g.game_number === num - 1)
@@ -196,6 +247,12 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                                 </TabsContent>
                             )
                         })}
+
+                        {isMatchFinished && (
+                            <TabsContent value="summary" className="absolute inset-0 m-0 data-[state=active]:flex flex-col p-0 bg-slate-950">
+                                <MatchSummary match={match} games={games} heroes={heroes} />
+                            </TabsContent>
+                        )}
                     </div>
                 </Tabs>
             </div>
