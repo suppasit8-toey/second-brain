@@ -121,3 +121,20 @@ export async function getGame(gameId: string) {
 
     return data
 }
+
+export async function deleteMatch(matchId: string) {
+    const supabase = await createClient()
+
+    const { error } = await supabase
+        .from('draft_matches')
+        .delete()
+        .eq('id', matchId)
+
+    if (error) {
+        console.error('Error deleting match:', error)
+        return { success: false, message: error.message }
+    }
+
+    revalidatePath('/admin/simulator')
+    return { success: true, message: 'Match deleted successfully' }
+}
