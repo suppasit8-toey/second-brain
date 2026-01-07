@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useActionState } from 'react'
 import { useFormStatus } from 'react-dom'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -24,12 +24,20 @@ function SubmitButton() {
     )
 }
 
+const initialState = {
+    message: '',
+    success: false,
+    matchId: undefined
+}
+
 export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
     const [open, setOpen] = useState(false)
     const router = useRouter()
 
     // Setup initial version if available
     const activeVersion = versions.find(v => v.is_active) || versions[0]
+    const [selectedVersion, setSelectedVersion] = useState(activeVersion?.id.toString())
+    const [selectedMode, setSelectedMode] = useState("BO5")
 
     async function action(prevState: any, formData: FormData) {
         const result = await createMatch(prevState, formData)
@@ -40,9 +48,7 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
         return result
     }
 
-    // Since we are using useFormState in a more complex setup often, 
-    // but for simplicity with the action import directly:
-    // We'll wrap the form submission to handle the client-side redirect after server action.
+    const [state, formAction] = useActionState(action, initialState)
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
@@ -56,10 +62,10 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
                     <DialogTitle className="text-xl font-bold">Setup New Match</DialogTitle>
                 </DialogHeader>
 
-                <form action={action} className="grid gap-4 py-4">
+                <form action={formAction} className="grid gap-4 py-4">
                     <div className="grid gap-2">
                         <Label htmlFor="version">Patch Version</Label>
-                        <Select name="version_id" defaultValue={activeVersion?.id.toString()}>
+                        <Select value={selectedVersion} onValueChange={setSelectedVersion}>
                             <SelectTrigger className="bg-slate-800 border-slate-700">
                                 <SelectValue placeholder="Select Version" />
                             </SelectTrigger>
@@ -71,6 +77,7 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
                                 ))}
                             </SelectContent>
                         </Select>
+                        <input type="hidden" name="version_id" value={selectedVersion} />
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
@@ -98,7 +105,7 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
 
                     <div className="grid gap-2">
                         <Label htmlFor="mode">Mode</Label>
-                        <Select name="mode" defaultValue="BO5">
+                        <Select value={selectedMode} onValueChange={setSelectedMode}>
                             <SelectTrigger className="bg-slate-800 border-slate-700">
                                 <SelectValue placeholder="Select Series Type" />
                             </SelectTrigger>
@@ -110,11 +117,15 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
                                 <SelectItem value="BO7">Best of 7</SelectItem>
                             </SelectContent>
                         </Select>
+                        <input type="hidden" name="mode" value={selectedMode} />
                     </div>
 
                     <div className="pt-4">
                         <SubmitButton />
                     </div>
+                    {state.message && (
+                        <div className="text-red-500 text-sm">{state.message}</div>
+                    )}
                 </form>
             </DialogContent>
         </Dialog>

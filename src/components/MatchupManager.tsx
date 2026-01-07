@@ -4,7 +4,7 @@ import { useState, useEffect, useTransition } from 'react'
 import { Version, Hero, POSITIONS } from '@/utils/types'
 import { getHeroesByVersion } from '@/app/admin/heroes/actions'
 import { saveMatchups, getMatchups } from '@/app/admin/matchups/actions'
-import { Plus, Search, Shield, Sword, Save, X, Trash2, Filter, AlertCircle, Pencil, ChevronDown, Check, CheckCircle2, Minus } from 'lucide-react'
+import { Plus, Search, Save, X, Filter, AlertCircle, Pencil, ChevronDown, Check, Minus } from 'lucide-react'
 import Image from 'next/image'
 
 interface MatchupManagerProps {
@@ -523,8 +523,8 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
                                             className="dark-input w-full"
                                         >
                                             {POSITIONS.map(p => (
-                                                <option key={p} value={p === 'Abyssal Dragon' ? 'Abyssal' : p}>
-                                                    {p === 'Abyssal Dragon' ? 'Abyssal' : p}
+                                                <option key={p} value={p}>
+                                                    {p}
                                                 </option>
                                             ))}
                                         </select>
