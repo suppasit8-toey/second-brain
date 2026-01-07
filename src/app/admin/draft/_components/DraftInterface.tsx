@@ -21,10 +21,16 @@ interface DraftInterfaceProps {
 }
 
 export default function DraftInterface({ match, game, initialHeroes }: DraftInterfaceProps) {
-    const { state, currentStep, lockIn, togglePause } = useDraftEngine()
+    const { state, currentStep, lockIn, togglePause } = useDraftEngine({ initialPicks: game.picks })
     const [selectedHero, setSelectedHero] = useState<Hero | null>(null)
     const [recommendations, setRecommendations] = useState<any>({ analyst: [], history: [], hybrid: [] })
     const [activeTab, setActiveTab] = useState('analyst')
+
+    // Navigate to next game logic
+    const games = match.games || []
+    const sortedGames = [...games].sort((a: any, b: any) => a.game_number - b.game_number)
+    const currentIndex = sortedGames.findIndex(g => g.id === game.id)
+    const nextGame = sortedGames[currentIndex + 1]
 
     // Derived Lists for filtering
     const bannedIds = [...state.blueBans, ...state.redBans]
@@ -69,6 +75,15 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                 blueBans={state.blueBans}
                 redBans={state.redBans}
                 heroes={initialHeroes}
+                nextGameId={nextGame?.id}
+                matchId={match.slug || match.id}
+                initialData={{
+                    winner: game.winner || null,
+                    blueKeyPlayer: game.blue_key_player_id,
+                    redKeyPlayer: game.red_key_player_id,
+                    winPrediction: game.analysis_data?.winPrediction?.blue || 50,
+                    notes: game.analysis_data?.notes
+                }}
             />
         )
     }

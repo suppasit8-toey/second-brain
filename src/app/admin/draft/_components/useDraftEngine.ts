@@ -14,18 +14,67 @@ export interface DraftState {
     history: any[]; // Undo stack
 }
 
-export function useDraftEngine() {
-    const [state, setState] = useState<DraftState>({
-        stepIndex: 0,
-        bluePicks: {},
-        redPicks: {},
-        blueBans: [],
-        redBans: [],
-        timer: PHASE_TIMERS.BAN,
-        isPaused: true, // Start paused
-        isFinished: false,
-        history: []
-    })
+interface UseDraftEngineProps {
+    initialPicks?: any[]; // From DB
+}
+
+export function useDraftEngine({ initialPicks = [] }: UseDraftEngineProps = {}) {
+    const initializeState = (): DraftState => {
+        // Default State
+        const defaults: DraftState = {
+            stepIndex: 0,
+            bluePicks: {},
+            redPicks: {},
+            blueBans: [],
+            redBans: [],
+            timer: PHASE_TIMERS.BAN,
+            isPaused: true,
+            isFinished: false,
+            history: []
+        }
+
+        if (!initialPicks || initialPicks.length === 0) return defaults
+
+        // Rehydrate State
+        const newState = { ...defaults }
+
+        initialPicks.forEach(p => {
+            if (p.type === 'BAN') {
+                if (p.side === 'BLUE') newState.blueBans.push(p.hero_id)
+                else newState.redBans.push(p.hero_id)
+            } else if (p.type === 'PICK') {
+                // position_index is 1-based usually, but let's check how we stored it.
+                // In generic logic, we used Object.keys length.
+                // We should map strictly if possible, or just push.
+                // Our generic engine uses 0-4 index.
+                const idx = p.position_index - 1
+                if (p.side === 'BLUE') newState.bluePicks[idx] = p.hero_id
+                else newState.redPicks[idx] = p.hero_id
+            }
+        })
+
+        // Determine step index based on fills
+        // Simple way: count total actions
+        const totalActions = initialPicks.length
+        newState.stepIndex = totalActions
+
+        // If all done (approx 18 steps usually), set finished
+        if (totalActions >= DRAFT_SEQUENCE.length) {
+            newState.isFinished = true
+            newState.timer = 0
+            newState.isPaused = true
+        } else {
+            // If mid-game rehydration (refresh), stay paused
+            newState.isFinished = false
+            newState.timer = DRAFT_SEQUENCE[totalActions]?.type === 'BAN' ? PHASE_TIMERS.BAN : PHASE_TIMERS.PICK
+        }
+
+        return newState
+    }
+
+    const [state, setState] = useState<DraftState>(initializeState)
+
+    // ... rest of logic ...
 
     const currentStep: DraftStep | undefined = DRAFT_SEQUENCE[state.stepIndex]
 

@@ -183,7 +183,7 @@ export default function MatchList({ matches }: MatchListProps) {
                                         })}
                                     </span>
 
-                                    <Link href={`/admin/simulator/${match.id}`}>
+                                    <Link href={`/admin/simulator/${match.slug || match.id}`}>
                                         <Button size="sm" variant={match.status === 'ongoing' ? "default" : "outline"} className={match.status === 'ongoing' ? "bg-indigo-600 hover:bg-indigo-700" : "border-slate-700 hover:bg-slate-800"}>
                                             {match.status === 'ongoing' ? 'Enter Room' : 'View Summary'}
                                         </Button>

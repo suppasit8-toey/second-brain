@@ -1,11 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { DraftMatch, DraftGame, Hero } from '@/utils/types'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import NewGameModal from './NewGameModal'
 import DraftInterface from './DraftInterface'
+import NewGameButton from './NewGameButton'
 import { Badge } from '@/components/ui/badge'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
+import { Lock } from 'lucide-react'
 
 interface MatchRoomProps {
     match: DraftMatch;
@@ -14,29 +16,84 @@ interface MatchRoomProps {
 
 export default function MatchRoom({ match, heroes }: MatchRoomProps) {
     const games = match.games || []
-    const [activeTab, setActiveTab] = useState<string>(games.length > 0 ? games[games.length - 1].id : 'overview')
+    const searchParams = useSearchParams()
+    const router = useRouter()
+    const pathname = usePathname()
 
-    const nextGameNumber = games.length + 1
+    // 1. Determine Max Games based on Mode
+    const getMaxGames = (mode: string) => {
+        switch (mode) {
+            case 'BO1': return 1;
+            case 'BO2': return 2;
+            case 'BO3': return 3;
+            case 'BO5': return 5;
+            case 'BO7': return 7;
+            default: return 1;
+        }
+    }
+    const maxGames = getMaxGames(match.mode)
+    const seriesArray = Array.from({ length: maxGames }, (_, i) => i + 1)
+
+    // 2. Score Calculation
+    const teamAScore = games.filter(g => g.winner === 'Blue' && g.blue_team_name === match.team_a_name || g.winner === 'Red' && g.red_team_name === match.team_a_name).length
+    const teamBScore = games.filter(g => g.winner === 'Blue' && g.blue_team_name === match.team_b_name || g.winner === 'Red' && g.red_team_name === match.team_b_name).length
+
+    // 3. Tab Logic
+    const gameIdParam = searchParams.get('game')
+
+    // Default Tab: Latest Created Game or 'game-1' if none
+    const latestGameId = games.length > 0 ? games[games.length - 1].id : 'new-1'
+
+    // Resolve initial active tab
+    // If param exists and is valid (either a game ID or a placeholder 'new-X') -> use it
+    // Else -> use latestGameId
+    const resolveInitialTab = () => {
+        if (gameIdParam) {
+            // Check if it's an ID
+            if (games.some(g => g.id === gameIdParam)) return gameIdParam
+            // Check if it's a valid placeholder like "new-2"
+            if (gameIdParam.startsWith('new-')) return gameIdParam
+        }
+        return latestGameId
+    }
+
+    const [activeTab, setActiveTab] = useState<string>(resolveInitialTab())
+
+    const onTabChange = (val: string) => {
+        setActiveTab(val)
+        const params = new URLSearchParams(searchParams)
+        params.set('game', val)
+        router.replace(`${pathname}?${params.toString()}`)
+    }
+
+    // Effect: If a new game is created (games length increases), switch to it automatically?
+    // Handled by NewGameButton refresh usually, but let's keep state in sync if props update
+    useEffect(() => {
+        // Optional: Auto-select latest game if not viewing history?
+        // sticking to URL param priority
+    }, [games.length])
 
     return (
         <div className="flex flex-col h-[calc(100vh-6rem)]">
             {/* Match Header */}
             <div className="shrink-0 bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between">
                 <div className="flex items-center gap-8">
-                    <div className="text-right">
-                        <h2 className="text-2xl font-black text-white">{match.team_a_name}</h2>
+                    <div className="text-right w-48">
+                        <h2 className="text-2xl font-black text-white truncate">{match.team_a_name}</h2>
                         <p className="text-xs text-slate-500 uppercase tracking-wider">Team A</p>
                     </div>
 
-                    <div className="px-6 py-2 bg-slate-800 rounded-lg border border-slate-700 flex flex-col items-center">
-                        <span className="text-xs text-slate-500 font-mono mb-1">{match.mode}</span>
-                        <div className="text-3xl font-bold font-mono leading-none tracking-widest text-indigo-400">
-                            0 - 0
+                    <div className="px-8 py-3 bg-slate-800 rounded-xl border border-slate-700 flex flex-col items-center min-w-[120px]">
+                        <span className="text-xs text-slate-500 font-mono mb-1">{match.mode} Series</span>
+                        <div className="text-4xl font-bold font-mono leading-none tracking-widest text-white">
+                            <span className={teamAScore > teamBScore ? 'text-blue-400' : ''}>{teamAScore}</span>
+                            <span className="text-slate-600 mx-2">-</span>
+                            <span className={teamBScore > teamAScore ? 'text-red-400' : ''}>{teamBScore}</span>
                         </div>
                     </div>
 
-                    <div className="text-left">
-                        <h2 className="text-2xl font-black text-white">{match.team_b_name}</h2>
+                    <div className="text-left w-48">
+                        <h2 className="text-2xl font-black text-white truncate">{match.team_b_name}</h2>
                         <p className="text-xs text-slate-500 uppercase tracking-wider">Team B</p>
                     </div>
                 </div>
@@ -50,34 +107,68 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
 
             {/* Content Area */}
             <div className="flex-1 overflow-hidden flex flex-col">
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-                    <div className="shrink-0 px-6 py-2 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2">
-                        <TabsList className="bg-slate-800 text-slate-400">
-                            {games.map((game) => (
-                                <TabsTrigger key={game.id} value={game.id}>
-                                    Game {game.game_number}
-                                </TabsTrigger>
-                            ))}
-                        </TabsList>
+                <Tabs value={activeTab} onValueChange={onTabChange} className="flex-1 flex flex-col">
+                    <div className="shrink-0 px-6 py-2 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2 overflow-x-auto">
+                        <TabsList className="bg-slate-800 text-slate-400 h-10 p-1">
+                            {seriesArray.map((num) => {
+                                const game = games.find(g => g.game_number === num)
+                                const isCreated = !!game
+                                // Previous game must be finished to unlock this (if not created)
+                                const prevGame = games.find(g => g.game_number === num - 1)
+                                const isLocked = !isCreated && (num > 1 && (!prevGame || !prevGame.winner)) // Simple check: winner field implies finished? Or check status? 
+                                // Actually, draft_games table doesn't have 'status', but has 'winner' or 'picks'.
+                                // PostDraftResult saves winner. So if winner is set, game is done.
 
-                        <NewGameModal match={match} nextGameNumber={nextGameNumber} />
+                                const value = isCreated ? game.id : `new-${num}`
+
+                                return (
+                                    <TabsTrigger
+                                        key={num}
+                                        value={value}
+                                        disabled={isLocked}
+                                        className="data-[state=active]:bg-slate-700 data-[state=active]:text-white px-4"
+                                    >
+                                        {isLocked ? <Lock className="w-3 h-3 mr-2 opacity-50" /> : null}
+                                        Game {num}
+                                    </TabsTrigger>
+                                )
+                            })}
+                        </TabsList>
                     </div>
 
-                    {games.length === 0 && (
-                        <div className="flex-1 flex items-center justify-center p-12">
-                            <div className="text-center space-y-4 max-w-md">
-                                <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto text-3xl">🎮</div>
-                                <h3 className="text-xl font-bold text-white">Ready to Start?</h3>
-                                <p className="text-slate-400">The match lobby is set up. Click "Start Game 1" to begin the first draft phase.</p>
-                            </div>
-                        </div>
-                    )}
+                    <div className="flex-1 relative bg-slate-950">
+                        {seriesArray.map((num) => {
+                            const game = games.find(g => g.game_number === num)
+                            const isCreated = !!game
+                            const value = isCreated ? game.id : `new-${num}`
 
-                    {games.map((game) => (
-                        <TabsContent key={game.id} value={game.id} className="flex-1 p-0 m-0 data-[state=active]:flex flex-col">
-                            <DraftInterface match={match} game={game} initialHeroes={heroes} />
-                        </TabsContent>
-                    ))}
+                            // Check lock status for content rendering too (security)
+                            const prevGame = games.find(g => g.game_number === num - 1)
+                            const isLocked = !isCreated && (num > 1 && (!prevGame || !prevGame.winner))
+
+                            return (
+                                <TabsContent key={num} value={value} className="absolute inset-0 m-0 data-[state=active]:flex flex-col p-0">
+                                    {isCreated ? (
+                                        <DraftInterface match={match} game={game} initialHeroes={heroes} />
+                                    ) : (
+                                        <div className="flex-1 flex items-center justify-center p-12">
+                                            {isLocked ? (
+                                                <div className="text-center space-y-4 opacity-50">
+                                                    <Lock className="w-16 h-16 mx-auto text-slate-600" />
+                                                    <h3 className="text-xl font-bold text-slate-500">Game {num} Locked</h3>
+                                                    <p className="text-slate-600">Complete Game {num - 1} to unlock this round.</p>
+                                                </div>
+                                            ) : (
+                                                <div className="w-full max-w-md">
+                                                    <NewGameButton match={match} gameNumber={num} />
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </TabsContent>
+                            )
+                        })}
+                    </div>
                 </Tabs>
             </div>
         </div>

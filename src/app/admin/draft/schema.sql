@@ -7,6 +7,7 @@ create table draft_matches (
     mode text not null check (mode in ('BO1', 'BO2', 'BO3', 'BO5', 'BO7')),
     status text default 'ongoing' check (status in ('ongoing', 'finished')),
     winner text, -- 'Team A' or 'Team B'
+    slug text unique, -- URL-friendly ID e.g., 20240107-01
     created_at timestamp with time zone default now()
 );
 

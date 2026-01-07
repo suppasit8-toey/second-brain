@@ -43,6 +43,8 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
         const result = await createMatch(prevState, formData)
         if (result.success && result.matchId) {
             setOpen(false)
+            // Redirect to slug if available (matchId return from action already handles valid ID/Slug preference if updated)
+            // But draft/actions.ts returns matchId as slug || id.
             router.push(`/admin/draft/${result.matchId}`)
         }
         return result
@@ -101,6 +103,28 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
                                 required
                             />
                         </div>
+                    </div>
+
+                    {/* Quick Presets (Optional Helper) */}
+                    <div className="flex gap-2 justify-center">
+                        {['Bacon Time', 'Buriram United', 'Talon', 'Hydra', 'eArena', 'Full Sense', 'King of Gamers', 'PSG Esports'].map(team => (
+                            <button
+                                key={team}
+                                type="button"
+                                onClick={() => {
+                                    // Simple logic: Fill empty slot or rotate
+                                    const form = document.querySelector('form') as HTMLFormElement
+                                    const teamA = form.elements.namedItem('team_a_name') as HTMLInputElement
+                                    const teamB = form.elements.namedItem('team_b_name') as HTMLInputElement
+
+                                    if (!teamA.value) teamA.value = team;
+                                    else if (!teamB.value && teamA.value !== team) teamB.value = team;
+                                }}
+                                className="text-xs px-2 py-1 bg-slate-800 rounded border border-slate-700 hover:bg-slate-700 text-slate-400"
+                            >
+                                {team}
+                            </button>
+                        ))}
                     </div>
 
                     <div className="grid gap-2">

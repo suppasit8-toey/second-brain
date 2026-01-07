@@ -59,14 +59,28 @@ export async function getMatches() {
 export async function getMatch(matchId: string) {
     const supabase = await createClient()
 
-    const { data, error } = await supabase
+    // Build query
+    let query = supabase
         .from('draft_matches')
         .select(`
             *,
             version:versions(*),
-            games:draft_games(*)
+            games:draft_games(
+                *,
+                picks:draft_picks(*)
+            )
         `)
-        .eq('id', matchId)
+
+    // Check if matchId looks like a UUID
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(matchId)
+
+    if (isUUID) {
+        query = query.eq('id', matchId)
+    } else {
+        query = query.eq('slug', matchId)
+    }
+
+    const { data, error } = await query
         .single()
 
     if (error) {

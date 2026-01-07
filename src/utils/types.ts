@@ -80,6 +80,7 @@ export interface DraftMatch {
     mode: DraftMode;
     status: 'ongoing' | 'finished';
     winner?: 'Team A' | 'Team B';
+    slug?: string;
     created_at?: string;
 
     // Joins

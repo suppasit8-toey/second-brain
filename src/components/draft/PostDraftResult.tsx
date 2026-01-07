@@ -22,6 +22,16 @@ interface PostDraftResultProps {
     blueBans: string[];
     redBans: string[];
     heroes: Hero[];
+    nextGameId?: string;
+    matchId?: string;
+    manualLanes?: Record<string, string>;
+    initialData?: {
+        winner?: 'Blue' | 'Red' | null;
+        blueKeyPlayer?: string;
+        redKeyPlayer?: string;
+        winPrediction?: number;
+        notes?: string;
+    }
 }
 
 export default function PostDraftResult({
@@ -32,29 +42,37 @@ export default function PostDraftResult({
     redPicks,
     blueBans,
     redBans,
-    heroes
+    heroes,
+    nextGameId,
+    matchId,
+    manualLanes = {},
+    initialData
 }: PostDraftResultProps) {
     const router = useRouter()
-    const [assignments, setAssignments] = useState<Record<string, string>>({})
-    const [winner, setWinner] = useState<'Blue' | 'Red' | null>(null)
-    const [blueKeyPlayer, setBlueKeyPlayer] = useState<string>("")
-    const [redKeyPlayer, setRedKeyPlayer] = useState<string>("")
-    const [winPrediction, setWinPrediction] = useState<number>(50) // Blue Win %
-    const [notes, setNotes] = useState("")
+    const [assignments, setAssignments] = useState<Record<string, string>>(manualLanes)
+    // ... existing state ... 
+    const [winner, setWinner] = useState<'Blue' | 'Red' | null>(initialData?.winner || null)
+    const [blueKeyPlayer, setBlueKeyPlayer] = useState<string>(initialData?.blueKeyPlayer || "")
+    const [redKeyPlayer, setRedKeyPlayer] = useState<string>(initialData?.redKeyPlayer || "")
+    const [winPrediction, setWinPrediction] = useState<number>(initialData?.winPrediction || 50)
+    const [notes, setNotes] = useState(initialData?.notes || "")
     const [submitting, setSubmitting] = useState(false)
 
     // Helper: Get Hero
-    const getHero = (id: string) => heroes.find(h => h.id === id)
+    const getHero = (id: string | number) => heroes.find(h => String(h.id) === String(id))
 
     // 1. Auto-fill logic
     useEffect(() => {
-        const newAssignments: Record<string, string> = {}
+        const newAssignments: Record<string, string> = { ...assignments }
         const allPickIds = [...Object.values(bluePicks), ...Object.values(redPicks)]
 
         allPickIds.forEach(id => {
-            const h = getHero(id)
-            if (h && h.main_position && h.main_position.length === 1) {
-                newAssignments[id] = h.main_position[0]
+            // Only auto-assign if NOT manually set during draft
+            if (!newAssignments[id]) {
+                const h = getHero(id)
+                if (h && h.main_position && h.main_position.length === 1) {
+                    newAssignments[id] = h.main_position[0]
+                }
             }
         })
         setAssignments(newAssignments)
@@ -130,9 +148,8 @@ export default function PostDraftResult({
         })
 
         if (res.success) {
-            // Check if there's a next game or just reload
-            // For now, reload to show "Completed" state or redirect
-            window.location.reload()
+            router.refresh()
+            // Optional: Show success toast
         } else {
             alert("Error saving: " + res.message)
             setSubmitting(false)
@@ -209,21 +226,22 @@ export default function PostDraftResult({
                             {/* Win Prediction */}
                             <div>
                                 <div className="flex justify-between mb-2">
-                                    <Label className="text-base text-blue-400">Blue Win % prediction</Label>
-                                    <span className="text-xl font-bold">{winPrediction}%</span>
-                                    <Label className="text-base text-red-400">Red Win % prediction</Label>
+                                    <Label className="text-base text-blue-400">Blue Win %: {winPrediction}%</Label>
+                                    <Label className="text-base text-red-400">Red Win %: {100 - winPrediction}%</Label>
                                 </div>
                                 <input
                                     type="range"
                                     min="0" max="100"
                                     value={winPrediction}
                                     onChange={(e) => setWinPrediction(Number(e.target.value))}
-                                    className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                                    style={{
+                                        background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${winPrediction}%, #ef4444 ${winPrediction}%, #ef4444 100%)`
+                                    }}
+                                    className="w-full h-4 rounded-lg appearance-none cursor-pointer border border-slate-700 hover:opacity-90 transition-opacity"
                                 />
-                                <div className="flex justify-between text-xs text-slate-500 mt-1">
-                                    <span>Red Favored</span>
-                                    <span>Equal</span>
-                                    <span>Blue Favored</span>
+                                <div className="flex justify-between text-xs text-slate-500 mt-2 font-bold uppercase tracking-widest px-1">
+                                    <span className={winPrediction > 50 ? "text-blue-500 transition-colors" : "transition-colors"}>Blue Favored</span>
+                                    <span className={winPrediction < 50 ? "text-red-500 transition-colors" : "transition-colors"}>Red Favored</span>
                                 </div>
                             </div>
 
@@ -233,9 +251,9 @@ export default function PostDraftResult({
                                     <Label className="text-sm mb-2 block text-blue-400 font-bold uppercase">Blue Team Key Player</Label>
                                     <Select value={blueKeyPlayer} onValueChange={setBlueKeyPlayer}>
                                         <SelectTrigger className="bg-slate-900 border-blue-900/50 h-12">
-                                            <SelectValue placeholder="Select Blue MVP">
+                                            <span className={!blueKeyPlayer ? "text-slate-500" : ""}>
                                                 {blueKeyPlayer ? getHero(blueKeyPlayer)?.name : "Select Blue MVP"}
-                                            </SelectValue>
+                                            </span>
                                         </SelectTrigger>
                                         <SelectContent>
                                             {Object.values(bluePicks).map(id => {
@@ -254,9 +272,9 @@ export default function PostDraftResult({
                                     <Label className="text-sm mb-2 block text-red-400 font-bold uppercase">Red Team Key Player</Label>
                                     <Select value={redKeyPlayer} onValueChange={setRedKeyPlayer}>
                                         <SelectTrigger className="bg-slate-900 border-red-900/50 h-12">
-                                            <SelectValue placeholder="Select Red MVP">
+                                            <span className={!redKeyPlayer ? "text-slate-500" : ""}>
                                                 {redKeyPlayer ? getHero(redKeyPlayer)?.name : "Select Red MVP"}
-                                            </SelectValue>
+                                            </span>
                                         </SelectTrigger>
                                         <SelectContent>
                                             {Object.values(redPicks).map(id => {
@@ -323,12 +341,12 @@ export default function PostDraftResult({
 
                             <Button size="lg" className="w-full h-16 text-xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 shadow-lg shadow-green-900/20" onClick={handleSubmit} disabled={submitting}>
                                 {submitting ? <Loader2 className="w-6 h-6 animate-spin mr-2" /> : <Save className="w-6 h-6 mr-2" />}
-                                SAVE & NEXT GAME
+                                SAVE RESULT
                             </Button>
                         </div>
                     </CardContent>
                 </Card>
             </div>
-        </div>
+        </div >
     )
 }

@@ -51,25 +51,48 @@ export default function NewGameModal({ match, nextGameNumber }: NewGameModalProp
                     <div className="space-y-4">
                         <Label className="text-base">Select Blue Side (First Pick)</Label>
                         <RadioGroup value={blueSide} onValueChange={setBlueSide} className="grid grid-cols-2 gap-4">
+                            {/* Team A Card */}
                             <div>
                                 <RadioGroupItem value={match.team_a_name} id="team_a" className="peer sr-only" />
-                                <Label
-                                    htmlFor="team_a"
-                                    className="flex flex-col items-center justify-between rounded-md border-2 border-slate-700 bg-slate-800 p-4 hover:bg-slate-700 peer-data-[state=checked]:border-blue-500 peer-data-[state=checked]:text-blue-500 cursor-pointer transition-all"
-                                >
-                                    <span className="text-xl font-bold mb-1">{match.team_a_name}</span>
-                                    <span className="text-xs text-slate-400">Team A</span>
-                                </Label>
+                                {(() => {
+                                    const isBlue = blueSide === match.team_a_name;
+                                    const colorClass = isBlue
+                                        ? 'border-blue-500 text-blue-500 bg-blue-500/10'
+                                        : 'border-red-500 text-red-500 bg-red-500/10';
+                                    return (
+                                        <Label
+                                            htmlFor="team_a"
+                                            className={`flex flex-col items-center justify-between rounded-md border-2 p-4 cursor-pointer transition-all ${colorClass}`}
+                                        >
+                                            <span className="text-xl font-bold mb-1">{match.team_a_name}</span>
+                                            <span className={`text-xs ${isBlue ? 'text-blue-400' : 'text-red-400'}`}>
+                                                {isBlue ? 'BLUE SIDE' : 'RED SIDE'}
+                                            </span>
+                                        </Label>
+                                    );
+                                })()}
                             </div>
+
+                            {/* Team B Card */}
                             <div>
                                 <RadioGroupItem value={match.team_b_name} id="team_b" className="peer sr-only" />
-                                <Label
-                                    htmlFor="team_b"
-                                    className="flex flex-col items-center justify-between rounded-md border-2 border-slate-700 bg-slate-800 p-4 hover:bg-slate-700 peer-data-[state=checked]:border-blue-500 peer-data-[state=checked]:text-blue-500 cursor-pointer transition-all"
-                                >
-                                    <span className="text-xl font-bold mb-1">{match.team_b_name}</span>
-                                    <span className="text-xs text-slate-400">Team B</span>
-                                </Label>
+                                {(() => {
+                                    const isBlue = blueSide === match.team_b_name;
+                                    const colorClass = isBlue
+                                        ? 'border-blue-500 text-blue-500 bg-blue-500/10'
+                                        : 'border-red-500 text-red-500 bg-red-500/10';
+                                    return (
+                                        <Label
+                                            htmlFor="team_b"
+                                            className={`flex flex-col items-center justify-between rounded-md border-2 p-4 cursor-pointer transition-all ${colorClass}`}
+                                        >
+                                            <span className="text-xl font-bold mb-1">{match.team_b_name}</span>
+                                            <span className={`text-xs ${isBlue ? 'text-blue-400' : 'text-red-400'}`}>
+                                                {isBlue ? 'BLUE SIDE' : 'RED SIDE'}
+                                            </span>
+                                        </Label>
+                                    );
+                                })()}
                             </div>
                         </RadioGroup>
                     </div>

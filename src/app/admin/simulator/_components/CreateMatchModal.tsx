@@ -97,36 +97,64 @@ export default function CreateMatchModal({ versions }: CreateMatchModalProps) {
                         </div>
 
                         {!isCustomTeams ? (
-                            <div className="flex items-center justify-center gap-3 text-lg font-bold bg-slate-900 p-3 rounded border border-slate-800/50">
-                                <span className="text-blue-400">Team A</span>
-                                <span className="text-slate-600 text-sm font-normal">VS</span>
-                                <span className="text-red-400">Team B</span>
-                                <input type="hidden" name="team_a_name" value="Team A" />
-                                <input type="hidden" name="team_b_name" value="Team B" />
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-center gap-3 text-lg font-bold bg-slate-900 p-3 rounded border border-slate-800/50">
+                                    <span className="text-blue-400">Team A</span>
+                                    <span className="text-slate-600 text-sm font-normal">VS</span>
+                                    <span className="text-red-400">Team B</span>
+                                    <input type="hidden" name="team_a_name" value="Team A" />
+                                    <input type="hidden" name="team_b_name" value="Team B" />
+                                </div>
+                                <p className="text-xs text-center text-slate-500">Default generic team names will be used.</p>
                             </div>
                         ) : (
-                            <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-2">
-                                <div className="grid gap-2">
-                                    <Label htmlFor="team_a" className="text-xs text-blue-400">Blue Side</Label>
-                                    <Input
-                                        id="team_a"
-                                        name="team_a_name"
-                                        placeholder="Team A Name"
-                                        defaultValue="Team A"
-                                        className="bg-slate-800 border-slate-700"
-                                        required
-                                    />
+                            <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="team_a" className="text-xs text-slate-400">Team A</Label>
+                                        <Input
+                                            id="team_a"
+                                            name="team_a_name"
+                                            placeholder="Team A Name"
+                                            defaultValue="Team A"
+                                            className="bg-slate-800 border-slate-700"
+                                            required
+                                        />
+                                    </div>
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="team_b" className="text-xs text-slate-400">Team B</Label>
+                                        <Input
+                                            id="team_b"
+                                            name="team_b_name"
+                                            placeholder="Team B Name"
+                                            defaultValue="Team B"
+                                            className="bg-slate-800 border-slate-700"
+                                            required
+                                        />
+                                    </div>
                                 </div>
-                                <div className="grid gap-2">
-                                    <Label htmlFor="team_b" className="text-xs text-red-400">Red Side</Label>
-                                    <Input
-                                        id="team_b"
-                                        name="team_b_name"
-                                        placeholder="Team B Name"
-                                        defaultValue="Team B"
-                                        className="bg-slate-800 border-slate-700"
-                                        required
-                                    />
+
+                                {/* Preset Buttons */}
+                                <div className="flex gap-2 flex-wrap justify-center">
+                                    {['Bacon Time', 'Buriram United', 'Talon', 'Hydra', 'eArena', 'Full Sense', 'King of Gamers', 'PSG Esports'].map(team => (
+                                        <button
+                                            key={team}
+                                            type="button"
+                                            onClick={() => {
+                                                const form = document.querySelector('form') as HTMLFormElement
+                                                const teamA = form.elements.namedItem('team_a_name') as HTMLInputElement
+                                                const teamB = form.elements.namedItem('team_b_name') as HTMLInputElement
+
+                                                if (teamA && teamB) {
+                                                    if (teamA.value === 'Team A' || !teamA.value) teamA.value = team;
+                                                    else if ((teamB.value === 'Team B' || !teamB.value) && teamA.value !== team) teamB.value = team;
+                                                }
+                                            }}
+                                            className="text-[10px] px-2 py-1 bg-slate-800 rounded border border-slate-700 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+                                        >
+                                            {team}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
                         )}

@@ -17,6 +17,30 @@ export async function createMatch(prevState: any, formData: FormData) {
         return { message: 'Missing required fields', success: false }
     }
 
+    // Generate Slug: YYYYMMDD-XX
+    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '') // YYYYMMDD
+
+    // Count matches for today to determine suffix
+    // Note: This is prone to race conditions in high traffic but okay for admin tool
+    // Better way is to query latest slug for today
+    const { data: latestMatch } = await supabase
+        .from('draft_matches')
+        .select('slug')
+        .ilike('slug', `${dateStr}-%`)
+        .order('slug', { ascending: false })
+        .limit(1)
+        .single()
+
+    let sequence = 1
+    if (latestMatch && latestMatch.slug) {
+        const parts = latestMatch.slug.split('-')
+        if (parts.length === 2) {
+            sequence = parseInt(parts[1]) + 1
+        }
+    }
+
+    const slug = `${dateStr}-${sequence.toString().padStart(2, '0')}`
+
     const { data, error } = await supabase
         .from('draft_matches')
         .insert([{
@@ -24,7 +48,8 @@ export async function createMatch(prevState: any, formData: FormData) {
             team_b_name,
             mode,
             version_id: parseInt(version_id),
-            status: 'ongoing'
+            status: 'ongoing',
+            slug
         }])
         .select()
         .single()
@@ -35,7 +60,8 @@ export async function createMatch(prevState: any, formData: FormData) {
     }
 
     revalidatePath('/admin/draft')
-    return { message: 'Match created successfully!', success: true, matchId: data.id }
+    revalidatePath('/admin/draft')
+    return { message: 'Match created successfully!', success: true, matchId: data.slug || data.id }
 }
 
 export async function getMatches() {
@@ -60,14 +86,28 @@ export async function getMatches() {
 export async function getMatch(matchId: string) {
     const supabase = await createClient()
 
-    const { data, error } = await supabase
+    // Build query
+    let query = supabase
         .from('draft_matches')
         .select(`
             *,
             version:versions(*),
-            games:draft_games(*)
+            games:draft_games(
+                *,
+                picks:draft_picks(*)
+            )
         `)
-        .eq('id', matchId)
+
+    // Check if matchId looks like a UUID
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(matchId)
+
+    if (isUUID) {
+        query = query.eq('id', matchId)
+    } else {
+        query = query.eq('slug', matchId)
+    }
+
+    const { data, error } = await query
         .single()
 
     if (error) {
