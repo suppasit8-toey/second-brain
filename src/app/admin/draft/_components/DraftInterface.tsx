@@ -24,6 +24,7 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
     const { state, currentStep, lockIn, togglePause } = useDraftEngine()
     const [selectedHero, setSelectedHero] = useState<Hero | null>(null)
     const [recommendations, setRecommendations] = useState<any>({ analyst: [], history: [], hybrid: [] })
+    const [activeTab, setActiveTab] = useState('analyst')
 
     // Derived Lists for filtering
     const bannedIds = [...state.blueBans, ...state.redBans]
@@ -182,7 +183,7 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
 
                 {/* Recommendation Panel */}
                 <div className="h-64 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col">
-                    <Tabs defaultValue="analyst" className="flex-1 flex flex-col">
+                    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
                         <div className="bg-slate-950 px-4 py-2 border-b border-slate-800">
                             <TabsList className="bg-transparent h-auto p-0 gap-4">
                                 <TabsTrigger value="analyst" className="data-[state=active]:bg-transparent data-[state=active]:text-indigo-400 data-[state=active]:border-b-2 border-indigo-400 rounded-none pb-2">

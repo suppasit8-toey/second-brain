@@ -82,14 +82,16 @@ const SelectContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTML
 )
 SelectContent.displayName = "SelectContent"
 
-const SelectItem = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement> & { value: string }>(
-    ({ className, children, value, onClick, ...props }, ref) => {
+const SelectItem = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement> & { value: string; disabled?: boolean }>(
+    ({ className, children, value, disabled, onClick, ...props }, ref) => {
         const ctx = React.useContext(SelectContext);
         const isActive = ctx?.value === value;
         return (
             <div
                 ref={ref}
+                data-disabled={disabled}
                 onClick={(e) => {
+                    if (disabled) return;
                     ctx?.onValueChange(value);
                     ctx?.setOpen(false);
                     onClick?.(e);
