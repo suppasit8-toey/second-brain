@@ -50,7 +50,7 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
             side: currentStep?.side
         }
 
-        getRecommendations(match.version_id, allyPicks, enemyPicks, bannedIds, [], context)
+        getRecommendations(match.version_id, allyPicks, enemyPicks, bannedIds)
             .then(setRecommendations)
 
     }, [state.stepIndex])
