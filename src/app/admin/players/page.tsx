@@ -1,14 +1,15 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { getAllPlayers, getAllTeams, createPlayer } from '../tournaments/actions'
+import { getAllPlayers, getAllTeams, createPlayer, deletePlayer } from '../tournaments/actions'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Users, Search, Shield, Plus } from 'lucide-react'
+import { Users, Search, Shield, Plus, Trash2, AlertTriangle } from 'lucide-react'
+import Link from 'next/link'
 import Image from 'next/image'
 
 export default function PlayersPage() {
@@ -19,6 +20,9 @@ export default function PlayersPage() {
     // Create Modal State
     const [isCreateOpen, setIsCreateOpen] = useState(false)
     const [teams, setTeams] = useState<any[]>([])
+
+    // Delete State
+    const [deleteTarget, setDeleteTarget] = useState<any>(null)
 
     useEffect(() => {
         loadData()
@@ -35,6 +39,24 @@ export default function PlayersPage() {
     const loadTeams = async () => {
         const t = await getAllTeams()
         setTeams(t)
+    }
+
+    const handleDelete = (e: React.MouseEvent, player: any) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setDeleteTarget(player)
+    }
+
+    const confirmDelete = async () => {
+        if (!deleteTarget) return
+
+        const res = await deletePlayer(deleteTarget.id, 'global')
+        if (res.error) {
+            alert(res.error)
+        } else {
+            setDeleteTarget(null)
+            loadData()
+        }
     }
 
     const filteredPlayers = players.filter(p =>
@@ -87,49 +109,79 @@ export default function PlayersPage() {
             ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                     {filteredPlayers.map(player => (
-                        <Card key={player.id} className="bg-slate-900 border-slate-800 text-white group hover:border-indigo-500/50 transition-colors">
-                            <CardHeader className="flex flex-row items-center gap-3 pb-2">
-                                <div className="w-10 h-10 rounded bg-slate-950 flex items-center justify-center font-bold text-indigo-500 border border-slate-800 shrink-0">
-                                    {player.name.charAt(0)}
-                                </div>
-                                <div className="min-w-0">
-                                    <CardTitle className="text-base font-bold truncate">{player.name}</CardTitle>
-                                    <div className="text-xs text-slate-500 flex items-center gap-1.5 truncate">
-                                        <Shield className="w-3 h-3" />
-                                        {player.team?.short_name || player.team?.name || 'Free Agent'}
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="flex flex-wrap gap-1 mt-2">
-                                    {player.positions && player.positions.map((pos: string) => (
-                                        <span key={pos} className="text-[10px] px-1.5 py-0.5 bg-slate-950 rounded border border-slate-800 text-slate-400 font-medium">
-                                            {pos}
-                                        </span>
-                                    ))}
-                                </div>
-                            </CardContent>
-                        </Card>
+                        <div key={player.id} className="relative group">
+                            <Link href={`/admin/players/${player.slug || player.id}`} className="block h-full">
+                                <Card className="bg-slate-900 border-slate-800 text-white h-full hover:border-indigo-500/50 transition-colors">
+                                    <CardHeader className="flex flex-row items-center gap-3 pb-2 pt-5">
+                                        <div className="min-w-0 flex-1">
+                                            <CardTitle className="text-base font-bold truncate uppercase pr-6">{player.name}</CardTitle>
+                                            <div className="text-xs text-slate-500 flex items-center gap-1.5 truncate">
+                                                <Shield className="w-3 h-3" />
+                                                {player.team?.short_name || player.team?.name || 'Free Agent'}
+                                            </div>
+                                        </div>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div className="flex flex-wrap gap-1 mt-2">
+                                            {player.positions && player.positions.map((pos: string) => (
+                                                <span key={pos} className="text-[10px] px-1.5 py-0.5 bg-slate-950 rounded border border-slate-800 text-slate-400 font-medium">
+                                                    {pos === 'Abyssal Dragon' ? 'Abyssal' : pos}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            </Link>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-red-400 hover:bg-red-500/10 z-10 w-8 h-8 rounded-full"
+                                onClick={(e) => handleDelete(e, player)}
+                            >
+                                <Trash2 size={16} />
+                            </Button>
+                        </div>
                     ))}
                 </div>
             )}
+
+            <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+                <DialogContent className="bg-slate-900 border-slate-800 text-white">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-red-500">
+                            <AlertTriangle size={20} />
+                            Confirm Deletion
+                        </DialogTitle>
+                        <DialogDescription className="text-slate-400">
+                            Are you sure you want to delete <span className="text-white font-bold">{deleteTarget?.name}</span>? This action cannot be undone.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="ghost" onClick={() => setDeleteTarget(null)} className="text-slate-400 hover:text-white">
+                            Cancel
+                        </Button>
+                        <Button variant="destructive" onClick={confirmDelete} className="bg-red-600 hover:bg-red-700 text-white">
+                            Delete Player
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }
 
 function CreatePlayerDialog({ teams, open, onOpenChange, onSuccess }: any) {
     const [name, setName] = useState('')
-    const [teamId, setTeamId] = useState('')
     const [positions, setPositions] = useState<string[]>([])
 
-    const POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam', 'Coach']
+    const POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam', 'Coach']
 
     const handleSubmit = async () => {
         if (!name) return alert('Name is required')
 
         const formData = new FormData()
         formData.append('name', name)
-        if (teamId) formData.append('team_id', teamId)
+        // Default to no team (Free Agent)
         formData.append('positions', JSON.stringify(positions))
         formData.append('tournament_id', 'global') // Fallback ID for global context
 
@@ -138,7 +190,6 @@ function CreatePlayerDialog({ teams, open, onOpenChange, onSuccess }: any) {
             alert(res.error)
         } else {
             setName('')
-            setTeamId('')
             setPositions([])
             onSuccess()
         }
@@ -170,21 +221,7 @@ function CreatePlayerDialog({ teams, open, onOpenChange, onSuccess }: any) {
                         />
                     </div>
 
-                    <div className="space-y-2">
-                        <Label>Team</Label>
-                        <Select value={teamId} onValueChange={setTeamId}>
-                            <SelectTrigger className="bg-slate-950 border-slate-800">
-                                <SelectValue placeholder="Select Team" />
-                            </SelectTrigger>
-                            <SelectContent className="bg-slate-950 border-slate-800 text-white">
-                                {teams.map((t: any) => (
-                                    <SelectItem key={t.id} value={t.id}>
-                                        {t.name} ({t.short_name})
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
+
 
                     <div className="space-y-2">
                         <Label>Positions</Label>

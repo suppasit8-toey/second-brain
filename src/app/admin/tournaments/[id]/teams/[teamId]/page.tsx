@@ -21,7 +21,7 @@ const ROSTER_STRUCTURE = [
     { role: 'Dark Slayer', label: 'Dark Slayer Lane' },
     { role: 'Jungle', label: 'Jungle' },
     { role: 'Mid', label: 'Mid Lane' },
-    { role: 'Abyssal Dragon', label: 'Abyssal Dragon Lane' },
+    { role: 'Abyssal', label: 'Abyssal Lane' },
     { role: 'Roam', label: 'Roam' },
     { role: 'Sub1', label: 'Substitute 1' },
     { role: 'Sub2', label: 'Substitute 2' },
@@ -46,33 +46,38 @@ export default function TeamRosterPage({ params }: { params: Promise<{ id: strin
 
     const loadData = async () => {
         const t = await getTournament(id)
-        setTournament(t)
+        if (t) {
+            setTournament(t)
+            const teams = await getTeams(t.id)
+            const currentTeam = teams.find(tm => tm.id === teamId || tm.slug === teamId)
+            setTeam(currentTeam || null)
 
-        const teams = await getTeams(id)
-        const currentTeam = teams.find(tm => tm.id === teamId)
-        setTeam(currentTeam || null)
+            // Load Roster Players
+            if (currentTeam) {
+                const teamPlayers = await getPlayers(currentTeam.id)
+                const globalPlayers = await getAllPlayers()
+                setAllPlayers(globalPlayers)
 
-        // Load Roster Players
-        if (currentTeam) {
-            const teamPlayers = await getPlayers(currentTeam.id)
-            const globalPlayers = await getAllPlayers()
-            setAllPlayers(globalPlayers)
-
-            // Map players to slots
-            const updatedRoster = ROSTER_STRUCTURE.map(slot => {
-                const assigned = teamPlayers.find((p: any) => p.roster_role === slot.role)
-                return { ...slot, player: assigned }
-            })
-            setRoster(updatedRoster)
+                // Map players to slots
+                const updatedRoster = ROSTER_STRUCTURE.map(slot => {
+                    const assigned = teamPlayers.find((p: any) => p.roster_role === slot.role)
+                    return { ...slot, player: assigned }
+                })
+                setRoster(updatedRoster)
+            }
         }
     }
 
     const handleAssign = async (player: any) => {
         if (!activeRole) return
-        await assignPlayerToRoster(player.id, teamId, activeRole, id)
-        setIsSelectOpen(false)
-        setSearchTerm('')
-        loadData()
+        const res = await assignPlayerToRoster(player.id, teamId, activeRole, id)
+        if (res.error) {
+            alert(res.error)
+        } else {
+            setIsSelectOpen(false)
+            setSearchTerm('')
+            loadData()
+        }
     }
 
     const handleRemove = async (player: any) => {
@@ -81,9 +86,14 @@ export default function TeamRosterPage({ params }: { params: Promise<{ id: strin
         loadData()
     }
 
-    const filteredCandidates = allPlayers.filter(p =>
-        p.name.toLowerCase().includes(searchTerm.toLowerCase())
-    )
+    // Filter State
+    const [filterPosition, setFilterPosition] = useState<string>('All')
+
+    const filteredCandidates = allPlayers.filter(p => {
+        const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase())
+        const matchesPosition = filterPosition === 'All' || p.positions?.includes(filterPosition)
+        return matchesSearch && matchesPosition
+    })
 
     if (!team || !tournament) return <div className="p-12 text-center text-slate-500">Loading...</div>
 
@@ -128,6 +138,13 @@ export default function TeamRosterPage({ params }: { params: Promise<{ id: strin
                             slot={slot}
                             onAssign={() => {
                                 setActiveRole(slot.role)
+                                // Auto-filter if it's a standard role
+                                const standardRoles = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
+                                if (standardRoles.includes(slot.role)) {
+                                    setFilterPosition(slot.role)
+                                } else {
+                                    setFilterPosition('All')
+                                }
                                 setIsSelectOpen(true)
                             }}
                             onRemove={handleRemove}
@@ -143,6 +160,11 @@ export default function TeamRosterPage({ params }: { params: Promise<{ id: strin
                             slot={slot}
                             onAssign={() => {
                                 setActiveRole(slot.role)
+                                if (slot.role === 'Coach') {
+                                    setFilterPosition('Coach')
+                                } else {
+                                    setFilterPosition('All')
+                                }
                                 setIsSelectOpen(true)
                             }}
                             onRemove={handleRemove}
@@ -158,6 +180,21 @@ export default function TeamRosterPage({ params }: { params: Promise<{ id: strin
                         <DialogTitle>Assign Player to {roster.find(r => r.role === activeRole)?.label}</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4">
+                        <div className="flex gap-2 pb-2 overflow-x-auto">
+                            {['All', 'Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam', 'Coach'].map(pos => (
+                                <button
+                                    key={pos}
+                                    onClick={() => setFilterPosition(pos)}
+                                    className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap border transition-all ${filterPosition === pos
+                                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                                        : 'bg-slate-950 border-slate-800 text-slate-500 hover:border-slate-600'
+                                        }`}
+                                >
+                                    {pos}
+                                </button>
+                            ))}
+                        </div>
+
                         <div className="bg-slate-950 p-2 rounded-lg border border-slate-800 flex items-center gap-2">
                             <Search className="w-4 h-4 text-slate-500 ml-2" />
                             <Input
@@ -168,7 +205,11 @@ export default function TeamRosterPage({ params }: { params: Promise<{ id: strin
                             />
                         </div>
                         <div className="max-h-[300px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                            {filteredCandidates.map(p => (
+                            {filteredCandidates.length === 0 ? (
+                                <div className="text-center py-8 text-slate-500 text-sm italic">
+                                    No players found for this role.
+                                </div>
+                            ) : filteredCandidates.map(p => (
                                 <button
                                     key={p.id}
                                     onClick={() => handleAssign(p)}

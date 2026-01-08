@@ -30,6 +30,7 @@ export interface Team {
     id: string; // uuid
     tournament_id: string;
     name: string;
+    slug?: string;
     short_name?: string;
     logo_url?: string;
     created_at?: string;
@@ -42,7 +43,9 @@ export interface Player {
     id: string;
     team_id: string;
     name: string;
+    slug?: string;
     positions: string[]; // e.g. ["Jungle", "Coach"]
+    roster_role?: string; // Current active role in team roster
     created_at?: string;
 }
 

@@ -110,7 +110,7 @@ export default function TournamentsPage() {
                     </div>
                 )}
                 {tournaments.map(t => (
-                    <Link key={t.id} href={`/admin/tournaments/${t.id}`}>
+                    <Link key={t.id} href={`/admin/tournaments/${t.slug || t.id}`}>
                         <Card className="bg-slate-900 border-slate-800 text-white hover:border-indigo-500/50 transition-colors group relative overflow-hidden">
                             <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                                 <Button variant="destructive" size="icon" className="h-8 w-8" onClick={(e) => handleDelete(t.id, e)}>

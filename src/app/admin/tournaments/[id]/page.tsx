@@ -28,14 +28,18 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
 
     const loadData = async () => {
         const t = await getTournament(id)
-        if (t) setTournament(t)
-
-        const teamsData = await getTeams(id)
-        setTeams(teamsData)
+        if (t) {
+            setTournament(t)
+            const teamsData = await getTeams(t.id)
+            setTeams(teamsData)
+        }
     }
 
     async function handleCreateTeam(formData: FormData) {
-        formData.append('tournament_id', id)
+        if (!tournament) return
+        formData.append('tournament_id', tournament.id)
+        formData.append('path', `/admin/tournaments/${id}`)
+
         const res = await createTeam(formData)
 
         if (res.error) {
@@ -77,7 +81,6 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
                         <div>
                             <h1 className="text-3xl font-black text-white uppercase tracking-tighter">{tournament.name}</h1>
                             <div className="flex gap-2 mt-1">
-                                <span className="text-xs font-mono bg-slate-800 px-2 py-0.5 rounded text-slate-400 border border-slate-700">ID: {tournament.id.split('-')[0]}...</span>
                                 <span className="text-xs font-bold bg-blue-900/30 text-blue-400 px-2 py-0.5 rounded border border-blue-500/30 uppercase">{tournament.status}</span>
                             </div>
                         </div>
@@ -192,7 +195,7 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
 
 function ManageRosterButton({ team, tournamentId }: { team: Team, tournamentId: string }) {
     return (
-        <Link href={`/admin/tournaments/${tournamentId}/teams/${team.id}`} className="block">
+        <Link href={`/admin/tournaments/${tournamentId}/teams/${team.slug || team.id}`} className="block">
             <Button variant="outline" size="sm" className="w-full border-slate-700 bg-slate-900/50 hover:bg-slate-800 text-slate-400 hover:text-white transition-colors">
                 <Users className="w-4 h-4 mr-2" /> Manage Roster
             </Button>
