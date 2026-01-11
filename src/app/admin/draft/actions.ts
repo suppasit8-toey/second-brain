@@ -8,8 +8,8 @@ import { DraftMode } from '@/utils/types'
 export async function createMatch(prevState: any, formData: FormData) {
     const supabase = await createClient()
 
-    const team_a_name = formData.get('team_a_name') as string
-    const team_b_name = formData.get('team_b_name') as string
+    const team_a_name = formData.get('team_a_name') as string || 'Team A'
+    const team_b_name = formData.get('team_b_name') as string || 'Team B'
     const mode = formData.get('mode') as DraftMode
     const version_id = formData.get('version_id') as string
 
@@ -49,7 +49,8 @@ export async function createMatch(prevState: any, formData: FormData) {
             mode,
             version_id: parseInt(version_id),
             status: 'ongoing',
-            slug
+            slug,
+            match_type: 'scrim_simulator'
         }])
         .select()
         .single()
@@ -58,6 +59,27 @@ export async function createMatch(prevState: any, formData: FormData) {
         console.error('Error creating match:', error)
         return { message: 'Error creating match: ' + error.message, success: false }
     }
+
+    // Games are now created manually one by one via NewGameButton to allow side selection
+    // const games = []
+    // const gameCount = mode === 'BO1' ? 1 : mode === 'BO2' ? 2 : mode === 'BO3' ? 3 : mode === 'BO4' ? 4 : mode === 'BO5' ? 5 : mode === 'BO7' ? 7 : 1
+
+    // for (let i = 1; i <= gameCount; i++) {
+    //     games.push({
+    //         match_id: data.id,
+    //         game_number: i,
+    //         blue_team_name: i % 2 !== 0 ? team_a_name : team_b_name,
+    //         red_team_name: i % 2 !== 0 ? team_b_name : team_a_name,
+    //     })
+    // }
+
+    // const { error: gamesError } = await supabase
+    //     .from('draft_games')
+    //     .insert(games)
+
+    // if (gamesError) {
+    //     console.error('Error creating games:', gamesError)
+    // }
 
     revalidatePath('/admin/draft')
     revalidatePath('/admin/draft')
@@ -111,7 +133,7 @@ export async function getMatch(matchId: string) {
         .single()
 
     if (error) {
-        console.error('Error fetching match:', error)
+        console.error(`Error fetching match with ID ${matchId}:`, JSON.stringify(error, null, 2))
         return null
     }
 
@@ -160,5 +182,6 @@ export async function deleteMatch(matchId: string) {
     }
 
     revalidatePath('/admin/draft')
+    revalidatePath('/admin/scrims')
     return { success: true, message: 'Match deleted' }
 }

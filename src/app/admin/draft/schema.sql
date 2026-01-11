@@ -4,10 +4,12 @@ create table draft_matches (
     version_id bigint references versions(id) not null,
     team_a_name text not null,
     team_b_name text not null,
-    mode text not null check (mode in ('BO1', 'BO2', 'BO3', 'BO5', 'BO7')),
+    mode text not null check (mode in ('BO1', 'BO2', 'BO3', 'BO4', 'BO5', 'BO7')),
     status text default 'ongoing' check (status in ('ongoing', 'finished')),
     winner text, -- 'Team A' or 'Team B'
     slug text unique, -- URL-friendly ID e.g., 20240107-01
+    tournament_id uuid references tournaments(id),
+    match_date date default CURRENT_DATE,
     created_at timestamp with time zone default now()
 );
 

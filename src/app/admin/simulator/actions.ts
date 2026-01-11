@@ -7,8 +7,8 @@ import { DraftMode } from '@/utils/types'
 export async function createMatch(prevState: any, formData: FormData) {
     const supabase = await createClient()
 
-    const team_a_name = formData.get('team_a_name') as string
-    const team_b_name = formData.get('team_b_name') as string
+    const team_a_name = formData.get('team_a_name') as string || 'Team A'
+    const team_b_name = formData.get('team_b_name') as string || 'Team B'
     const mode = formData.get('mode') as DraftMode
     const version_id = formData.get('version_id') as string
     const tournament_id = formData.get('tournament_id') as string || null
@@ -25,7 +25,8 @@ export async function createMatch(prevState: any, formData: FormData) {
             mode,
             version_id: parseInt(version_id),
             tournament_id,
-            status: 'ongoing'
+            status: 'ongoing',
+            match_type: 'simulation'
         }])
         .select()
         .single()
@@ -34,6 +35,27 @@ export async function createMatch(prevState: any, formData: FormData) {
         console.error('Error creating match:', error)
         return { message: 'Error creating match: ' + error.message, success: false }
     }
+
+    // Games are now created manually one by one via NewGameButton to allow side selection
+    // const games = []
+    // const gameCount = mode === 'BO1' ? 1 : mode === 'BO2' ? 2 : mode === 'BO3' ? 3 : mode === 'BO4' ? 4 : mode === 'BO5' ? 5 : mode === 'BO7' ? 7 : 1
+
+    // for (let i = 1; i <= gameCount; i++) {
+    //     games.push({
+    //         match_id: data.id,
+    //         game_number: i,
+    //         blue_team_name: i % 2 !== 0 ? team_a_name : team_b_name,
+    //         red_team_name: i % 2 !== 0 ? team_b_name : team_a_name,
+    //     })
+    // }
+
+    // const { error: gamesError } = await supabase
+    //     .from('draft_games')
+    //     .insert(games)
+
+    // if (gamesError) {
+    //     console.error('Error creating games:', gamesError)
+    // }
 
     revalidatePath('/admin/simulator')
     return { message: 'Match created successfully!', success: true, matchId: data.id }
@@ -49,6 +71,8 @@ export async function getMatches() {
             *,
             version:versions(id, name)
         `)
+        // Show only 'simulation' or NULL (for backward compatibility)
+        .or('match_type.eq.simulation,match_type.is.null')
         .order('created_at', { ascending: false })
 
     if (error) {
@@ -153,6 +177,40 @@ export async function deleteMatch(matchId: string) {
 
     revalidatePath('/admin/simulator')
     return { success: true, message: 'Match deleted successfully' }
+}
+
+export async function resetGame(gameId: string) {
+    const supabase = await createClient()
+
+    const { error } = await supabase
+        .from('draft_games')
+        .delete()
+        .eq('id', gameId)
+
+    if (error) {
+        console.error('Error resetting game:', error)
+        return { success: false, message: error.message }
+    }
+
+    revalidatePath('/admin/simulator')
+    return { success: true, message: 'Game reset successfully' }
+}
+
+export async function finishMatch(matchId: string) {
+    const supabase = await createClient()
+
+    const { error } = await supabase
+        .from('draft_matches')
+        .update({ status: 'finished' })
+        .eq('id', matchId)
+
+    if (error) {
+        console.error('Error finishing match:', error)
+        return { success: false, message: error.message }
+    }
+
+    revalidatePath(`/admin/simulator/${matchId}`)
+    return { success: true }
 }
 
 // --- AI ANALYSIS ---

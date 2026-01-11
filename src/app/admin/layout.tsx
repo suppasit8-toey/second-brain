@@ -1,4 +1,5 @@
 import AdminLayoutWrapper from '@/components/admin/AdminLayout'
+import { UIProvider } from '@/context/UIContext'
 
 export default function AdminLayout({
     children,
@@ -6,8 +7,10 @@ export default function AdminLayout({
     children: React.ReactNode
 }) {
     return (
-        <AdminLayoutWrapper>
-            {children}
-        </AdminLayoutWrapper>
+        <UIProvider>
+            <AdminLayoutWrapper>
+                {children}
+            </AdminLayoutWrapper>
+        </UIProvider>
     )
 }

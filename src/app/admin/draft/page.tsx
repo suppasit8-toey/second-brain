@@ -1,6 +1,7 @@
 import { getVersions } from '../heroes/actions'
 import { getMatches } from './actions'
 import CreateMatchModal from './_components/CreateMatchModal'
+import DeleteMatchButton from './_components/DeleteMatchButton'
 import { formatDate } from '@/utils/format' // Assuming this helper exists, or I will use inline
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -31,7 +32,11 @@ export default async function DraftDashboard() {
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {matches.map((match: any) => (
                             <Link href={`/admin/draft/${match.id}`} key={match.id} className="block group">
-                                <Card className="bg-slate-900 border-slate-800 hover:border-indigo-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/10">
+                                <Card className="bg-slate-900 border-slate-800 hover:border-indigo-500/50 transition-all duration-300 hover:shadow-lg hover:shadow-indigo-500/10 relative">
+                                    <DeleteMatchButton
+                                        matchId={match.id}
+                                        matchTitle={`${match.team_a_name} vs ${match.team_b_name}`}
+                                    />
                                     <CardHeader className="pb-2">
                                         <div className="flex justify-between items-start">
                                             <div className="space-y-1">

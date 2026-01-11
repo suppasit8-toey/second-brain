@@ -80,3 +80,23 @@ export async function finishGame(data: FinishGameData) {
 
     return { success: true }
 }
+
+export async function finishMatch(matchId: string) {
+    const supabase = await createClient()
+
+    // Check current status first to avoid redundant updates? 
+    // Or just update.
+
+    const { error } = await supabase
+        .from('draft_matches')
+        .update({ status: 'finished' })
+        .eq('id', matchId)
+
+    if (error) {
+        console.error('Error finishing match:', error)
+        return { success: false, message: error.message }
+    }
+
+    revalidatePath(`/admin/simulator/${matchId}`)
+    return { success: true }
+}

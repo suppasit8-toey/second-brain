@@ -57,13 +57,20 @@ const DialogTrigger = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttrib
 )
 DialogTrigger.displayName = "DialogTrigger"
 
+import { createPortal } from "react-dom"
+
 const DialogContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
     ({ className, children, ...props }, ref) => {
         const { open, onOpenChange } = React.useContext(DialogContext);
+        const [mounted, setMounted] = React.useState(false)
 
-        if (!open) return null;
+        React.useEffect(() => {
+            setMounted(true)
+        }, [])
 
-        return (
+        if (!open || !mounted) return null;
+
+        return createPortal(
             <div className="fixed inset-0 z-50 flex items-start justify-center sm:items-center">
                 {/* Backdrop */}
                 <div
@@ -86,7 +93,8 @@ const DialogContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTML
                         <span className="sr-only">Close</span>
                     </button>
                 </div>
-            </div>
+            </div>,
+            document.body
         )
     }
 )

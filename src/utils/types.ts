@@ -33,6 +33,7 @@ export interface Team {
     slug?: string;
     short_name?: string;
     logo_url?: string;
+    role?: 'participant' | 'scrim_partner';
     created_at?: string;
 
     // Joins
@@ -101,7 +102,7 @@ export const POWER_SPIKES = ['Early', 'Mid', 'Late', 'Balanced'] as const; // Re
 export const POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam'] as const;
 export const TIERS = ['S', 'A', 'B', 'C', 'D'] as const;
 
-export type DraftMode = 'BO1' | 'BO2' | 'BO3' | 'BO5' | 'BO7';
+export type DraftMode = 'BO1' | 'BO2' | 'BO3' | 'BO4' | 'BO5' | 'BO7';
 export type DraftPhase = 'BAN_1' | 'PICK_1' | 'BAN_2' | 'PICK_2' | 'FINISHED';
 export type DraftSide = 'BLUE' | 'RED';
 
@@ -116,6 +117,7 @@ export interface DraftMatch {
     slug?: string;
     created_at?: string;
     tournament_id?: string;
+    match_date?: string; // ISO date string
 
     // Joins
     version?: Version;

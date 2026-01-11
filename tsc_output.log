@@ -1,0 +1,1 @@
+﻿src/app/admin/simulator/_components/MatchSummary.tsx(43,30): error TS2339: Property 'BO4' does not exist on type '{ BO1: number; BO3: number; BO5: number; BO7: number; BO2: number; }'.

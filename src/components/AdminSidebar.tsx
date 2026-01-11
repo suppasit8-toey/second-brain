@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Users, Swords, LayoutDashboard, Shield, History, Handshake, Gamepad2, Trophy, Ghost, UserRound } from 'lucide-react'
+import { Home, Users, Swords, LayoutDashboard, Shield, History, Handshake, Gamepad2, Trophy, Ghost, UserRound, ScrollText, PlusCircle } from 'lucide-react'
 
 export default function AdminSidebar() {
     const pathname = usePathname()
@@ -13,6 +13,7 @@ export default function AdminSidebar() {
         { href: '/admin/matchups', label: 'Matchups', icon: Swords },
         { href: '/admin/combos', label: 'Combos', icon: Handshake },
         { href: '/admin/tournaments', label: 'Tournaments', icon: Trophy },
+        { href: '/admin/scrims', label: 'Scrim Logs', icon: ScrollText },
         { href: '/admin/players', label: 'Players', icon: UserRound },
         { href: '/admin/simulator', label: 'Draft Simulator', icon: Gamepad2 },
     ]

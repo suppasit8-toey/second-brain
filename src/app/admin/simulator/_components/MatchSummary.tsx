@@ -40,7 +40,7 @@ export default function MatchSummary({ match, games, heroes }: MatchSummaryProps
     // Logic: Who won?
     let winnerName = 'Draw'
     let winnerColor = 'text-slate-400'
-    const winningThreshold = { 'BO1': 1, 'BO3': 2, 'BO5': 3, 'BO7': 4, 'BO2': 2 }[match.mode] || 1
+
 
     if (match.mode === 'BO2') {
         if (teamAScore > teamBScore) { winnerName = match.team_a_name; winnerColor = 'text-blue-400' }

@@ -1,16 +1,22 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { DraftMatch, DraftGame, Hero } from '@/utils/types'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import DraftInterface from './DraftInterface'
+import DraftInterface, { DraftControls } from './DraftInterface'
 import NewGameButton from '../../draft/_components/NewGameButton'
 import MatchSummary from './MatchSummary'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { Lock, Trophy, ArrowLeft } from 'lucide-react'
+import { Lock, Trophy, ArrowLeft, RefreshCw, Maximize2, Minimize2, Play, Pause } from 'lucide-react'
+import { resetGame, finishMatch } from '../actions'
+import { useUI } from '@/context/UIContext'
+
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+
+
 
 // Reuse types or ensure they are compatible
 interface MatchRoomProps {
@@ -23,6 +29,11 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
     const searchParams = useSearchParams()
     const router = useRouter()
     const pathname = usePathname()
+    const [resetDialogOpen, setResetDialogOpen] = useState(false)
+    const [gameToReset, setGameToReset] = useState<string | null>(null)
+    const { isFullscreen, toggleFullscreen } = useUI()
+    const draftRef = useRef<DraftControls>(null)
+    const [isDraftPaused, setIsDraftPaused] = useState(false)
 
     // 1. Determine Max Games based on Mode
     const getMaxGames = (mode: string) => {
@@ -30,6 +41,7 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
             case 'BO1': return 1;
             case 'BO2': return 2;
             case 'BO3': return 3;
+            case 'BO4': return 4;
             case 'BO5': return 5;
             case 'BO7': return 7;
             default: return 1;
@@ -46,20 +58,22 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
     const gameIdParam = searchParams.get('game')
 
     // Determine Winner / Series End
-    // BO1: 1 win
-    // BO3: 2 wins
-    // BO5: 3 wins
-    // BO7: 4 wins
-    // BO2: Play ALL 2 games (Draw possible)
+    // BO2, BO4, BO6: Play ALL games (Draw possible, typical for Scrims)
+    // BO1, BO3, BO5, BO7: Competitive Series (First to threshold)
     let winningThreshold = 1
+    let playAllGames = false
+
+    if (match.mode === 'BO2') { playAllGames = true; winningThreshold = 2 } // Though threshold technically doesn't apply if we force play all, but we use it for checking 'finished' count
     if (match.mode === 'BO3') winningThreshold = 2
+    if (match.mode === 'BO4') { playAllGames = true; winningThreshold = 4 }
     if (match.mode === 'BO5') winningThreshold = 3
     if (match.mode === 'BO7') winningThreshold = 4
 
+    const finishedGamesCount = games.filter(g => g.winner).length
+
     const isMatchFinished =
-        (match.mode === 'BO2' && games.filter(g => g.winner).length === 2) ||
-        (teamAScore >= winningThreshold) ||
-        (teamBScore >= winningThreshold)
+        (playAllGames && finishedGamesCount === winningThreshold) ||
+        (!playAllGames && (teamAScore >= winningThreshold || teamBScore >= winningThreshold))
 
     const latestGameId = games.length > 0 ? games[games.length - 1].id : (games.length === 0 ? 'new-1' : `new-${games.length + 1}`)
 
@@ -92,6 +106,25 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
         }
     }, [searchParams, activeTab])
 
+    // Effect: Auto-finish match if criteria met
+    useEffect(() => {
+        if (isMatchFinished && match.status !== 'finished') {
+            finishMatch(match.id).then(res => {
+                if (res.success) {
+                    console.log('Match automatically marked as finished')
+                    router.refresh()
+                }
+            })
+        }
+    }, [isMatchFinished, match.status, match.id, router])
+
+    const handleResetConfirm = async () => {
+        if (!gameToReset) return
+        await resetGame(gameToReset)
+        setResetDialogOpen(false)
+        setGameToReset(null)
+    }
+
     // NEW: Global Ban Logic (Previously Picked)
     // We need to pass previously picked heroes to the DraftInterface for filtering
     // logic: get all picks from games *before* the current game number
@@ -120,50 +153,90 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
     }
 
     return (
-        <div className="flex flex-col h-[calc(100vh-6rem)]">
-            {/* Match Header */}
-            <div className="shrink-0 bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between">
-                <div className="flex items-center gap-8">
-                    <div className="text-right w-48">
-                        <h2 className="text-2xl font-black text-white truncate">{match.team_a_name}</h2>
-                        <p className="text-xs text-slate-500 uppercase tracking-wider">Team A</p>
-                    </div>
+        <div className={`flex flex-col ${isFullscreen ? 'h-screen' : 'h-[calc(100vh-6rem)]'}`}>
+            {/* Match Header - Hidden in Fullscreen */}
+            {!isFullscreen && (
+                <div className="shrink-0 bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-8">
+                        <div className="text-right w-48">
+                            <h2 className="text-2xl font-black text-white truncate">{match.team_a_name}</h2>
+                            <p className="text-xs text-slate-500 uppercase tracking-wider">Team A</p>
+                        </div>
 
-                    <div className="px-8 py-3 bg-slate-800 rounded-xl border border-slate-700 flex flex-col items-center min-w-[120px]">
-                        <span className="text-xs text-slate-500 font-mono mb-1">{match.mode} Series</span>
-                        <div className="text-4xl font-bold font-mono leading-none tracking-widest text-white">
-                            <span className={teamAScore > teamBScore ? 'text-blue-400' : ''}>{teamAScore}</span>
-                            <span className="text-slate-600 mx-2">-</span>
-                            <span className={teamBScore > teamAScore ? 'text-red-400' : ''}>{teamBScore}</span>
+                        <div className="px-8 py-3 bg-slate-800 rounded-xl border border-slate-700 flex flex-col items-center min-w-[120px]">
+                            <span className="text-xs text-slate-500 font-mono mb-1">{match.mode} Series</span>
+                            <div className="text-4xl font-bold font-mono leading-none tracking-widest text-white">
+                                <span className={teamAScore > teamBScore ? 'text-blue-400' : ''}>{teamAScore}</span>
+                                <span className="text-slate-600 mx-2">-</span>
+                                <span className={teamBScore > teamAScore ? 'text-red-400' : ''}>{teamBScore}</span>
+                            </div>
+                        </div>
+
+                        <div className="text-left w-48">
+                            <h2 className="text-2xl font-black text-white truncate">{match.team_b_name}</h2>
+                            <p className="text-xs text-slate-500 uppercase tracking-wider">Team B</p>
                         </div>
                     </div>
 
-                    <div className="text-left w-48">
-                        <h2 className="text-2xl font-black text-white truncate">{match.team_b_name}</h2>
-                        <p className="text-xs text-slate-500 uppercase tracking-wider">Team B</p>
+                    <div className="flex items-center gap-4">
+                        {/* Back to Lobby Button */}
+                        <Link href="/admin/scrims">
+                            <Button size="sm" variant="ghost" className="text-slate-400 hover:text-white">
+                                <ArrowLeft className="w-4 h-4 mr-2" />
+                                Back to Lobby
+                            </Button>
+                        </Link>
+
+                        <Badge variant="outline" className="h-8 px-3 border-indigo-500/30 text-indigo-300 bg-indigo-500/10">
+                            Patch {match.version?.name}
+                        </Badge>
+
+                        <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-lg border border-slate-700">
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => draftRef.current?.togglePause()}
+                                className="h-8 w-8 hover:bg-slate-700 text-slate-300 hover:text-white"
+                                title={isDraftPaused ? "Resume Draft" : "Pause Draft"}
+                            >
+                                {isDraftPaused ? <Play className="w-4 h-4 text-green-400 fill-green-400" /> : <Pause className="w-4 h-4" />}
+                            </Button>
+
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => {
+                                    if (activeTab && !activeTab.startsWith('new-') && activeTab !== 'summary') {
+                                        setGameToReset(activeTab)
+                                        setResetDialogOpen(true)
+                                    }
+                                }}
+                                className="h-8 w-8 hover:bg-slate-700 text-slate-400 hover:text-red-400"
+                                title="Reset Game"
+                            >
+                                <RefreshCw className="w-4 h-4" />
+                            </Button>
+
+                            <div className="w-px h-4 bg-slate-700 mx-1" />
+
+                            <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={toggleFullscreen}
+                                className="h-8 w-8 hover:bg-slate-700 text-slate-300 hover:text-white"
+                                title="Enter Focus Mode"
+                            >
+                                <Maximize2 className="w-4 h-4" />
+                            </Button>
+                        </div>
                     </div>
                 </div>
+            )}
 
-                <div className="flex items-center gap-4">
-                    {/* Back to Lobby Button */}
-                    <Link href="/admin/simulator">
-                        <Button size="sm" variant="ghost" className="text-slate-400 hover:text-white">
-                            <ArrowLeft className="w-4 h-4 mr-2" />
-                            Back to Lobby
-                        </Button>
-                    </Link>
-
-                    <Badge variant="outline" className="h-8 px-3 border-indigo-500/30 text-indigo-300 bg-indigo-500/10">
-                        Patch {match.version?.name}
-                    </Badge>
-                </div>
-            </div>
-
-            {/* Content Area */}
-            <div className="flex-1 overflow-hidden flex flex-col">
+            <div className="flex-1 overflow-hidden flex flex-col relative min-h-0">
                 <Tabs value={activeTab} onValueChange={onTabChange} className="flex-1 flex flex-col">
-                    <div className="shrink-0 px-6 py-2 border-b border-slate-800 bg-slate-900/50 flex items-center gap-2 overflow-x-auto">
-                        <TabsList className="bg-slate-800 text-slate-400 h-10 p-1">
+                    <div className={`shrink-0 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between gap-4 overflow-x-auto ${isFullscreen ? 'px-4 py-1' : 'px-6 py-2'}`}>
+                        <TabsList className="bg-slate-800 text-slate-400 h-10 p-1 shrink-0">
                             {seriesArray.map((num) => {
                                 // If match is already finished, do we show future unplayed games?
                                 // e.g. BO5 finished 3-0. Should we show Game 4/5?
@@ -201,9 +274,67 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                                 </TabsTrigger>
                             )}
                         </TabsList>
+
+                        {/* Fullscreen Compact Match Info */}
+                        {isFullscreen && (
+                            <div className="flex items-center gap-4 bg-slate-900/80 px-4 py-1.5 rounded-lg border border-slate-800/50 shadow-sm mx-auto absolute left-1/2 -translate-x-1/2 pointer-events-none">
+                                <div className={`font-bold text-sm ${teamAScore > teamBScore ? 'text-blue-400' : 'text-slate-300'}`}>
+                                    {match.team_a_name}
+                                </div>
+                                <div className="flex items-center gap-2 font-mono font-bold text-lg bg-black/40 px-3 py-0.5 rounded text-white">
+                                    <span className={teamAScore > teamBScore ? 'text-blue-400' : 'text-white'}>{teamAScore}</span>
+                                    <span className="text-slate-600 text-xs">:</span>
+                                    <span className={teamBScore > teamAScore ? 'text-red-400' : 'text-white'}>{teamBScore}</span>
+                                </div>
+                                <div className={`font-bold text-sm ${teamBScore > teamAScore ? 'text-red-400' : 'text-slate-300'}`}>
+                                    {match.team_b_name}
+                                </div>
+                            </div>
+                        )}
+
+
+                        {isFullscreen && (
+                            <div className="flex items-center gap-1 ml-auto bg-slate-800 p-1 rounded-lg border border-slate-700">
+                                <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => draftRef.current?.togglePause()}
+                                    className="h-8 w-8 hover:bg-slate-700 text-slate-300 hover:text-white"
+                                    title={isDraftPaused ? "Resume Draft" : "Pause Draft"}
+                                >
+                                    {isDraftPaused ? <Play className="w-4 h-4 text-green-400 fill-green-400" /> : <Pause className="w-4 h-4" />}
+                                </Button>
+                                <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => {
+                                        if (activeTab && !activeTab.startsWith('new-') && activeTab !== 'summary') {
+                                            setGameToReset(activeTab)
+                                            setResetDialogOpen(true)
+                                        }
+                                    }}
+                                    className="h-8 w-8 hover:bg-slate-700 text-slate-400 hover:text-red-400"
+                                    title="Reset Game"
+                                >
+                                    <RefreshCw className="w-4 h-4" />
+                                </Button>
+
+                                <div className="w-px h-4 bg-slate-700 mx-1" />
+
+                                <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={toggleFullscreen}
+                                    className="h-8 w-8 hover:bg-slate-700 text-slate-300 hover:text-white"
+                                    title="Exit Focus Mode"
+                                >
+                                    <Minimize2 className="w-4 h-4" />
+                                </Button>
+                            </div>
+                        )}
                     </div>
 
-                    <div className="flex-1 relative bg-slate-950">
+                    <div className="flex-1 relative bg-slate-950 min-h-0">
                         {seriesArray.map((num) => {
                             const game = games.find(g => g.game_number === num)
                             const isCreated = !!game
@@ -222,13 +353,21 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                             return (
                                 <TabsContent key={num} value={value} className="absolute inset-0 m-0 data-[state=active]:flex flex-col p-0">
                                     {isCreated ? (
-                                        <DraftInterface
-                                            match={match}
-                                            game={game}
-                                            initialHeroes={heroes}
-                                            teamAGlobalBans={teamAGlobalBans}
-                                            teamBGlobalBans={teamBGlobalBans}
-                                        />
+                                        <div className="flex-1 flex flex-col relative min-h-0 overflow-hidden">
+                                            <DraftInterface
+                                                ref={draftRef}
+                                                match={match}
+                                                game={game}
+                                                initialHeroes={heroes}
+                                                teamAGlobalBans={teamAGlobalBans}
+                                                teamBGlobalBans={teamBGlobalBans}
+                                                onReset={() => {
+                                                    setGameToReset(game.id)
+                                                    setResetDialogOpen(true)
+                                                }}
+                                                onPausedChange={setIsDraftPaused}
+                                            />
+                                        </div>
                                     ) : (
                                         <div className="flex-1 flex items-center justify-center p-12">
                                             {isLocked ? (
@@ -256,6 +395,34 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                     </div>
                 </Tabs>
             </div>
+
+            <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+                <DialogContent className="bg-slate-900 border-slate-800 text-white sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-red-400 flex items-center gap-2">
+                            <RefreshCw className="w-5 h-5" />
+                            Reset Game?
+                        </DialogTitle>
+                        <DialogDescription className="text-slate-400">
+                            Are you sure you want to reset this game? This will:
+                            <ul className="list-disc list-inside mt-2 space-y-1 text-slate-300">
+                                <li>Delete all picks and bans for this game</li>
+                                <li>Allow you to re-select Blue/Red sides</li>
+                                <li>Restart the draft timer</li>
+                            </ul>
+                            <p className="mt-4 text-xs text-slate-500">This action cannot be undone.</p>
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button variant="ghost" onClick={() => setResetDialogOpen(false)} className="text-slate-400 hover:text-white">
+                            Cancel
+                        </Button>
+                        <Button variant="destructive" onClick={handleResetConfirm} className="bg-red-600 hover:bg-red-700 text-white">
+                            Reset Game
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

@@ -115,6 +115,134 @@ export async function deleteTournament(id: string) {
     return { success: true }
 }
 
+export async function importTeam(sourceTeamId: string, targetTournamentId: string, role: string) {
+    const supabase = await createClient()
+
+    // 1. Fetch Source Team
+    const { data: sourceTeam } = await supabase.from('teams').select('*').eq('id', sourceTeamId).single()
+    if (!sourceTeam) return { error: 'Source team not found' }
+
+    // 2. Fetch Source Players
+    const { data: sourcePlayers } = await supabase.from('players').select('*').eq('team_id', sourceTeamId)
+
+    // 3. Generate Unique Slug
+    const baseSlug = slugify(sourceTeam.name)
+    const uniqueSuffix = Math.random().toString(36).substring(2, 6)
+    const newSlug = `${baseSlug}-${uniqueSuffix}`
+
+    // 4. Create New Team
+    const { data: newTeam, error: teamError } = await supabase
+        .from('teams')
+        .insert({
+            tournament_id: targetTournamentId,
+            name: sourceTeam.name,
+            slug: newSlug,
+            short_name: sourceTeam.short_name,
+            logo_url: sourceTeam.logo_url,
+            role: role
+        })
+        .select()
+        .single()
+
+    if (teamError) return { error: 'Failed to create team: ' + teamError.message }
+
+    // 5. Create New Players
+    if (sourcePlayers && sourcePlayers.length > 0) {
+        const newPlayers = sourcePlayers.map((p: any) => ({
+            team_id: newTeam.id,
+            name: p.name,
+            slug: `${slugify(p.name)}-${uniqueSuffix}`,
+            positions: p.positions,
+            roster_role: p.roster_role
+        }))
+        const { error: playersError } = await supabase.from('players').insert(newPlayers)
+        if (playersError) console.error('Error copying players:', playersError)
+    }
+
+    revalidatePath(`/admin/tournaments/${targetTournamentId}`)
+    return { success: true }
+}
+
+export async function addScrimPartners(targetTournamentId: string, teamIds: string[]) {
+    const supabase = await createClient()
+
+    if (!teamIds || teamIds.length === 0) return { error: 'No teams selected' }
+
+    let tournamentId = targetTournamentId
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetTournamentId)
+
+    if (!isUuid) {
+        const { data } = await supabase.from('tournaments').select('id').eq('slug', targetTournamentId).single()
+        if (data) {
+            tournamentId = data.id
+        } else {
+            return { error: 'Tournament not found' }
+        }
+    }
+
+    // Map to objects
+    const rows = teamIds.map(id => ({
+        tournament_id: tournamentId,
+        team_id: id
+    }))
+
+    const { error } = await supabase
+        .from('tournament_scrim_partners')
+        .insert(rows)
+        .select()
+
+    if (error) {
+        // If error is duplicate key, ignores it? Or fails?
+        // insert will fail on duplicates. 
+        // We can use upsert or ignore conflcit? 
+        // .upsert(rows, { onConflict: 'tournament_id, team_id', ignoreDuplicates: true })
+        if (error.code === '23505') { // Unique violation
+            const { error: upsertError } = await supabase
+                .from('tournament_scrim_partners')
+                .upsert(rows, { onConflict: 'tournament_id, team_id', ignoreDuplicates: true })
+
+            if (upsertError) return { error: upsertError.message }
+        } else {
+            return { error: error.message }
+        }
+    }
+
+    revalidatePath(`/admin/tournaments/${targetTournamentId}`)
+    return { success: true }
+}
+
+export async function getScrimPartnerTeams(tournamentId: string) {
+    const supabase = await createClient()
+
+    // Join tournament_scrim_partners with teams
+    const { data, error } = await supabase
+        .from('tournament_scrim_partners')
+        .select(`
+            team_id,
+            team:teams (*)
+        `)
+        .eq('tournament_id', tournamentId)
+
+    if (error) {
+        // If table doesn't exist, this will error. 
+        console.error('Error fetching scrim partners:', error)
+        return []
+    }
+
+    // Flatten structure
+    // data is [{ team: { ... } }, { team: { ... } }]
+    // We want to return Team[] but with a flag maybe? 
+    // Or just Team objects. We will assign role='scrim_partner' manually to them for UI consistency
+
+    const teams = data.map((d: any) => ({
+        ...d.team,
+        role: 'scrim_partner', // Override role for display context
+        is_linked: true // Flag to show it's linked
+    }))
+
+    return teams as Team[]
+}
+
 // --- TEAMS ---
 
 export async function getTeams(tournamentId: string) {
@@ -167,7 +295,8 @@ export async function createTeam(formData: FormData) {
             name,
             slug: slugify(name),
             short_name: shortName || null,
-            logo_url: logoUrl || null
+            logo_url: logoUrl || null,
+            role: formData.get('role') as string || 'participant'
         })
         .select()
         .single()

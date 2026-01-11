@@ -1,8 +1,6 @@
 import * as React from "react"
 
-export function cn(...classes: (string | undefined | null | false)[]) {
-    return classes.filter(Boolean).join(" ")
-}
+import { cn } from "@/lib/utils"
 
 const Button = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link'; size?: 'default' | 'sm' | 'lg' | 'icon' }>(
     ({ className, variant = "default", size = "default", ...props }, ref) => {

@@ -3,8 +3,9 @@ import MatchRoom from '../_components/MatchRoom'
 import { getHeroesByVersion } from '../../heroes/actions'
 import { notFound } from 'next/navigation'
 
-export default async function MatchRoomPage({ params }: { params: { matchId: string } }) {
-    const match = await getMatch(params.matchId)
+export default async function MatchRoomPage({ params }: { params: Promise<{ matchId: string }> }) {
+    const { matchId } = await params
+    const match = await getMatch(matchId)
 
     if (!match) {
         notFound()
