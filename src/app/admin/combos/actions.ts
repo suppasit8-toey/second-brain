@@ -94,3 +94,118 @@ export async function deleteCombo(id: string) {
     revalidatePath('/admin/combos')
     return { success: true }
 }
+
+export async function getSuggestedCombos(versionId: number) {
+    const supabase = await createClient()
+
+    // 1. Fetch Existing Combos for THIS version to exclude them
+    const { data: existing } = await supabase
+        .from('hero_combos')
+        .select('hero_a_id, hero_a_position, hero_b_id, hero_b_position')
+        .eq('version_id', versionId)
+
+    const existingSet = new Set<string>()
+    existing?.forEach((c: any) => {
+        // Store both directions to be safe
+        existingSet.add(`${c.hero_a_id}|${c.hero_b_id}`)
+        existingSet.add(`${c.hero_b_id}|${c.hero_a_id}`)
+    })
+
+    // 2. Fetch Scrim Data
+    const { data: matches } = await supabase
+        .from('draft_matches')
+        .select(`
+            games:draft_games(
+                id,
+                winner,
+                picks:draft_picks(
+                    hero_id,
+                    side,
+                    assigned_role,
+                    type
+                )
+            )
+        `)
+        .eq('version_id', versionId)
+        .eq('status', 'finished')
+
+    // 3. Analyze Pairs
+    // Key: `${ID_A}|${POS_A}|${ID_B}|${POS_B}` (ID_A < ID_B to handle uniqueness)
+    const suggestions = new Map<string, {
+        heroA: string, posA: string,
+        heroB: string, posB: string,
+        wins: number, games: number
+    }>()
+
+    matches?.forEach(match => {
+        match.games.forEach((game: any) => {
+            const blueTeam: { id: string, role: string }[] = []
+            const redTeam: { id: string, role: string }[] = []
+
+            game.picks?.forEach((p: any) => {
+                if (p.type === 'PICK' && p.assigned_role) {
+                    if (p.side === 'BLUE') blueTeam.push({ id: p.hero_id, role: p.assigned_role })
+                    else redTeam.push({ id: p.hero_id, role: p.assigned_role })
+                }
+            })
+
+            const processTeam = (team: { id: string, role: string }[], isWinner: boolean) => {
+                // Generate all pairs
+                for (let i = 0; i < team.length; i++) {
+                    for (let j = i + 1; j < team.length; j++) {
+                        const p1 = team[i]
+                        const p2 = team[j]
+
+                        // Sort to ensure consistency (Lexicographical ID sort)
+                        // Actually, strict ID sort might mess up Position assignment if logic depends on order?
+                        // No, just keep track of who is who.
+
+                        let h1 = p1, h2 = p2
+                        if (p1.id > p2.id) { h1 = p2; h2 = p1 } // Swap so h1.id < h2.id
+
+                        // Check if exists in DB
+                        // We only checked ID pairs in existingSet for loose collision detection, which is good enough
+                        // But strictly we should check positions too if we want "Mid+Jungle" vs "Mid+Roam" distinct?
+                        // Usually Synergy is Hero+Hero regardless of role, OR specific role. 
+                        // Let's assume Hero+Hero key for exclusion to avoid spamming same hero pairs.
+                        if (existingSet.has(`${h1.id}|${h2.id}`)) continue;
+
+                        const key = `${h1.id}|${h1.role}|${h2.id}|${h2.role}`
+
+                        if (!suggestions.has(key)) {
+                            suggestions.set(key, {
+                                heroA: h1.id, posA: h1.role,
+                                heroB: h2.id, posB: h2.role,
+                                wins: 0, games: 0
+                            })
+                        }
+
+                        const s = suggestions.get(key)!
+                        s.games++
+                        if (isWinner) s.wins++
+                    }
+                }
+            }
+
+            processTeam(blueTeam, game.winner === 'Blue')
+            processTeam(redTeam, game.winner === 'Red')
+        })
+    })
+
+    // 4. Fetch Details & Format
+    const { data: heroes } = await supabase.from('heroes').select('id, name, icon_url')
+    const heroMap = new Map<string, any>()
+    heroes?.forEach((h: any) => heroMap.set(h.id, h))
+
+    const results = Array.from(suggestions.values())
+        .filter(s => s.games >= 3) // Minimum threshold to reduce noise
+        .map(s => ({
+            ...s,
+            heroAData: heroMap.get(s.heroA),
+            heroBData: heroMap.get(s.heroB),
+            winRate: Math.round((s.wins / s.games) * 100 / 5) * 5 // Round to nearest 5 as requested
+        }))
+        .sort((a, b) => b.games - a.games) // Most frequent first
+
+    return results
+}

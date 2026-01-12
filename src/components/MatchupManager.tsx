@@ -6,6 +6,7 @@ import { getHeroesByVersion } from '@/app/admin/heroes/actions'
 import { saveMatchups, getMatchups } from '@/app/admin/matchups/actions'
 import { Plus, Search, Save, X, Filter, AlertCircle, Pencil, ChevronDown, Check, Minus } from 'lucide-react'
 import Image from 'next/image'
+import MatchupSuggestions from '@/app/admin/matchups/_components/MatchupSuggestions'
 
 interface MatchupManagerProps {
     initialVersions: Version[];
@@ -307,6 +308,18 @@ export default function MatchupManager({ initialVersions }: MatchupManagerProps)
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
+            {/* CEREBRO SUGGESTIONS */}
+            <div className="mb-8">
+                <MatchupSuggestions
+                    versionId={selectedVersionId}
+                    onMatchupAdded={() => {
+                        // If current view is related to the added matchup, we might want to refresh
+                        // But since we don't know exactly what was added, we rely on user navigation or manual refresh
+                        // Or we can just let it be independent additions
+                    }}
+                />
+            </div>
+
             {/* 1. TOP TOOLBAR */}
             <div className="glass-card p-4 md:p-6 flex flex-col gap-6 relative overflow-hidden">
                 <div className="flex flex-col md:flex-row items-end md:items-center gap-4 z-10">

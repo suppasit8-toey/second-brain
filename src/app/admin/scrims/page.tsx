@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { Plus, RotateCw, Trash, Search, X, Calendar as CalendarIcon, Check, FileDown, FileUp, Loader2 } from 'lucide-react'
+import { Plus, RotateCw, Trash, Search, X, Calendar as CalendarIcon, Check, FileDown, FileUp, Loader2, AlertTriangle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog'
 import DeleteMatchButton from '../draft/_components/DeleteMatchButton'
@@ -911,6 +911,17 @@ export default function ScrimManagerPage() {
                                                     <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider">
                                                         {scrim.mode ? `${scrim.mode.replace('BO', '')} Game` : '1 Game'}
                                                     </span>
+
+                                                    {/* Missing MVP Indicator */}
+                                                    {isSimulator && scrim.games?.some((g: any) => !g.blue_key_player_id || !g.red_key_player_id) && (
+                                                        <>
+                                                            <span className="text-slate-700 text-[10px]">•</span>
+                                                            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-950/60 border border-amber-800/80 text-amber-500 text-[9px] font-black uppercase tracking-wider animate-pulse">
+                                                                <AlertTriangle className="w-2.5 h-2.5" />
+                                                                Missing MVP
+                                                            </div>
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>

@@ -7,6 +7,7 @@ import { getCombos, saveCombo, deleteCombo, updateCombo } from '@/app/admin/comb
 import { Plus, Link as LinkIcon, Handshake, Trash2, Edit2, SlidersHorizontal, X } from 'lucide-react'
 import Image from 'next/image'
 import { ConfigProvider, theme, Card, Select, Segmented, Button, Input, Avatar, Space, message, Modal } from 'antd'
+import ComboSuggestions from '@/app/admin/combos/_components/ComboSuggestions'
 
 interface ComboManagerProps {
     initialVersions: Version[];
@@ -267,6 +268,14 @@ export default function ComboManager({ initialVersions }: ComboManagerProps) {
                     </div>
                 </div>
 
+                {/* AI SUGGESTIONS */}
+                <ComboSuggestions
+                    versionId={selectedVersionId}
+                    onComboAdded={async () => {
+                        const newCombos = await getCombos(selectedVersionId)
+                        setCombos(newCombos)
+                    }}
+                />
 
                 {/* LIST OF COMBOS */}
                 <div className="space-y-4">
