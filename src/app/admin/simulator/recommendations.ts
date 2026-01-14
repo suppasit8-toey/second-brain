@@ -489,7 +489,7 @@ export async function getRecommendations(
         analyst: sortedRecs,
         history: sortedRecs,
         hybrid: sortedRecs,
-        smartBan: [],
+        smartBan: [] as Recommendation[],
         warning: warningMessage,
         heroPools: {
             ally: formatPool(teamStats),
