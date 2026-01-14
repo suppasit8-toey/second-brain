@@ -39,6 +39,75 @@ export default async function HeroDetailPage({ params }: Props) {
         .eq('is_active', true)
         .single();
 
+    // --- NEW: Calculate Win Rate from Scrim History ---
+    let calculatedWinRate = 0;
+    let totalGames = 0;
+
+    if (activeVersion) {
+        // A. Get all match IDs for this version
+        const { data: matches } = await supabase
+            .from('draft_matches')
+            .select('id')
+            .eq('version_id', activeVersion.id);
+
+        const matchIds = matches?.map(m => m.id) || [];
+
+        if (matchIds.length > 0) {
+            // B. Get all picks for this hero in those matches
+            // We use !inner on draft_games to ensure we only get picks that have a valid game
+            // We select draft_games explicitly to check the winner
+            const { data: scrimPicks } = await supabase
+                .from('draft_picks')
+                .select(`
+                    side,
+                    draft_games!inner (
+                        winner,
+                        match_id
+                    )
+                `)
+                .eq('hero_id', hero.id)
+                .eq('type', 'PICK')
+                .in('draft_games.match_id', matchIds);
+
+            if (scrimPicks && scrimPicks.length > 0) {
+                totalGames = scrimPicks.length;
+                const wins = scrimPicks.filter((pick: any) => {
+                    const game = pick.draft_games;
+                    if (!game || !game.winner) return false;
+
+                    const pSide = pick.side?.toUpperCase(); // "BLUE" or "RED"
+                    const gWinner = game.winner?.toUpperCase(); // "BLUE" or "RED" or "Blue"/"Red" depending on DB consistency
+
+                    return pSide === gWinner;
+                }).length;
+
+                calculatedWinRate = Math.round((wins / totalGames) * 100);
+            }
+        }
+    }
+
+    // Override the static win_rate with our dynamic scrim win rate
+    // We treat the first stats entry as the active one for display purposes
+    if (!hero.hero_stats) {
+        hero.hero_stats = [];
+    }
+
+    if (hero.hero_stats.length === 0) {
+        // Create a dummy stat object if none exists
+        hero.hero_stats.push({
+            tier: '?',
+            power_spike: 'Unknown',
+            win_rate: calculatedWinRate,
+            matches_played: totalGames,
+            version_id: activeVersion?.id
+        });
+    } else {
+        // Update existing
+        hero.hero_stats[0].win_rate = calculatedWinRate;
+        hero.hero_stats[0].matches_played = totalGames;
+    }
+    // --------------------------------------------------
+
     // 3. Fetch Matchups (if active version exists)
     let matchups: any[] = [];
 

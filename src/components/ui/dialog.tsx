@@ -57,6 +57,36 @@ const DialogTrigger = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttrib
 )
 DialogTrigger.displayName = "DialogTrigger"
 
+const DialogClose = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { asChild?: boolean }>(
+    ({ className, onClick, asChild, children, ...props }, ref) => {
+        const { onOpenChange } = React.useContext(DialogContext);
+
+        if (asChild && React.isValidElement(children)) {
+            return React.cloneElement(children as React.ReactElement<any>, {
+                onClick: (e: React.MouseEvent) => {
+                    onOpenChange(false);
+                    (children as React.ReactElement<any>).props.onClick?.(e);
+                }
+            })
+        }
+
+        return (
+            <button
+                ref={ref}
+                onClick={(e) => {
+                    onOpenChange(false);
+                    onClick?.(e);
+                }}
+                className={className}
+                {...props}
+            >
+                {children}
+            </button>
+        )
+    }
+)
+DialogClose.displayName = "DialogClose"
+
 import { createPortal } from "react-dom"
 
 const DialogContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
@@ -120,4 +150,4 @@ const DialogFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
 )
 DialogFooter.displayName = "DialogFooter"
 
-export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription }
+export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription, DialogClose }

@@ -118,6 +118,13 @@ export interface DraftMatch {
     created_at?: string;
     tournament_id?: string;
     match_date?: string; // ISO date string
+    ai_metadata?: {
+        mode: 'PVP' | 'PVE';
+        settings: {
+            dataSource: 'GLOBAL' | 'TOURNAMENT';
+            tournamentId?: string;
+        };
+    };
 
     // Joins
     version?: Version;

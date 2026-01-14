@@ -6,23 +6,25 @@ import { redirect } from 'next/navigation'
 
 export async function getLatestScrimId() {
     const supabase = await createClient()
-    const { data: latestMatch } = await supabase
+    const { data: matches } = await supabase
         .from('draft_matches')
         .select('slug')
         .ilike('slug', 'SCRIM%')
         .order('slug', { ascending: false })
-        .limit(1)
-        .single()
+        .limit(50)
 
-    let nextNum = 1
-    if (latestMatch && latestMatch.slug) {
-        const numPart = latestMatch.slug.replace('SCRIM', '')
-        const parsed = parseInt(numPart)
-        if (!isNaN(parsed)) {
-            nextNum = parsed + 1
-        }
+    let maxNum = 0
+    if (matches && matches.length > 0) {
+        matches.forEach((m: { slug: string }) => {
+            const numPart = m.slug.replace('SCRIM', '')
+            const parsed = parseInt(numPart)
+            if (!isNaN(parsed) && parsed > maxNum) {
+                maxNum = parsed
+            }
+        })
     }
 
+    const nextNum = maxNum + 1
     return `SCRIM${nextNum.toString().padStart(6, '0')}`
 }
 
@@ -41,70 +43,72 @@ export async function createScrim(formData: FormData) {
         return { error: 'Missing required fields' }
     }
 
-    // 1. Generate Slug: SCRIMxxxxxx
-    // Query for the latest slug starting with 'SCRIM'
-    const { data: latestMatch } = await supabase
-        .from('draft_matches')
-        .select('slug')
-        .ilike('slug', 'SCRIM%')
-        .order('slug', { ascending: false })
-        .limit(1)
-        .single()
+    let attempts = 0
+    let savedMatch = null
+    let errorMsg = ''
 
-    let nextNum = 1
-    if (latestMatch && latestMatch.slug) {
-        // Expected format: SCRIM000001
-        const numPart = latestMatch.slug.replace('SCRIM', '')
-        const parsed = parseInt(numPart)
-        if (!isNaN(parsed)) {
-            nextNum = parsed + 1
+    while (attempts < 3 && !savedMatch) {
+        // 1. Generate Slug using Robust Scan
+        const { data: matches } = await supabase
+            .from('draft_matches')
+            .select('slug')
+            .ilike('slug', 'SCRIM%')
+            .order('slug', { ascending: false })
+            .limit(50)
+
+        let maxNum = 0
+        if (matches && matches.length > 0) {
+            matches.forEach((m: { slug: string }) => {
+                const numPart = m.slug.replace('SCRIM', '')
+                const parsed = parseInt(numPart)
+                if (!isNaN(parsed) && parsed > maxNum) {
+                    maxNum = parsed
+                }
+            })
+        }
+
+        const nextNum = maxNum + 1
+        const newSlug = `SCRIM${nextNum.toString().padStart(6, '0')}`
+        const matchType = mode === 'FULL' ? 'scrim_simulator' : 'scrim_summary'
+
+        // 2. Try Create Match
+        const { data: match, error } = await supabase
+            .from('draft_matches')
+            .insert({
+                version_id: parseInt(versionId),
+                tournament_id: tournamentId,
+                team_a_name: teamA,
+                team_b_name: teamB,
+                mode: bestOf,
+                status: 'ongoing',
+                match_date: matchDate,
+                slug: newSlug,
+                match_type: matchType
+            })
+            .select()
+            .single()
+
+        if (error) {
+            if (error.code === '23505') { // Unique constraint violation (duplicate slug)
+                console.warn(`Slug collision for ${newSlug}, retrying...`)
+                attempts++
+                errorMsg = 'Failed to generate unique Match ID. Please try again.'
+            } else {
+                return { error: error.message }
+            }
+        } else {
+            savedMatch = match
         }
     }
 
-    const newSlug = `SCRIM${nextNum.toString().padStart(6, '0')}`
-
-    const matchType = mode === 'FULL' ? 'scrim_simulator' : 'scrim_summary'
-
-    // 2. Create Match
-    const { data: match, error } = await supabase
-        .from('draft_matches')
-        .insert({
-            version_id: parseInt(versionId),
-            tournament_id: tournamentId,
-            team_a_name: teamA,
-            team_b_name: teamB,
-            mode: bestOf,
-            status: 'ongoing',
-            match_date: matchDate,
-            slug: newSlug,
-            match_type: matchType
-        })
-        .select()
-        .single()
-
-    if (error) {
-        return { error: error.message }
+    if (!savedMatch) {
+        return { error: errorMsg || 'Failed to create match after multiple attempts.' }
     }
+
+    const match = savedMatch
 
     // 3. Handle Mode Redirect
     if (mode === 'FULL') {
-        // Create first game? Or let Simulator handle it?
-        // Simulator expects a game to exist OR creates one.
-        // We now want to let the Simulator (NewGameButton) handle the creation of Game 1 so the user can choosing Sides.
-
-        /* 
-        const { error: gameError } = await supabase
-            .from('draft_games')
-            .insert({
-                match_id: match.id,
-                game_number: 1,
-                blue_team_name: teamA,
-                red_team_name: teamB
-            })
-
-        if (gameError) return { error: `Match created but game failed: ${gameError.message}` }
-        */
-
         redirect(`/admin/simulator/${match.slug}`)
     } else {
         // Mode 2: Summary -> Redirect to Summary Entry Page
@@ -260,7 +264,9 @@ export async function saveBatchScrimSummary(matchId: string, payload: any) {
             game_number: gData.gameNumber,
             blue_team_name: gData.blueTeamName,
             red_team_name: gData.redTeamName,
-            winner: gData.winner === 'blue' ? 'Blue' : 'Red'
+            winner: gData.winner === 'blue' ? 'Blue' : 'Red',
+            blue_key_player_id: gData.blueKeyPlayer || null,
+            red_key_player_id: gData.redKeyPlayer || null
         }
 
         if (!gameId) {

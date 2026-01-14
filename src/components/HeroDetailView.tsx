@@ -70,6 +70,7 @@ export default function HeroDetailView({ hero, matchups = [], combos = [] }: { h
                     <div className="px-6 py-2 rounded-lg bg-white/5 border border-white/5 text-center min-w-[110px] group-hover:border-white/10 transition-colors">
                         <h3 className="text-[10px] font-bold text-text-muted uppercase tracking-widest mb-0.5">Win Rate</h3>
                         <p className="text-lg font-bold text-green-400">{currentStats.win_rate || 50}%</p>
+                        <p className="text-[10px] text-text-muted mt-1 font-medium">{currentStats.matches_played || 0} Matches</p>
                     </div>
                 </div>
 

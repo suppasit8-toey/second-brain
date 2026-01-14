@@ -54,12 +54,9 @@ const SelectTrigger = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttrib
 SelectTrigger.displayName = "SelectTrigger"
 
 const SelectValue = React.forwardRef<HTMLSpanElement, React.HTMLAttributes<HTMLSpanElement> & { placeholder?: string }>(
-    ({ className, placeholder, ...props }, ref) => {
+    ({ className, placeholder, children, ...props }, ref) => {
         const ctx = React.useContext(SelectContext);
-        // We'd need to find the label for the value. For this simplified mock, we might just show the value or rely on the user passing text.
-        // Actually, for a mock, let's just show the value. Real shadcn finds the child text. 
-        // We will assume the use of this component corresponds to simple value display.
-        return <span ref={ref} className={className} {...props}>{ctx?.value || placeholder}</span>
+        return <span ref={ref} className={className} {...props}>{children || ctx?.value || placeholder}</span>
     }
 )
 SelectValue.displayName = "SelectValue"

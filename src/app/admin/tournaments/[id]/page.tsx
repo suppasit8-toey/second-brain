@@ -1,14 +1,14 @@
 'use client'
 
 import { useState, useEffect, use } from 'react'
-import { getTournament, getTeams, getScrimPartnerTeams, createTeam, deleteTeam, getPlayers, createPlayer, deletePlayer } from '../actions'
+import { getTournament, getTeams, getScrimPartnerTeams, createTeam, updateTeam, deleteTeam, getPlayers, createPlayer, deletePlayer } from '../actions'
 import { Tournament, Team } from '@/utils/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Trash2, Plus, Users, ArrowLeft, Shield, Upload, X } from 'lucide-react'
+import { Trash2, Plus, Users, ArrowLeft, Shield, Upload, X, Pencil } from 'lucide-react'
 import { CldUploadButton } from 'next-cloudinary'
 // import { useToast } from '@/components/ui/use-toast'
 import Link from 'next/link'
@@ -21,6 +21,7 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
     const [teams, setTeams] = useState<Team[]>([])
     const [isOpen, setIsOpen] = useState(false)
     const [uploadedLogo, setUploadedLogo] = useState('')
+    const [editingTeam, setEditingTeam] = useState<Team | null>(null)
     // const { toast } = useToast()
 
     useEffect(() => {
@@ -38,20 +39,27 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
         }
     }
 
-    async function handleCreateTeam(formData: FormData) {
+    async function handleTeamSubmit(formData: FormData) {
         if (!tournament) return
         formData.append('tournament_id', tournament.id)
         formData.append('path', `/admin/tournaments/${id}`)
 
-        const res = await createTeam(formData)
+        // Decide Create or Update
+        let res;
+        if (editingTeam) {
+            formData.append('id', editingTeam.id)
+            res = await updateTeam(formData)
+        } else {
+            res = await createTeam(formData)
+        }
 
         if (res.error) {
             alert('Error: ' + res.error)
         } else {
-            // alert('Success: Team added!')
-            // alert('Success: Team added!')
+            // alert('Success!')
             setIsOpen(false)
             setUploadedLogo('')
+            setEditingTeam(null)
             loadData()
         }
     }
@@ -65,6 +73,18 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
             // alert('Success: Team removed')
             loadData()
         }
+    }
+
+    const openCreate = () => {
+        setEditingTeam(null)
+        setUploadedLogo('')
+        setIsOpen(true)
+    }
+
+    const openEdit = (team: Team) => {
+        setEditingTeam(team)
+        setUploadedLogo(team.logo_url || '')
+        setIsOpen(true)
     }
 
     if (!tournament) return <div className="p-8 text-slate-500">Loading tournament...</div>
@@ -102,31 +122,31 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
                     <Button
                         size="sm"
                         className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
-                        onClick={() => setIsOpen(true)}
+                        onClick={openCreate}
                     >
                         <Plus className="w-4 h-4" /> Add Team
                     </Button>
                 </div>
 
-                {/* Standard Add Team Dialog */}
+                {/* Team Dialog (Create/Edit) */}
                 <Dialog open={isOpen} onOpenChange={(open) => {
                     setIsOpen(open)
-                    if (!open) setUploadedLogo('')
+                    if (!open) { setUploadedLogo(''); setEditingTeam(null); }
                 }}>
                     <DialogContent className="bg-slate-900 border-slate-800 text-white">
                         <DialogHeader>
-                            <DialogTitle>Add Participating Team</DialogTitle>
+                            <DialogTitle>{editingTeam ? 'Edit Team' : 'Add Participating Team'}</DialogTitle>
                         </DialogHeader>
-                        <form action={handleCreateTeam} className="space-y-4">
+                        <form action={handleTeamSubmit} className="space-y-4">
                             <input type="hidden" name="role" value="participant" />
                             <div>
                                 <Label htmlFor="name">Team Name</Label>
-                                <Input id="name" name="name" placeholder="Full Team Name" required className="bg-slate-950 border-slate-800" />
+                                <Input id="name" name="name" defaultValue={editingTeam?.name} placeholder="Full Team Name" required className="bg-slate-950 border-slate-800" />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <Label htmlFor="short_name">Short Name (Tag)</Label>
-                                    <Input id="short_name" name="short_name" placeholder="e.g. BAC" className="bg-slate-950 border-slate-800" />
+                                    <Input id="short_name" name="short_name" defaultValue={editingTeam?.short_name || ''} placeholder="e.g. BAC" className="bg-slate-950 border-slate-800" />
                                 </div>
                                 <div>
                                     <Label>Team Logo</Label>
@@ -162,7 +182,7 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
                                     </div>
                                 </div>
                             </div>
-                            <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700">Add Participating Team</Button>
+                            <Button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700">{editingTeam ? 'Save Changes' : 'Add Participating Team'}</Button>
                         </form>
                     </DialogContent>
                 </Dialog>
@@ -172,9 +192,14 @@ export default function TournamentDetailPage({ params }: { params: Promise<{ id:
                         <Card key={team.id} className="bg-slate-900 border-slate-800 text-white group hover:border-indigo-500/50 transition-colors">
                             <CardHeader className="flex flex-row items-center justify-between pb-2">
                                 <CardTitle className="text-lg font-bold truncate pr-2">{team.name}</CardTitle>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:text-red-400 -mr-2" onClick={() => handleDeleteTeam(team.id)}>
-                                    <Trash2 className="w-4 h-4" />
-                                </Button>
+                                <div className="flex items-center -mr-2">
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:text-blue-400" onClick={() => openEdit(team)}>
+                                        <Pencil className="w-4 h-4" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600 hover:text-red-400" onClick={() => handleDeleteTeam(team.id)}>
+                                        <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                </div>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="flex items-center gap-4">

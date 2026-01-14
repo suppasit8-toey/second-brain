@@ -108,11 +108,11 @@ export default function PostDraftResult({
     // ... existing logic ...
 
     const handleSubmit = async () => {
-        // ... (validation) ...
-        if (!winner || !blueKeyPlayer || !redKeyPlayer) {
-            alert("Please select a Winner and Key Players for BOTH teams.")
-            return
-        }
+        // Validation Check - DISABLED per user request
+        // if (!winner || !blueKeyPlayer || !redKeyPlayer) {
+        //     alert("Please select a Winner and Key Players for BOTH teams.")
+        //     return
+        // }
         const blueIds = Object.values(bluePicks)
         const redIds = Object.values(redPicks)
 
@@ -125,31 +125,62 @@ export default function PostDraftResult({
         // Compile Data
         const picksData: any[] = []
 
+        // Draft Slot Mappings (Absolute 1-18)
+        const BLUE_PICK_SLOTS = [5, 8, 9, 16, 17]
+        const RED_PICK_SLOTS = [6, 7, 10, 15, 18]
+        const BLUE_BAN_SLOTS = [1, 3, 12, 14]
+        const RED_BAN_SLOTS = [2, 4, 11, 13]
+
         // Process Blue Picks
-        Object.entries(bluePicks).forEach(([idx, heroId]) => {
-            picksData.push({
-                hero_id: heroId,
-                type: 'PICK',
-                side: 'BLUE',
-                position_index: parseInt(idx) + 1,
-                assigned_role: assignments[heroId] || 'Flex'
-            })
+        Object.entries(bluePicks).forEach(([idxStr, heroId]) => {
+            const idx = parseInt(idxStr)
+            if (idx >= 0 && idx < BLUE_PICK_SLOTS.length) {
+                picksData.push({
+                    hero_id: heroId,
+                    type: 'PICK',
+                    side: 'BLUE',
+                    position_index: BLUE_PICK_SLOTS[idx],
+                    assigned_role: assignments[heroId] || 'Flex'
+                })
+            }
         })
 
         // Process Red Picks
-        Object.entries(redPicks).forEach(([idx, heroId]) => {
-            picksData.push({
-                hero_id: heroId,
-                type: 'PICK',
-                side: 'RED',
-                position_index: parseInt(idx) + 1,
-                assigned_role: assignments[heroId] || 'Flex'
-            })
+        Object.entries(redPicks).forEach(([idxStr, heroId]) => {
+            const idx = parseInt(idxStr)
+            if (idx >= 0 && idx < RED_PICK_SLOTS.length) {
+                picksData.push({
+                    hero_id: heroId,
+                    type: 'PICK',
+                    side: 'RED',
+                    position_index: RED_PICK_SLOTS[idx],
+                    assigned_role: assignments[heroId] || 'Flex'
+                })
+            }
         })
 
-        // Process Bans (Standard)
-        blueBans.forEach((heroId, idx) => picksData.push({ hero_id: heroId, type: 'BAN', side: 'BLUE', position_index: idx + 1 }))
-        redBans.forEach((heroId, idx) => picksData.push({ hero_id: heroId, type: 'BAN', side: 'RED', position_index: idx + 1 }))
+        // Process Bans
+        blueBans.forEach((heroId, idx) => {
+            if (idx >= 0 && idx < BLUE_BAN_SLOTS.length) {
+                picksData.push({
+                    hero_id: heroId,
+                    type: 'BAN',
+                    side: 'BLUE',
+                    position_index: BLUE_BAN_SLOTS[idx]
+                });
+            }
+        });
+
+        redBans.forEach((heroId, idx) => {
+            if (idx >= 0 && idx < RED_BAN_SLOTS.length) {
+                picksData.push({
+                    hero_id: heroId,
+                    type: 'BAN',
+                    side: 'RED',
+                    position_index: RED_BAN_SLOTS[idx]
+                });
+            }
+        });
 
         const res = await finishGame({
             gameId,

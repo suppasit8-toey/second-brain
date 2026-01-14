@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 
 interface FinishGameData {
     gameId: string;
-    winner: 'Blue' | 'Red';
+    winner: 'Blue' | 'Red' | null;
     mvpHeroId?: string; // Optional (legacy) or mapped to winner
     blueKeyPlayer?: string;
     redKeyPlayer?: string;
@@ -24,19 +24,25 @@ export async function finishGame(data: FinishGameData) {
     const supabase = await createClient()
 
     // 1. Update Game Result
+    // Sanitize inputs
+    const blueKeyId = data.blueKeyPlayer || null
+    const redKeyId = data.redKeyPlayer || null
+
+    // 1. Update Game Result
     const updatePayload: any = {
         winner: data.winner,
         notes: data.notes,
         status: 'finished',
         // Map new fields if columns exist, or put in analysis_data
-        blue_key_player_id: data.blueKeyPlayer,
-        red_key_player_id: data.redKeyPlayer,
+        blue_key_player_id: blueKeyId,
+        red_key_player_id: redKeyId,
         analysis_data: data.winPrediction
     }
 
-    // Set MVP based on winner for backward compatibility if needed, or simple logic
-    if (data.winner === 'Blue') updatePayload.mvp_hero_id = data.blueKeyPlayer
-    else updatePayload.mvp_hero_id = data.redKeyPlayer
+    // Set MVP based on winner for backward compatibility if needed
+    if (data.winner === 'Blue') updatePayload.mvp_hero_id = blueKeyId
+    else if (data.winner === 'Red') updatePayload.mvp_hero_id = redKeyId
+    else updatePayload.mvp_hero_id = null
 
     const { error: gameError } = await supabase
         .from('draft_games')

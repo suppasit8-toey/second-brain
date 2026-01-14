@@ -12,9 +12,29 @@ export async function createMatch(prevState: any, formData: FormData) {
     const mode = formData.get('mode') as DraftMode
     const version_id = formData.get('version_id') as string
     const tournament_id = formData.get('tournament_id') as string || null
+    const ai_mode = formData.get('ai_mode') as string || 'PVP'
+    const ai_settings_json = formData.get('ai_settings') as string || '{}'
 
     if (!team_a_name || !team_b_name || !mode || !version_id) {
         return { message: 'Missing required fields', success: false }
+    }
+
+    // Generate DRAFT Slug
+    // We count existing DRAFT matches to determine next number
+    const { count } = await supabase
+        .from('draft_matches')
+        .select('*', { count: 'exact', head: true })
+        .like('slug', 'DRAFT%')
+
+    const nextNum = (count || 0) + 1
+    const slug = `DRAFT${nextNum.toString().padStart(6, '0')}`
+
+    let settings = {}
+    try {
+        settings = JSON.parse(ai_settings_json)
+    } catch (e) {
+        console.error('Error parsing AI settings:', e)
+        return { message: 'Invalid AI Settings JSON', success: false }
     }
 
     const { data, error } = await supabase
@@ -26,14 +46,16 @@ export async function createMatch(prevState: any, formData: FormData) {
             version_id: parseInt(version_id),
             tournament_id,
             status: 'ongoing',
-            match_type: 'simulation'
+            match_type: 'simulation',
+            slug,
+            ai_metadata: { mode: ai_mode, settings }
         }])
         .select()
         .single()
 
     if (error) {
-        console.error('Error creating match:', error)
-        return { message: 'Error creating match: ' + error.message, success: false }
+        console.error('Error creating match (Supabase):', JSON.stringify(error, null, 2))
+        return { message: 'Error creating match: ' + (error.message || JSON.stringify(error)), success: false }
     }
 
     // Games are now created manually one by one via NewGameButton to allow side selection
@@ -58,7 +80,8 @@ export async function createMatch(prevState: any, formData: FormData) {
     // }
 
     revalidatePath('/admin/simulator')
-    return { message: 'Match created successfully!', success: true, matchId: data.id }
+    // Redirect to slug if possible, otherwise ID
+    return { message: 'Match created successfully!', success: true, matchId: data.slug || data.id }
 }
 
 export async function getMatches() {
@@ -381,3 +404,26 @@ export async function getMatchAnalysis(matchId: string) {
     return { laneAnalysis, comboAnalysis, keyPlayerAnalysis }
 }
 
+export async function updateGameMVP(gameId: string, side: 'blue' | 'red', heroId: string) {
+    const supabase = await createClient()
+
+    const field = side === 'blue' ? 'blue_key_player_id' : 'red_key_player_id'
+
+    const { data, error } = await supabase
+        .from('draft_games')
+        .update({ [field]: heroId })
+        .eq('id', gameId)
+        .select('match_id')
+        .single()
+
+    if (error) {
+        console.error('Error updating MVP:', error)
+        return { success: false, message: error.message }
+    }
+
+    if (data?.match_id) {
+        revalidatePath(`/admin/simulator/${data.match_id}`)
+    }
+
+    return { success: true }
+}

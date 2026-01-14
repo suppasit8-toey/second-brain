@@ -7,7 +7,8 @@ import { DraftPick } from '@/utils/types'
 interface FinishGameData {
     gameId: string;
     winner: 'Blue' | 'Red';
-    mvpHeroId?: string;
+    blueKeyPlayer?: string;
+    redKeyPlayer?: string;
     notes?: string;
     picks: {
         hero_id: string;
@@ -26,7 +27,8 @@ export async function finishGame(data: FinishGameData) {
         .from('draft_games')
         .update({
             winner: data.winner,
-            mvp_hero_id: data.mvpHeroId,
+            blue_key_player_id: data.blueKeyPlayer,
+            red_key_player_id: data.redKeyPlayer,
             notes: data.notes,
             status: 'finished'
         })

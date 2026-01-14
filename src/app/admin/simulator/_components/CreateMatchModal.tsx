@@ -46,6 +46,8 @@ export default function CreateMatchModal({ versions, tournaments }: CreateMatchM
     // UI States
     const [selectedMode, setSelectedMode] = useState<string>('BO5')
     const [isCustomTeams, setIsCustomTeams] = useState(false)
+    const [aiMode, setAiMode] = useState<'PVP' | 'PVE'>('PVP')
+    const [aiDataSource, setAiDataSource] = useState<'GLOBAL' | 'TOURNAMENT'>('GLOBAL')
 
     // Tournament Logic
     const [selectedTournament, setSelectedTournament] = useState<string>('none')
@@ -79,6 +81,13 @@ export default function CreateMatchModal({ versions, tournaments }: CreateMatchM
         }
     }, [state, router])
 
+    // Update Team B if AI Mode changes (Default only if empty)
+    useEffect(() => {
+        if (aiMode === 'PVE' && !teamB) {
+            setTeamB('Cerebro AI')
+        }
+    }, [aiMode])
+
     return (
         <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -86,7 +95,7 @@ export default function CreateMatchModal({ versions, tournaments }: CreateMatchM
                     + Create New Match
                 </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[500px] bg-slate-900 border-slate-800 text-white">
+            <DialogContent className="sm:max-w-[600px] bg-slate-900 border-slate-800 text-white">
                 <DialogHeader>
                     <DialogTitle className="text-xl font-bold">Setup New Match</DialogTitle>
                 </DialogHeader>
@@ -97,6 +106,27 @@ export default function CreateMatchModal({ versions, tournaments }: CreateMatchM
                             {state.message}
                         </div>
                     )}
+
+                    <input type="hidden" name="ai_mode" value={aiMode} />
+                    <input type="hidden" name="ai_settings" value={JSON.stringify({ dataSource: aiDataSource, tournamentId: selectedTournament })} />
+
+                    {/* MODE SELECTION TABS */}
+                    <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-lg">
+                        <button
+                            type="button"
+                            onClick={() => setAiMode('PVP')}
+                            className={`py-2 px-4 rounded-md text-sm font-bold transition-all ${aiMode === 'PVP' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            Player VS Player
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setAiMode('PVE')}
+                            className={`py-2 px-4 rounded-md text-sm font-bold transition-all ${aiMode === 'PVE' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                        >
+                            Player VS Bot (AI)
+                        </button>
+                    </div>
 
                     <div className="grid gap-2">
                         <Label>Patch Version</Label>
@@ -113,13 +143,21 @@ export default function CreateMatchModal({ versions, tournaments }: CreateMatchM
                     {/* Tournament Selection */}
                     <div className="grid gap-2">
                         <Label>Tournament (Optional)</Label>
+                        <div className="text-[10px] text-slate-500 mb-1">
+                            {aiMode === 'PVE' ? 'Select a tournament to use its specific meta data for the AI analysis.' : 'Associate this match with a tournament context.'}
+                        </div>
                         <input type="hidden" name="tournament_id" value={selectedTournament === 'none' ? '' : selectedTournament} />
                         <Select value={selectedTournament} onValueChange={setSelectedTournament}>
                             <SelectTrigger className="bg-slate-800 border-slate-700">
-                                <SelectValue placeholder="Select Tournament" />
+                                <SelectValue placeholder="Select Tournament">
+                                    {selectedTournament === 'none'
+                                        ? "None (Global Meta / Friendly)"
+                                        : tournaments.find(t => t.id === selectedTournament)?.name || selectedTournament
+                                    }
+                                </SelectValue>
                             </SelectTrigger>
                             <SelectContent className="bg-slate-800 border-slate-700 hover:!bg-slate-800">
-                                <SelectItem value="none">None (Friendly Match)</SelectItem>
+                                <SelectItem value="none">None (Global Meta / Friendly)</SelectItem>
                                 {tournaments.map(t => (
                                     <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                                 ))}
@@ -130,7 +168,7 @@ export default function CreateMatchModal({ versions, tournaments }: CreateMatchM
                     <div className="space-y-4 rounded-lg bg-slate-950/50 p-4 border border-slate-800">
                         <div className="flex items-center justify-between">
                             <Label className="text-sm font-medium text-slate-300">Team Names</Label>
-                            {selectedTournament === 'none' && (
+                            {selectedTournament === 'none' && aiMode === 'PVP' && (
                                 <Button
                                     type="button"
                                     variant="link"
@@ -146,7 +184,7 @@ export default function CreateMatchModal({ versions, tournaments }: CreateMatchM
                         {selectedTournament !== 'none' ? (
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="grid gap-2">
-                                    <Label className="text-xs text-slate-400">Team A</Label>
+                                    <Label className="text-xs text-slate-400">Team A (You)</Label>
                                     <input type="hidden" name="team_a_name" value={teamA} />
                                     <Select value={teamA} onValueChange={setTeamA}>
                                         <SelectTrigger className="bg-slate-800 border-slate-700" disabled={loadingTeams}>
@@ -160,13 +198,18 @@ export default function CreateMatchModal({ versions, tournaments }: CreateMatchM
                                     </Select>
                                 </div>
                                 <div className="grid gap-2">
-                                    <Label className="text-xs text-slate-400">Team B</Label>
+                                    <Label className="text-xs text-slate-400">Team B {aiMode === 'PVE' ? '(AI Opponent)' : '(Opponent)'}</Label>
                                     <input type="hidden" name="team_b_name" value={teamB} />
+                                    {/* Always allow selection if teams are available, even in PVE */}
                                     <Select value={teamB} onValueChange={setTeamB}>
                                         <SelectTrigger className="bg-slate-800 border-slate-700" disabled={loadingTeams}>
-                                            <SelectValue placeholder={loadingTeams ? "Loading..." : "Select Team B"} />
+                                            <SelectValue placeholder={loadingTeams ? "Loading..." : "Select Team B (AI)"} />
                                         </SelectTrigger>
                                         <SelectContent className="bg-slate-800 border-slate-700">
+                                            {/* In PVE, add a default 'Cerebro AI' option if they don't want a specific team */}
+                                            {aiMode === 'PVE' && (
+                                                <SelectItem value="Cerebro AI">Cerebro AI (Generic)</SelectItem>
+                                            )}
                                             {tournamentTeams.map(t => (
                                                 <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>
                                             ))}
@@ -174,7 +217,7 @@ export default function CreateMatchModal({ versions, tournaments }: CreateMatchM
                                     </Select>
                                 </div>
                             </div>
-                        ) : !isCustomTeams ? (
+                        ) : !isCustomTeams && aiMode === 'PVP' ? (
                             <div className="space-y-4">
                                 <div className="flex items-center justify-center gap-3 text-lg font-bold bg-slate-900 p-3 rounded border border-slate-800/50">
                                     <span className="text-blue-400">Team A</span>
@@ -189,44 +232,40 @@ export default function CreateMatchModal({ versions, tournaments }: CreateMatchM
                             <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="grid gap-2">
-                                        <Label htmlFor="team_a" className="text-xs text-slate-400">Team A</Label>
+                                        <Label htmlFor="team_a" className="text-xs text-slate-400">Team A (You)</Label>
                                         <Input
                                             id="team_a"
                                             name="team_a_name"
                                             placeholder="Team A Name"
-                                            defaultValue="Team A"
+                                            defaultValue={teamA || 'Team A'}
+                                            onChange={(e) => setTeamA(e.target.value)}
                                             className="bg-slate-800 border-slate-700"
                                             required
                                         />
                                     </div>
                                     <div className="grid gap-2">
-                                        <Label htmlFor="team_b" className="text-xs text-slate-400">Team B</Label>
+                                        <Label htmlFor="team_b" className="text-xs text-slate-400">Team B {aiMode === 'PVE' ? '(AI)' : ''}</Label>
                                         <Input
                                             id="team_b"
                                             name="team_b_name"
                                             placeholder="Team B Name"
-                                            defaultValue="Team B"
+                                            value={teamB || (aiMode === 'PVE' ? 'Cerebro AI' : 'Team B')}
+                                            onChange={(e) => setTeamB(e.target.value)}
                                             className="bg-slate-800 border-slate-700"
                                             required
                                         />
                                     </div>
                                 </div>
 
-                                {/* Preset Buttons */}
+                                {/* Preset Buttons (Only show in PVP or for Team A in PVE) */}
                                 <div className="flex gap-2 flex-wrap justify-center">
                                     {['Bacon Time', 'Buriram United', 'Talon', 'Hydra', 'eArena', 'Full Sense', 'King of Gamers', 'PSG Esports'].map(team => (
                                         <button
                                             key={team}
                                             type="button"
                                             onClick={() => {
-                                                const form = document.querySelector('form') as HTMLFormElement
-                                                const teamA = form.elements.namedItem('team_a_name') as HTMLInputElement
-                                                const teamB = form.elements.namedItem('team_b_name') as HTMLInputElement
-
-                                                if (teamA && teamB) {
-                                                    if (teamA.value === 'Team A' || !teamA.value) teamA.value = team;
-                                                    else if ((teamB.value === 'Team B' || !teamB.value) && teamA.value !== team) teamB.value = team;
-                                                }
+                                                setTeamA(team)
+                                                if (aiMode === 'PVP') setTeamB('Team B')
                                             }}
                                             className="text-[10px] px-2 py-1 bg-slate-800 rounded border border-slate-700 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
                                         >

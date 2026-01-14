@@ -10,10 +10,12 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown, RefreshCw } from 'lucide-react'
+import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown, RefreshCw, Users, Globe, Swords, Link as LinkIcon, User } from 'lucide-react'
 import Image from 'next/image'
 import PostDraftResult from '@/components/draft/PostDraftResult'
 import { Input } from '@/components/ui/input'
+import { useDraftBot } from './useDraftBot'
+import DraftSuggestionPanel from './DraftSuggestionPanel'
 
 export interface DraftControls {
     togglePause: () => void;
@@ -33,6 +35,17 @@ interface DraftInterfaceProps {
 const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, game, initialHeroes, teamAGlobalBans = [], teamBGlobalBans = [], onReset, onPausedChange }, ref) => {
     const { state, currentStep, lockIn, togglePause } = useDraftEngine()
 
+    const [recommendations, setRecommendations] = useState<any>({ analyst: [], history: [], hybrid: [], smartBan: [] })
+    const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false)
+    const [currentTab, setCurrentTab] = useState('hero')
+    const [aiTab, setAiTab] = useState('suggestions')
+
+    // Suggestion Panels State
+    const [blueSuggestions, setBlueSuggestions] = useState<any[]>([])
+    const [redSuggestions, setRedSuggestions] = useState<any[]>([])
+    const [isBlueSuggestLoading, setIsBlueSuggestLoading] = useState(false)
+    const [isRedSuggestLoading, setIsRedSuggestLoading] = useState(false)
+
     useImperativeHandle(ref, () => ({
         togglePause,
         isPaused: state.isPaused
@@ -44,12 +57,19 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         }
     }, [state.isPaused, onPausedChange])
 
+    // Initialize Bot
+    useDraftBot({
+        game,
+        match,
+        draftState: { ...state, currentStep, stepIndex: state.stepIndex },
+        onLockIn: lockIn,
+        isPaused: state.isPaused,
+        initialHeroes
+    })
+
     const [selectedHero, setSelectedHero] = useState<Hero | null>(null)
-    const [recommendations, setRecommendations] = useState<any>({ analyst: [], history: [], hybrid: [], smartBan: [] })
-    const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false)
     const [showSummary, setShowSummary] = useState(false)
     const [manualLanes, setManualLanes] = useState<Record<string, string[]>>({})
-    const [currentTab, setCurrentTab] = useState("hero")
 
     const handleLaneAssign = (heroId: string, lane: string) => {
         setManualLanes(prev => {
@@ -152,9 +172,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
         const currentPhase = (currentStep?.type === 'BAN' ? 'BAN' : 'PICK') as 'BAN' | 'PICK'
         const context = {
-            matchId: match.id,
             phase: currentPhase,
-            side: currentStep?.side
+            side: currentStep?.side,
+            tournamentId: match.ai_metadata?.settings?.tournamentId,
+            enemyTeamName: currentStep?.side === 'BLUE' ? game.red_team_name : game.blue_team_name
         }
 
         setIsLoadingRecommendations(true)
@@ -170,6 +191,58 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             })
 
     }, [state.stepIndex])
+
+    const handleGenerateSuggestion = async (side: 'BLUE' | 'RED', mode: string) => {
+        const isBlue = side === 'BLUE'
+        const setLoading = isBlue ? setIsBlueSuggestLoading : setIsRedSuggestLoading
+        const setRecs = isBlue ? setBlueSuggestions : setRedSuggestions
+
+        setLoading(true)
+        try {
+            const allyPicks = isBlue ? Object.values(state.bluePicks) : Object.values(state.redPicks)
+            const enemyPicks = isBlue ? Object.values(state.redPicks) : Object.values(state.bluePicks)
+            const currentPhase = (currentStep?.type === 'BAN' ? 'BAN' : 'PICK') as 'BAN' | 'PICK'
+
+            // Fetch recommendations for THIS side specifically
+            const data = await getRecommendations(
+                match.version_id,
+                allyPicks as string[],
+                enemyPicks as string[],
+                bannedIds,
+                [],
+                {
+                    matchId: match.id,
+                    phase: currentPhase,
+                    side: side,
+                    tournamentId: match.ai_metadata?.settings?.tournamentId,
+                    targetTeamName: isBlue ? game.blue_team_name : game.red_team_name
+                }
+            )
+
+            // Select array based on mode
+            let results = data.hybrid || []
+            if (mode === 'analyst') results = data.analyst
+            else if (mode === 'history') results = data.history
+            else if (mode === 'counter') results = data.hybrid // Counter logic often mixed in hybrid, or need specific return
+            else if (mode === 'smartBan') results = data.smartBan
+
+            // Map to Suggestion Format
+            // Expected data structure from getRecommendations: { hero, score, reason }[]
+            const formatted = results.map((r: any) => ({
+                hero: r.hero,
+                score: r.score,
+                reason: r.reason,
+                type: mode === 'history' ? 'comfort' : (mode === 'counter' ? 'counter' : 'hybrid')
+            })).slice(0, 8) // Top 8
+
+            setRecs(formatted)
+
+        } catch (err) {
+            console.error("Manual Suggestion Failed:", err)
+        } finally {
+            setLoading(false)
+        }
+    }
 
     const handleHeroClick = (hero: Hero) => {
         if (unavailableIds.includes(hero.id)) return
@@ -273,18 +346,55 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         const blueBans: string[] = []
         const redBans: string[] = []
 
+        // Helper to find index in slot array
+        const getRelativeIndex = (pos: number, slots: number[]) => {
+            return slots.indexOf(pos)
+        }
+
+        const BLUE_PICK_SLOTS = [5, 8, 9, 16, 17]
+        const RED_PICK_SLOTS = [6, 7, 10, 15, 18]
+
         game.picks.forEach(p => {
             if (p.type === 'PICK') {
-                const idx = p.position_index - 1
-                if (p.side === 'BLUE') bluePicks[idx] = p.hero_id
-                else redPicks[idx] = p.hero_id
+                let idx = -1
+                if (p.side === 'BLUE') {
+                    idx = getRelativeIndex(p.position_index, BLUE_PICK_SLOTS)
+                    if (idx !== -1) bluePicks[idx] = p.hero_id
+                } else {
+                    idx = getRelativeIndex(p.position_index, RED_PICK_SLOTS)
+                    if (idx !== -1) redPicks[idx] = p.hero_id
+                }
+
+                // Fallback for legacy data (if pos index is 1-5)
+                if (idx === -1 && p.position_index <= 5) {
+                    const legacyIdx = p.position_index - 1
+                    if (p.side === 'BLUE') bluePicks[legacyIdx] = p.hero_id
+                    else redPicks[legacyIdx] = p.hero_id
+                }
 
                 if (p.assigned_role) {
                     manualLanes[p.hero_id] = p.assigned_role
                 }
             } else {
-                if (p.side === 'BLUE') blueBans.push(p.hero_id)
-                else redBans.push(p.hero_id)
+                // Safely map Bans using Position Index
+                const BLUE_BAN_SLOTS = [1, 3, 12, 14]
+                const RED_BAN_SLOTS = [2, 4, 11, 13]
+
+                let idx = -1
+                if (p.side === 'BLUE') {
+                    idx = getRelativeIndex(p.position_index, BLUE_BAN_SLOTS)
+                    // Ensure array is large enough or just assign
+                    if (idx !== -1) blueBans[idx] = p.hero_id
+                } else {
+                    idx = getRelativeIndex(p.position_index, RED_BAN_SLOTS)
+                    if (idx !== -1) redBans[idx] = p.hero_id
+                }
+
+                // Fallback for Legacy Bans (if simple push needed or unknown slot)
+                if (idx === -1) {
+                    if (p.side === 'BLUE') blueBans.push(p.hero_id)
+                    else redBans.push(p.hero_id)
+                }
             }
         })
 
@@ -348,12 +458,62 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         const blueScore = isBlueTeamA ? currentBlueWins : currentRedWins
         const redScore = isBlueTeamA ? currentRedWins : currentBlueWins
 
-        // Convert multi-lanes to single lane for PostDraftResult (Game Record uses 1 position)
-        // Taking the first selected lane as primary
+        // Convert multi-lanes to single lane for PostDraftResult
         const primaryLanes: Record<string, string> = {}
         Object.entries(manualLanes).forEach(([k, v]) => {
             if (v && v.length > 0) primaryLanes[k] = v[0]
         })
+
+        // --- BOT AUTO-ANALYSIS ---
+        let botMVP = null
+        // If PVE, we want to auto-fill the Bot's Lanes & MVP
+        const isPVE = match.ai_metadata?.mode === 'PVE'
+        if (isPVE) {
+            // Assume Bot is TEAM B.
+            // Check if Team B is Blue or Red in this game
+            const isBotBlue = game.blue_team_name === match.team_b_name
+            const botSide = isBotBlue ? 'BLUE' : 'RED'
+
+            // Get Bot Picks
+            const botPicks = botSide === 'BLUE' ? state.bluePicks : state.redPicks
+
+            // Predict Bot Lanes
+            const predictedBotLanes = predictLanes(botPicks) // Returns { Jungle: HeroID, ... }
+
+            // Invert to HeroID -> Role and merge into primaryLanes
+            Object.entries(predictedBotLanes).forEach(([role, heroId]) => {
+                if (!primaryLanes[heroId]) {
+                    primaryLanes[heroId] = role
+                }
+            })
+
+            // Select Bot MVP (Prefer Jungle > Abyssal > Mid)
+            botMVP = predictedBotLanes['Jungle'] || predictedBotLanes['Abyssal'] || predictedBotLanes['Mid'] || Object.values(botPicks)[0]
+        }
+
+        // Prepare Initial Data
+        // If game is already saved (has winner), use that.
+        // If not, use Bot Auto-Analysis for the Bot side key player.
+        const existingData = {
+            winner: game.winner,
+            blueKeyPlayer: game.blue_key_player_id,
+            redKeyPlayer: game.red_key_player_id,
+            winPrediction: game.analysis_data?.winPrediction?.blue,
+            notes: game.analysis_data?.notes
+        }
+
+        const isBotBlue = game.blue_team_name === match.team_b_name
+
+        const initialData = {
+            ...existingData,
+            // Only auto-fill if not already saved
+            blueKeyPlayer: existingData.blueKeyPlayer || (isPVE && isBotBlue ? botMVP : "") || undefined,
+            redKeyPlayer: existingData.redKeyPlayer || (isPVE && !isBotBlue ? botMVP : "") || undefined,
+            // Auto Set Win Prediction to 50 if new
+            winPrediction: existingData.winPrediction ?? 50,
+            winner: existingData.winner || undefined
+        }
+
 
         return (
             <PostDraftResult
@@ -367,6 +527,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 heroes={initialHeroes}
                 matchId={match.id}
                 manualLanes={primaryLanes}
+                initialData={initialData}
                 nextGameId={nextGameTab}
                 seriesScore={{ blue: blueScore, red: redScore }}
                 matchMode={match.mode || 'BO1'}
@@ -446,6 +607,15 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     })}
                 </div>
 
+                <DraftSuggestionPanel
+                    side="BLUE"
+                    teamName={game.blue_team_name}
+                    isActive={currentStep?.side === 'BLUE' && !state.isFinished}
+                    onGenerate={(mode) => handleGenerateSuggestion('BLUE', mode)}
+                    suggestions={blueSuggestions}
+                    isLoading={isBlueSuggestLoading}
+                    onSelectHero={handleHeroClick}
+                />
 
             </div>
 
@@ -688,91 +858,289 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
                     {/* Tab 3: CEREBRO AI */}
                     <TabsContent value="cerebro-ai" className="flex-1 flex flex-col min-h-0 bg-slate-900 border border-slate-800 rounded-xl p-4 data-[state=active]:flex m-0 overflow-hidden">
-                        <div className="flex items-center justify-between mb-4 shrink-0">
-                            <div>
-                                <h3 className="font-bold text-indigo-400 flex items-center gap-2">
-                                    <Brain className="w-5 h-5" />
-                                    CEREBRO AI ANALYSIS
-                                </h3>
-                                <div className="text-xs text-slate-500 font-mono mt-1">
-                                    CONTEXT: {isBanPhase ? 'RECOMMENDED BANS' : 'RECOMMENDED PICKS'}
+                        <Tabs value={aiTab} onValueChange={setAiTab} className="flex-1 flex flex-col h-full">
+                            <div className="flex items-center justify-between mb-2 shrink-0">
+                                <div>
+                                    <h3 className="font-bold text-indigo-400 flex items-center gap-2">
+                                        <Brain className="w-5 h-5" />
+                                        CEREBRO AI
+                                    </h3>
                                 </div>
+
+                                <TabsList className="bg-slate-950/50 border border-slate-800 p-0.5 h-8">
+                                    <TabsTrigger value="suggestions" title="Suggestions" className="w-8 h-7 px-0 data-[state=active]:bg-indigo-600 data-[state=active]:text-white transition-all"><Brain className="w-4 h-4" /></TabsTrigger>
+                                    <TabsTrigger value="hero-pools" title="Team Pools" className="w-8 h-7 px-0 data-[state=active]:bg-blue-600 data-[state=active]:text-white transition-all"><Users className="w-4 h-4" /></TabsTrigger>
+                                    <TabsTrigger value="meta" title="Meta Analysis" className="w-8 h-7 px-0 data-[state=active]:bg-purple-600 data-[state=active]:text-white transition-all"><Globe className="w-4 h-4" /></TabsTrigger>
+                                    <TabsTrigger value="counters" title="Counter Matchups" className="w-8 h-7 px-0 data-[state=active]:bg-red-600 data-[state=active]:text-white transition-all"><Swords className="w-4 h-4" /></TabsTrigger>
+                                    <TabsTrigger value="synergies" title="Synergies" className="w-8 h-7 px-0 data-[state=active]:bg-emerald-600 data-[state=active]:text-white transition-all"><LinkIcon className="w-4 h-4" /></TabsTrigger>
+                                    <TabsTrigger value="roster" title="Roster Dominance" className="w-8 h-7 px-0 data-[state=active]:bg-cyan-600 data-[state=active]:text-white transition-all"><User className="w-4 h-4" /></TabsTrigger>
+                                </TabsList>
                             </div>
 
                             {/* Warning Badge */}
                             {recommendations.warning && (
-                                <div className="bg-yellow-900/20 border border-yellow-900/30 px-3 py-1 rounded-full flex items-center gap-2 animate-pulse">
+                                <div className="bg-yellow-900/20 border border-yellow-900/30 px-3 py-1 rounded-full flex items-center gap-2 animate-pulse mb-2">
                                     <div className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
                                     <span className="text-[10px] text-yellow-500 font-bold tracking-tight uppercase">Strategy Alert</span>
                                 </div>
                             )}
-                        </div>
 
-                        {recommendations.warning && (
-                            <div className="mb-4 p-3 bg-yellow-950/30 border border-yellow-900/20 rounded text-xs text-yellow-200/80 leading-relaxed shrink-0">
-                                {recommendations.warning}
-                            </div>
-                        )}
+                            {recommendations.warning && (
+                                <div className="mb-4 p-3 bg-yellow-950/30 border border-yellow-900/20 rounded text-xs text-yellow-200/80 leading-relaxed shrink-0">
+                                    {recommendations.warning}
+                                </div>
+                            )}
 
-                        <ScrollArea className="flex-1 -mr-2 pr-2">
-                            {(() => {
-                                const activeRecs = isBanPhase
-                                    ? recommendations.smartBan
-                                    : recommendations.hybrid;
+                            <TabsContent value="suggestions" className="flex-1 min-h-0 mt-0">
+                                <ScrollArea className="h-full -mr-2 pr-2">
+                                    {(() => {
+                                        const activeRecs = isBanPhase
+                                            ? recommendations.smartBan
+                                            : recommendations.hybrid;
 
-                                if (isLoadingRecommendations) {
-                                    return (
-                                        <div className="flex flex-col items-center justify-center h-64 text-slate-500 gap-3 opacity-60">
-                                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>
-                                            <span className="text-xs font-mono">Processing Matchup Data...</span>
-                                        </div>
-                                    )
-                                }
-
-                                if (!activeRecs || activeRecs.length === 0) {
-                                    return (
-                                        <div className="flex flex-col items-center justify-center h-64 text-slate-500 gap-3 opacity-60">
-                                            <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center">
-                                                <Brain className="w-6 h-6 text-slate-600" />
-                                            </div>
-                                            <span className="text-xs">No strategic recommendations found for this context.</span>
-                                        </div>
-                                    )
-                                }
-
-                                return (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        {activeRecs.map((rec: any, idx: number) => (
-                                            <div key={rec.hero.id}
-                                                onClick={() => handleHeroClick(rec.hero)}
-                                                className="bg-slate-800/50 hover:bg-slate-800 p-3 rounded-lg border border-slate-700 hover:border-indigo-500/50 cursor-pointer transition-all group flex items-start gap-3"
-                                            >
-                                                {/* Rank Badge */}
-                                                <div className="text-xs font-black text-slate-600 group-hover:text-indigo-500/50 font-mono mt-1">
-                                                    #{idx + 1}
+                                        if (isLoadingRecommendations) {
+                                            return (
+                                                <div className="flex flex-col items-center justify-center h-48 text-slate-500 gap-3 opacity-60">
+                                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>
+                                                    <span className="text-xs font-mono">Processing Matchup Data...</span>
                                                 </div>
+                                            )
+                                        }
 
-                                                <div className="relative w-10 h-10 rounded overflow-hidden border border-slate-600 group-hover:border-indigo-400 transition-colors shrink-0">
-                                                    <Image src={rec.hero.icon_url} alt={rec.hero.name} fill className="object-cover" />
-                                                </div>
-
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex items-center justify-between mb-1">
-                                                        <span className="font-bold text-sm text-slate-200 group-hover:text-white truncate">{rec.hero.name}</span>
-                                                        <Badge variant="secondary" className={`text-[10px] h-4 px-1.5 ${rec.score > 30 ? 'bg-green-900/30 text-green-400' : 'bg-slate-700 text-slate-300'}`}>
-                                                            {rec.score.toFixed(0)} PTS
-                                                        </Badge>
+                                        if (!activeRecs || activeRecs.length === 0) {
+                                            return (
+                                                <div className="flex flex-col items-center justify-center h-48 text-slate-500 gap-3 opacity-60">
+                                                    <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center">
+                                                        <Brain className="w-6 h-6 text-slate-600" />
                                                     </div>
-                                                    <p className="text-[10px] text-slate-400 group-hover:text-indigo-300 leading-tight">
-                                                        {rec.reason}
-                                                    </p>
+                                                    <span className="text-xs">No strategic recommendations found for this context.</span>
+                                                </div>
+                                            )
+                                        }
+
+                                        return (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                {activeRecs.map((rec: any, idx: number) => (
+                                                    <div key={rec.hero.id}
+                                                        onClick={() => handleHeroClick(rec.hero)}
+                                                        className="bg-slate-800/50 hover:bg-slate-800 p-3 rounded-lg border border-slate-700 hover:border-indigo-500/50 cursor-pointer transition-all group flex items-start gap-3"
+                                                    >
+                                                        {/* Rank Badge */}
+                                                        <div className="text-xs font-black text-slate-600 group-hover:text-indigo-500/50 font-mono mt-1">
+                                                            #{idx + 1}
+                                                        </div>
+
+                                                        <div className="relative w-10 h-10 rounded overflow-hidden border border-slate-600 group-hover:border-indigo-400 transition-colors shrink-0">
+                                                            <Image src={rec.hero.icon_url} alt={rec.hero.name} fill className="object-cover" />
+                                                        </div>
+
+                                                        <div className="flex-1 min-w-0">
+                                                            <div className="flex items-center justify-between mb-1">
+                                                                <span className="font-bold text-sm text-slate-200 group-hover:text-white truncate">{rec.hero.name}</span>
+                                                                <Badge variant="secondary" className={`text-[10px] h-4 px-1.5 ${rec.score > 30 ? 'bg-green-900/30 text-green-400' : 'bg-slate-700 text-slate-300'}`}>
+                                                                    {rec.score.toFixed(0)} PTS
+                                                                </Badge>
+                                                            </div>
+                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                {rec.reason.split(' • ').map((r: string, i: number) => {
+                                                                    let Icon = Brain
+                                                                    let colorClass = "text-slate-400 bg-slate-800"
+
+                                                                    if (r.includes('Team Pool') || r.includes('Comfort')) { Icon = Users; colorClass = "text-blue-400 bg-blue-900/30 border-blue-800" }
+                                                                    else if (r.includes('Meta')) { Icon = Globe; colorClass = "text-purple-400 bg-purple-900/30 border-purple-800" }
+                                                                    else if (r.includes('Counter')) { Icon = Swords; colorClass = "text-red-400 bg-red-900/30 border-red-800" }
+                                                                    else if (r.includes('Synergy')) { Icon = LinkIcon; colorClass = "text-emerald-400 bg-emerald-900/30 border-emerald-800" }
+                                                                    else if (r.includes('Pool') && !r.includes('Team')) { Icon = User; colorClass = "text-cyan-400 bg-cyan-900/30 border-cyan-800" } // Player Pool
+                                                                    else if (r.includes('Deny')) { Icon = ShieldBan; colorClass = "text-orange-400 bg-orange-900/30 border-orange-800" }
+
+                                                                    return (
+                                                                        <div key={i} className={`text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${colorClass}`}>
+                                                                            <Icon className="w-2.5 h-2.5" />
+                                                                            <span>{r}</span>
+                                                                        </div>
+                                                                    )
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )
+                                    })()}
+                                </ScrollArea>
+                            </TabsContent>
+
+                            <TabsContent value="hero-pools" className="flex-1 min-h-0 mt-0">
+                                {(() => {
+                                    // Resolution Logic for Team A vs Team B pools
+                                    const isBlueTurn = currentStep?.side === 'BLUE'
+                                    const isTeamABlue = game.blue_team_name === match.team_a_name
+
+                                    // Ally = Current Side, Enemy = Other Side
+                                    const allyPool = recommendations.heroPools?.ally || []
+                                    const enemyPool = recommendations.heroPools?.enemy || []
+
+                                    let teamAPool = []
+                                    let teamBPool = []
+
+                                    if (isTeamABlue) {
+                                        teamAPool = isBlueTurn ? allyPool : enemyPool
+                                        teamBPool = isBlueTurn ? enemyPool : allyPool
+                                    } else {
+                                        teamAPool = isBlueTurn ? enemyPool : allyPool
+                                        teamBPool = isBlueTurn ? allyPool : enemyPool
+                                    }
+
+                                    return (
+                                        <div className="grid grid-cols-2 gap-4 h-full">
+                                            {/* Team A Data */}
+                                            <div className="flex flex-col gap-2">
+                                                <h4 className="text-[10px] font-bold text-blue-400 uppercase tracking-widest text-center truncate px-2 border-b border-blue-900/50 pb-1">
+                                                    {match.team_a_name}
+                                                </h4>
+                                                <ScrollArea className="flex-1 bg-slate-950/30 rounded-lg p-2 border border-slate-800">
+                                                    {teamAPool.map((item: any, i: number) => (
+                                                        <div key={item.hero.id} className="flex items-center gap-2 mb-2 p-1 hover:bg-white/5 rounded cursor-pointer" onClick={() => handleHeroClick(item.hero)}>
+                                                            <span className="text-xs text-slate-600 font-mono w-4">{i + 1}</span>
+                                                            <Image src={item.hero.icon_url} alt={item.hero.name} width={24} height={24} className="rounded" />
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="text-xs font-bold text-slate-300 truncate">{item.hero.name}</div>
+                                                                <div className="text-[9px] text-slate-500">
+                                                                    {item.picks} Picks • {item.winRate.toFixed(0)}% WR
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                    {(teamAPool.length === 0) && (
+                                                        <div className="text-center text-xs text-slate-600 py-4">No data</div>
+                                                    )}
+                                                </ScrollArea>
+                                            </div>
+
+                                            {/* Team B Data */}
+                                            <div className="flex flex-col gap-2">
+                                                <h4 className="text-[10px] font-bold text-red-400 uppercase tracking-widest text-center truncate px-2 border-b border-red-900/50 pb-1">
+                                                    {match.team_b_name}
+                                                </h4>
+                                                <ScrollArea className="flex-1 bg-slate-950/30 rounded-lg p-2 border border-slate-800">
+                                                    {teamBPool.map((item: any, i: number) => (
+                                                        <div key={item.hero.id} className="flex items-center gap-2 mb-2 p-1 hover:bg-white/5 rounded cursor-pointer" onClick={() => handleHeroClick(item.hero)}>
+                                                            <span className="text-xs text-slate-600 font-mono w-4">{i + 1}</span>
+                                                            <Image src={item.hero.icon_url} alt={item.hero.name} width={24} height={24} className="rounded" />
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="text-xs font-bold text-slate-300 truncate">{item.hero.name}</div>
+                                                                <div className="text-[9px] text-slate-500">
+                                                                    {item.picks} Picks • {item.winRate.toFixed(0)}% WR
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                    {(teamBPool.length === 0) && (
+                                                        <div className="text-center text-xs text-slate-600 py-4">No data</div>
+                                                    )}
+                                                </ScrollArea>
+                                            </div>
+                                        </div>
+                                    )
+                                })()}
+                            </TabsContent>
+
+                            {/* 3. META ANALYSIS */}
+                            <TabsContent value="meta" className="flex-1 min-h-0 mt-0">
+                                <ScrollArea className="h-full bg-slate-950/30 rounded-lg p-2 border border-slate-800">
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {recommendations.meta?.map((item: any) => (
+                                            <div key={item.hero.id} className="bg-purple-950/10 border border-purple-900/20 p-2 rounded flex items-center gap-2 hover:bg-purple-900/20 transition-colors cursor-pointer" onClick={() => handleHeroClick(item.hero)}>
+                                                <Image src={item.hero.icon_url} alt={item.hero.name} width={32} height={32} className="rounded" />
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="text-xs font-bold text-purple-200 truncate">{item.hero.name}</div>
+                                                    <div className="grid grid-cols-2 gap-1 mt-1">
+                                                        <div className="text-[9px] text-slate-400">WR: <span className="text-white">{item.stats.winRate}%</span></div>
+                                                        <div className="text-[9px] text-slate-400">PR: <span className="text-white">{item.stats.pickRate}%</span></div>
+                                                    </div>
                                                 </div>
                                             </div>
                                         ))}
+                                        {!recommendations.meta?.length && <div className="col-span-2 text-center text-xs text-slate-500 italic py-4">No Meta data available</div>}
                                     </div>
-                                )
-                            })()}
-                        </ScrollArea>
+                                </ScrollArea>
+                            </TabsContent>
+
+                            {/* 4. COUNTER MATCHUPS */}
+                            <TabsContent value="counters" className="flex-1 min-h-0 mt-0">
+                                <ScrollArea className="h-full bg-slate-950/30 rounded-lg p-2 border border-slate-800">
+                                    <h4 className="text-[10px] font-bold text-red-400 uppercase tracking-widest mb-2 border-b border-red-900/30 pb-1">Best Counters</h4>
+                                    <div className="flex flex-col gap-2">
+                                        {recommendations.counters?.map((item: any, idx: number) => (
+                                            <div key={idx} className="bg-red-950/10 border border-red-900/20 p-2 rounded flex items-center justify-between hover:bg-red-900/20 transition-colors cursor-pointer" onClick={() => handleHeroClick(item.hero)}>
+                                                <div className="flex items-center gap-2">
+                                                    <Image src={item.hero.icon_url} alt={item.hero.name} width={28} height={28} className="rounded border border-red-500/30" />
+                                                    <div className="text-xs font-bold text-red-200">{item.hero.name}</div>
+                                                </div>
+                                                <div className="text-[10px] font-mono text-slate-500 flex items-center gap-2">
+                                                    <span>vs</span>
+                                                    <div className="flex items-center gap-1">
+                                                        <Image src={item.target.icon_url} alt={item.target.name} width={20} height={20} className="rounded grayscale opacity-70" />
+                                                        <span className="text-red-400 font-bold">{(item.winRate - 50).toFixed(1)}% Adv</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {!recommendations.counters?.length && <div className="text-center text-xs text-slate-500 italic py-4">No significant counter matchups found</div>}
+                                    </div>
+                                </ScrollArea>
+                            </TabsContent>
+
+                            {/* 5. SYNERGIES */}
+                            <TabsContent value="synergies" className="flex-1 min-h-0 mt-0">
+                                <ScrollArea className="h-full bg-slate-950/30 rounded-lg p-2 border border-slate-800">
+                                    <h4 className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-2 border-b border-emerald-900/30 pb-1">Best Synergies</h4>
+                                    <div className="flex flex-col gap-2">
+                                        {recommendations.synergies?.map((item: any, idx: number) => (
+                                            <div key={idx} className="bg-emerald-950/10 border border-emerald-900/20 p-2 rounded flex items-center justify-between hover:bg-emerald-900/20 transition-colors cursor-pointer" onClick={() => handleHeroClick(item.hero)}>
+                                                <div className="flex items-center gap-2">
+                                                    <Image src={item.hero.icon_url} alt={item.hero.name} width={28} height={28} className="rounded border border-emerald-500/30" />
+                                                    <div className="text-xs font-bold text-emerald-200">{item.hero.name}</div>
+                                                </div>
+                                                <div className="text-[10px] font-mono text-slate-500 flex items-center gap-2">
+                                                    <span>with</span>
+                                                    <div className="flex items-center gap-1">
+                                                        <Image src={item.partner.icon_url} alt={item.partner.name} width={20} height={20} className="rounded grayscale opacity-70" />
+                                                        <span className="text-emerald-400 font-bold">+{item.score.toFixed(1)} Syn</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {!recommendations.synergies?.length && <div className="text-center text-xs text-slate-500 italic py-4">No strong synergies found with current picks</div>}
+                                    </div>
+                                </ScrollArea>
+                            </TabsContent>
+
+                            {/* 6. ROSTER DOMINANCE */}
+                            <TabsContent value="roster" className="flex-1 min-h-0 mt-0">
+                                <ScrollArea className="h-full bg-slate-950/30 rounded-lg p-2 border border-slate-800">
+                                    <h4 className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-2 border-b border-cyan-900/30 pb-1">Signature Picks</h4>
+                                    <div className="flex flex-col gap-2">
+                                        {recommendations.roster?.map((item: any, idx: number) => (
+                                            <div key={idx} className="bg-cyan-950/10 border border-cyan-900/20 p-2 rounded flex items-center justify-between hover:bg-cyan-900/20 transition-colors cursor-pointer" onClick={() => handleHeroClick(item.hero)}>
+                                                <div className="flex items-center gap-2">
+                                                    <Image src={item.hero.icon_url} alt={item.hero.name} width={32} height={32} className="rounded border border-cyan-500/30" />
+                                                    <div>
+                                                        <div className="text-xs font-bold text-cyan-200">{item.hero.name}</div>
+                                                        <div className="text-[9px] text-cyan-400/70">{item.player}</div>
+                                                    </div>
+                                                </div>
+                                                <div className="text-[10px] text-slate-400 text-right">
+                                                    <div>{item.picks} Games</div>
+                                                    <div className="font-bold text-white">{item.winRate.toFixed(0)}% WR</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {!recommendations.roster?.length && <div className="text-center text-xs text-slate-500 italic py-4">No signature picks found for this team</div>}
+                                    </div>
+                                </ScrollArea>
+                            </TabsContent>
+                        </Tabs>
                     </TabsContent>
                 </Tabs>
 
@@ -863,6 +1231,16 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                         )
                     })}
                 </div>
+
+                <DraftSuggestionPanel
+                    side="RED"
+                    teamName={game.red_team_name}
+                    isActive={currentStep?.side === 'RED' && !state.isFinished}
+                    onGenerate={(mode) => handleGenerateSuggestion('RED', mode)}
+                    suggestions={redSuggestions}
+                    isLoading={isRedSuggestLoading}
+                    onSelectHero={handleHeroClick}
+                />
 
 
             </div>

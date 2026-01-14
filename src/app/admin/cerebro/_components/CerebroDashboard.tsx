@@ -12,13 +12,14 @@ import {
     BarElement,
     Title,
 } from 'chart.js';
-import { Brain, Swords, Shield, Trophy, LayoutGrid, ListFilter, Users } from 'lucide-react';
+import { Brain, Swords, Trophy, LayoutGrid, ListFilter, Users } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { CerebroMode, getCerebroStats } from '../actions';
 import { getTournaments } from '../../tournaments/actions';
 import TeamDeepDiveStats from './TeamDeepDiveStats';
@@ -34,11 +35,15 @@ interface DashboardProps {
 }
 
 export default function CerebroDashboard({ initialVersions, defaultVersionId, teamName }: DashboardProps) {
+    const router = useRouter();
     const [versionId, setVersionId] = useState<string>(String(defaultVersionId));
     const [mode, setMode] = useState<CerebroMode>('ALL');
     const [loading, setLoading] = useState(false);
     const [stats, setStats] = useState<any>(null);
     const [roleFilter, setRoleFilter] = useState<string>('ALL');
+    const [metaRoleFilter, setMetaRoleFilter] = useState<string>('ALL'); // Decoupled filter for Meta Table
+    const [draftSide, setDraftSide] = useState<'ALL' | 'BLUE' | 'RED'>('ALL');
+
 
     // New Filters
     const [tournamentId, setTournamentId] = useState<string>('ALL');
@@ -81,12 +86,28 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
             heroes = heroes.filter(h => {
                 // Check if hero has picks in this role
                 const picksInRole = h.roleStats && h.roleStats[roleFilter];
-                return picksInRole && picksInRole > 0;
+                return picksInRole && picksInRole.picks > 0;
             });
         }
 
         return heroes.sort((a, b) => b.picks - a.picks);
     }, [stats, roleFilter]);
+
+    // Independent sorted list for the Meta Table
+    const sortedMetaHeroes = useMemo(() => {
+        if (!stats?.heroStats) return [];
+        let heroes = Object.values(stats.heroStats as Record<string, any>);
+
+        // Filter by Role using metaRoleFilter
+        if (metaRoleFilter !== 'ALL') {
+            heroes = heroes.filter(h => {
+                const picksInRole = h.roleStats && h.roleStats[metaRoleFilter];
+                return picksInRole && picksInRole.picks > 0;
+            });
+        }
+
+        return heroes.sort((a, b) => b.picks - a.picks);
+    }, [stats, metaRoleFilter]);
 
     const topCombos = useMemo(() => {
         if (!stats?.combos) return [];
@@ -95,6 +116,11 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
             .sort((a, b) => b.count - a.count)
             .slice(0, 10);
     }, [stats])
+
+    const poolHeroCount = useMemo(() => {
+        if (!stats?.heroStats) return 0;
+        return Object.values(stats.heroStats as Record<string, any>).filter(h => h.picks > 0).length;
+    }, [stats]);
 
     if (!stats) return <div className="p-10 text-center text-slate-500">Initializing Core...</div>;
 
@@ -176,29 +202,130 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-cyan-500"></div>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
                     {/* KPI Cards */}
-                    <Card className="bg-gradient-to-br from-slate-900 to-slate-950 border-slate-800 text-white col-span-1 md:col-span-1">
+                    <Card className="bg-gradient-to-br from-slate-900 to-slate-950 border-slate-800 text-white col-span-1">
                         <CardContent className="p-6 flex flex-col items-center justify-center h-full">
                             <h3 className="text-slate-400 text-sm font-medium uppercase tracking-widest mb-2">Total Games</h3>
                             <div className="text-5xl font-black text-white">{stats.totalGames}</div>
-                            <div className="mt-2 text-xs text-slate-500">{stats.totalMatches} Matches Logged</div>
+                            <div className="mt-2 text-xs text-slate-500 mb-1">{stats.totalMatches} Matches Logged</div>
+
+                            {/* Side Distribution */}
+                            {(stats.gamesOnBlue > 0 || stats.gamesOnRed > 0) && (
+                                <div className="flex gap-3 text-xs w-full justify-center border-t border-slate-800 pt-2 mt-2">
+                                    <span className="text-blue-400 font-medium">
+                                        {stats.gamesOnBlue} Blue <span className="opacity-70">({((stats.gamesOnBlue / stats.totalGames) * 100).toFixed(0)}%)</span>
+                                    </span>
+                                    <span className="text-red-400 font-medium">
+                                        {stats.gamesOnRed} Red <span className="opacity-70">({((stats.gamesOnRed / stats.totalGames) * 100).toFixed(0)}%)</span>
+                                    </span>
+                                </div>
+                            )}
                         </CardContent>
                     </Card>
 
-                    <Card className="bg-slate-900 border-slate-800 text-white col-span-1 md:col-span-1">
-                        <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-400 uppercase">First Pick Win Rate</CardTitle></CardHeader>
+                    <Card className="bg-slate-900 border-slate-800 text-white col-span-1">
+                        <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-400 uppercase">Side Win Rates</CardTitle></CardHeader>
                         <CardContent>
-                            <div className="text-3xl font-bold flex items-end gap-2">
-                                {stats.firstPickWinRate.total > 0
-                                    ? ((stats.firstPickWinRate.wins / stats.firstPickWinRate.total) * 100).toFixed(1)
-                                    : 0}%
-                                <span className="text-sm text-slate-500 mb-1 font-normal">Blue Side</span>
+                            <div className="flex flex-col gap-4">
+                                {/* Blue / First Pick */}
+                                {(() => {
+                                    // Determine Blue Stats
+                                    let blueWins = 0, blueGames = 0, blueWR = 0;
+                                    if (teamName) {
+                                        // Team Specific
+                                        blueWins = stats.winsOnBlue || 0;
+                                        blueGames = stats.gamesOnBlue || 0;
+                                    } else {
+                                        // Global
+                                        blueWins = stats.firstPickWinRate.wins;
+                                        blueGames = stats.firstPickWinRate.total;
+                                    }
+                                    blueWR = blueGames > 0 ? (blueWins / blueGames) * 100 : 0;
+
+                                    return (
+                                        <div>
+                                            <div className="text-2xl font-bold flex items-end gap-2 text-blue-400">
+                                                {blueWR.toFixed(1)}%
+                                                <span className="text-xs text-slate-500 mb-1.5 font-normal uppercase">First Pick (Blue)</span>
+                                            </div>
+                                            <div className="w-full h-1 bg-slate-800 rounded-full mt-1 mb-1 overflow-hidden">
+                                                <div
+                                                    className="h-full bg-blue-500 rounded-full"
+                                                    style={{ width: `${blueWR}%` }}
+                                                />
+                                            </div>
+                                            <div className="text-[10px] text-slate-500 font-medium">
+                                                {blueWins} Wins / {blueGames} Games
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Red / Second Pick */}
+                                {(() => {
+                                    // Determine Red Stats
+                                    let redWins = 0, redGames = 0, redWR = 0;
+                                    if (teamName) {
+                                        // Team Specific
+                                        redWins = stats.winsOnRed || 0;
+                                        redGames = stats.gamesOnRed || 0;
+                                    } else {
+                                        // Global
+                                        // Red Wins = Total - Blue Wins
+                                        const total = stats.firstPickWinRate.total;
+                                        const blueWins = stats.firstPickWinRate.wins;
+                                        redWins = total - blueWins;
+                                        redGames = total;
+                                    }
+                                    redWR = redGames > 0 ? (redWins / redGames) * 100 : 0;
+
+                                    return (
+                                        <div>
+                                            <div className="text-2xl font-bold flex items-end gap-2 text-red-400">
+                                                {redWR.toFixed(1)}%
+                                                <span className="text-xs text-slate-500 mb-1.5 font-normal uppercase">Second Pick (Red)</span>
+                                            </div>
+                                            <div className="w-full h-1 bg-slate-800 rounded-full mt-1 mb-1 overflow-hidden">
+                                                <div
+                                                    className="h-full bg-red-500 rounded-full"
+                                                    style={{ width: `${redWR}%` }}
+                                                />
+                                            </div>
+                                            <div className="text-[10px] text-slate-500 font-medium">
+                                                {redWins} Wins / {redGames} Games
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </CardContent>
                     </Card>
 
-                    <Card className="bg-slate-900 border-slate-800 text-white col-span-1 md:col-span-2">
+                    <Card
+                        className="bg-slate-900 border-slate-800 text-white col-span-1 cursor-pointer hover:bg-slate-800 transition-all group"
+                        onClick={() => {
+                            if (teamName) {
+                                router.push(`/admin/cerebro/team/${encodeURIComponent(teamName)}/heropool`);
+                            } else {
+                                document.getElementById('hero-analysis')?.scrollIntoView({ behavior: 'smooth' });
+                            }
+                        }}
+                    >
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-sm text-slate-400 uppercase flex items-center gap-2">
+                                <LayoutGrid size={16} /> Hero Pool
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-3xl font-bold flex items-end gap-2 group-hover:text-cyan-400 transition-colors">
+                                {poolHeroCount}
+                                <span className="text-sm text-slate-500 mb-1 font-normal">Heroes</span>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <Card className="bg-slate-900 border-slate-800 text-white col-span-1 md:col-span-2 lg:col-span-2">
                         <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-400 uppercase">Team Performance Leaderboard</CardTitle></CardHeader>
                         <CardContent>
                             <div className="space-y-2 max-h-[120px] overflow-y-auto custom-scrollbar pr-2">
@@ -227,7 +354,7 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                     </Card>
 
                     {/* Main Content Area */}
-                    <div className="md:col-span-3 space-y-6">
+                    <div className="col-span-1 md:col-span-2 lg:col-span-4 space-y-6">
 
                         {/* TEAM DEEP DIVE MODULE */}
                         {teamName && (
@@ -237,14 +364,14 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                         )}
 
                         {/* Hero Table */}
-                        <Card className="bg-slate-900 border-slate-800 text-white overflow-hidden">
+                        <Card id="hero-analysis" className="bg-slate-900 border-slate-800 text-white overflow-hidden scroll-mt-20">
                             <CardHeader className="border-b border-white/5 bg-slate-950/30">
                                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                                     <CardTitle className="flex items-center gap-2">
                                         <Swords className="text-cyan-400" />
                                         Hero Meta Analysis
                                     </CardTitle>
-                                    <Tabs value={roleFilter} onValueChange={setRoleFilter} className="w-full md:w-auto">
+                                    <Tabs value={metaRoleFilter} onValueChange={setMetaRoleFilter} className="w-full md:w-auto">
                                         <TabsList className="bg-slate-900 border border-slate-700 h-9">
                                             <TabsTrigger value="ALL" className="text-xs px-3">All</TabsTrigger>
                                             <TabsTrigger value="Dark Slayer" className="text-xs px-3">DSL</TabsTrigger>
@@ -257,9 +384,9 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                 </div>
                             </CardHeader>
                             <CardContent className="p-0">
-                                <div className="overflow-x-auto">
+                                <div className="overflow-x-auto max-h-[600px] overflow-y-auto custom-scrollbar">
                                     <table className="w-full text-sm text-left">
-                                        <thead className="bg-slate-950/50 text-slate-400 uppercase text-xs font-bold">
+                                        <thead className="bg-slate-950/50 text-slate-400 uppercase text-xs font-bold sticky top-0 z-10 backdrop-blur-md">
                                             <tr>
                                                 <th className="px-6 py-4">Hero</th>
                                                 <th className="px-6 py-4 text-center">Picks</th>
@@ -269,10 +396,10 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-white/5">
-                                            {sortedHeroes.slice(0, 10).map((hero: any) => {
+                                            {sortedMetaHeroes.map((hero: any) => {
                                                 const winRate = hero.picks > 0 ? (hero.wins / hero.picks) * 100 : 0;
                                                 const banRate = stats.totalGames > 0 ? (hero.bans / stats.totalGames) * 100 : 0;
-                                                const topRole = Object.entries(hero.roleStats).sort((a: any, b: any) => b[1] - a[1])[0];
+                                                const topRole = Object.entries(hero.roleStats).sort((a: any, b: any) => b[1].picks - a[1].picks)[0];
 
                                                 return (
                                                     <tr key={hero.id} className="hover:bg-white/5 transition-colors">
@@ -296,14 +423,14 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                                         <td className="px-6 py-3">
                                                             <div className="flex flex-wrap gap-1">
                                                                 {Object.entries(hero.roleStats)
-                                                                    .sort((a: any, b: any) => b[1] - a[1])
-                                                                    .map(([role, count]: any) => (
+                                                                    .sort((a: any, b: any) => b[1].picks - a[1].picks)
+                                                                    .map(([role, stats]: any) => (
                                                                         <Badge
                                                                             key={role}
                                                                             variant="secondary"
-                                                                            className={`bg-slate-800 text-slate-300 text-[10px] px-1.5 py-0 ${roleFilter !== 'ALL' && role === roleFilter ? 'ring-1 ring-cyan-500 text-cyan-400' : ''}`}
+                                                                            className={`bg-slate-800 text-slate-300 text-[10px] px-1.5 py-0 ${metaRoleFilter !== 'ALL' && role === metaRoleFilter ? 'ring-1 ring-cyan-500 text-cyan-400' : ''}`}
                                                                         >
-                                                                            {role} ({count})
+                                                                            {role} ({stats.picks})
                                                                         </Badge>
                                                                     ))}
                                                                 {Object.keys(hero.roleStats).length === 0 && '-'}
@@ -318,56 +445,198 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                             </CardContent>
                         </Card>
 
+
+
                         {/* DRAFT LOGIC ANALYSIS */}
                         {(mode === 'FULL_SIMULATOR' || mode === 'ALL') && stats?.pickOrderStats && (
                             <div className="space-y-6">
-                                <div className="flex items-center gap-2 text-cyan-400 mt-8 mb-4">
-                                    <Brain size={24} />
-                                    <h2 className="text-xl font-bold tracking-wider">DRAFT LOGIC & BAN ANALYSIS</h2>
+                                <div className="flex flex-col md:flex-row md:items-center justify-between mt-8 mb-4 gap-4">
+                                    <div className="flex flex-col gap-1">
+                                        <div className="flex items-center gap-2 text-cyan-400">
+                                            <Brain size={24} />
+                                            <h2 className="text-xl font-bold tracking-wider uppercase">Draft Logic & Ban Analysis</h2>
+                                        </div>
+                                        {teamName && (
+                                            <p className="text-[10px] text-slate-500 font-medium uppercase tracking-widest ml-8">
+                                                Analyzing bans made by <span className="text-slate-300">{teamName}</span>
+                                            </p>
+                                        )}
+                                    </div>
+
+                                    <div className="flex items-center gap-2">
+                                        <Badge variant="outline" className="bg-slate-950/50 border-slate-800 text-slate-500 font-mono text-[10px] py-1 px-3">
+                                            Source: Simulator
+                                        </Badge>
+                                        <Badge variant="outline" className="bg-cyan-500/10 border-cyan-500/30 text-cyan-400 font-mono text-[10px] py-1 px-3">
+                                            Games: {draftSide === 'ALL' ? stats.simulatorGames : (draftSide === 'BLUE' ? stats.simulatorGamesOnBlue : stats.simulatorGamesOnRed)}
+                                        </Badge>
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     {/* Pick Order Priority */}
                                     <Card className="bg-slate-900 border-slate-800 text-white">
                                         <CardHeader className="border-b border-white/5 bg-slate-950/30">
-                                            <CardTitle className="text-base flex items-center gap-2">
-                                                <ListFilter className="text-purple-400" size={18} />
-                                                Role Priority by Pick Slot
-                                            </CardTitle>
+                                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                                <CardTitle className="text-base flex items-center gap-2">
+                                                    <ListFilter className="text-purple-400" size={18} />
+                                                    Role Priority by Pick Slot
+                                                </CardTitle>
+                                                <Tabs value={draftSide} onValueChange={(v) => setDraftSide(v as any)} className="w-[300px]">
+                                                    <TabsList className="grid w-full grid-cols-3 bg-slate-900 border border-slate-700 h-8">
+                                                        <TabsTrigger value="ALL" className="text-xs">Total</TabsTrigger>
+                                                        <TabsTrigger value="BLUE" className="text-xs data-[state=active]:text-blue-400">Blue Side</TabsTrigger>
+                                                        <TabsTrigger value="RED" className="text-xs data-[state=active]:text-red-400">Red Side</TabsTrigger>
+                                                    </TabsList>
+                                                </Tabs>
+                                            </div>
                                         </CardHeader>
                                         <CardContent className="p-6">
                                             <div className="space-y-6">
-                                                {[1, 2, 3, 4, 5].map((slot) => {
-                                                    const roleData = stats.pickOrderStats[slot] || {};
+                                                <div className="text-[10px] uppercase font-bold text-slate-500 mb-2 px-1">Phase 1 (Picks)</div>
+                                                {[5, 6, 7, 8, 9, 10].map((slot) => {
+                                                    // Determine Source Data
+                                                    let roleData = stats.pickOrderStats[slot] || {};
+                                                    if (draftSide === 'BLUE') roleData = stats.sideStats?.BLUE.pickOrderStats[slot] || {};
+                                                    if (draftSide === 'RED') roleData = stats.sideStats?.RED.pickOrderStats[slot] || {};
+
                                                     const sortedRoles = Object.entries(roleData)
                                                         .sort((a: any, b: any) => b[1] - a[1])
                                                         .slice(0, 3); // Top 3 roles per slot
                                                     const totalPicksInSlot = Object.values(roleData).reduce((a: any, b: any) => a + b, 0) as number;
 
+                                                    // Labeling Logic based on User Mappings
+                                                    let teamTag = '';
+                                                    let relIdx = '';
+                                                    let isTargetTeam = false;
+
+                                                    if (draftSide === 'BLUE') {
+                                                        const blueMap = {
+                                                            5: { tag: 'TEAM A', idx: 'PICK 1', target: true },
+                                                            6: { tag: 'TEAM B', idx: 'PICK 1', target: false },
+                                                            7: { tag: 'TEAM B', idx: 'PICK 2', target: false },
+                                                            8: { tag: 'TEAM A', idx: 'PICK 2', target: true },
+                                                            9: { tag: 'TEAM A', idx: 'PICK 3', target: true },
+                                                            10: { tag: 'TEAM B', idx: 'PICK 3', target: false },
+                                                        } as any;
+                                                        teamTag = blueMap[slot].tag;
+                                                        relIdx = blueMap[slot].idx;
+                                                        isTargetTeam = blueMap[slot].target;
+                                                    } else {
+                                                        const redMap = {
+                                                            5: { tag: 'TEAM B', idx: 'PICK 1', target: false },
+                                                            6: { tag: 'TEAM A', idx: 'PICK 1', target: true },
+                                                            7: { tag: 'TEAM A', idx: 'PICK 2', target: true },
+                                                            8: { tag: 'TEAM B', idx: 'PICK 2', target: false },
+                                                            9: { tag: 'TEAM B', idx: 'PICK 3', target: false },
+                                                            10: { tag: 'TEAM A', idx: 'PICK 3', target: true },
+                                                        } as any;
+                                                        teamTag = redMap[slot].tag;
+                                                        relIdx = redMap[slot].idx;
+                                                        isTargetTeam = redMap[slot].target;
+                                                    }
+
                                                     return (
                                                         <div key={slot} className="flex items-center gap-4">
-                                                            <div className="w-16 flex-shrink-0 font-mono text-sm text-slate-500">
-                                                                Pick {slot}
+                                                            <div className={`w-28 flex-shrink-0 font-mono text-[10px] leading-tight flex flex-col ${isTargetTeam ? 'text-cyan-400' : 'text-slate-500 opacity-70'}`}>
+                                                                <span className="font-bold">{teamTag} {relIdx}</span>
+                                                                <span className="opacity-50 text-[8px]">Slot {slot}</span>
                                                             </div>
                                                             <div className="flex-1 flex gap-2 h-8">
                                                                 {sortedRoles.map(([role, count]: any, idx) => {
                                                                     const percent = totalPicksInSlot > 0 ? (count / totalPicksInSlot) * 100 : 0;
+                                                                    const playerName = stats.roster ? stats.roster[role] : null;
+
                                                                     return (
                                                                         <div
                                                                             key={role}
-                                                                            className={`h-full flex items-center justify-center px-2 text-xs font-bold rounded relative overflow-hidden ${role === 'Roam' ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/50' :
+                                                                            className={`h-full flex items-center justify-center px-2 text-[10px] font-bold rounded relative overflow-hidden ${role === 'Roam' ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/50' :
                                                                                 role === 'Mid' ? 'bg-red-500/20 text-red-500 border border-red-500/50' :
                                                                                     role === 'Jungle' ? 'bg-green-500/20 text-green-500 border border-green-500/50' :
                                                                                         role === 'Dark Slayer' ? 'bg-purple-500/20 text-purple-500 border border-purple-500/50' :
                                                                                             'bg-blue-500/20 text-blue-500 border border-blue-500/50'
                                                                                 }`}
                                                                             style={{ width: `${percent}%` }}
-                                                                            title={`${role}: ${percent.toFixed(1)}%`}
+                                                                            title={`${role} ${playerName ? `(${playerName})` : ''}: ${percent.toFixed(1)}%`}
                                                                         >
-                                                                            <span className="truncate">{role === 'Roam' ? 'SUP' : role === 'Dark Slayer' ? 'DSL' : role === 'Abyssal' ? 'ADL' : role === 'Jungle' ? 'JUG' : 'MID'}</span>
+                                                                            <span className="truncate">
+                                                                                {role === 'Roam' ? 'SUP' : role === 'Dark Slayer' ? 'DSL' : role === 'Abyssal' ? 'ADL' : role === 'Jungle' ? 'JUG' : 'MID'}
+                                                                            </span>
                                                                         </div>
                                                                     )
                                                                 })}
+                                                                {sortedRoles.length === 0 && <span className="text-[10px] text-slate-600 self-center">No data</span>}
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                })}
+                                                <div className="pt-2 border-t border-white/5 mx-4"></div>
+                                                <div className="text-[10px] uppercase font-bold text-slate-500 mb-2 px-1">Phase 2 (Picks)</div>
+                                                {[15, 16, 17, 18].map((slot) => {
+                                                    let roleData = stats.pickOrderStats[slot] || {};
+                                                    if (draftSide === 'BLUE') roleData = stats.sideStats?.BLUE.pickOrderStats[slot] || {};
+                                                    if (draftSide === 'RED') roleData = stats.sideStats?.RED.pickOrderStats[slot] || {};
+
+                                                    const sortedRoles = Object.entries(roleData)
+                                                        .sort((a: any, b: any) => b[1] - a[1])
+                                                        .slice(0, 3);
+                                                    const totalPicksInSlot = Object.values(roleData).reduce((a: any, b: any) => a + b, 0) as number;
+
+                                                    let teamTag = '';
+                                                    let relIdx = '';
+                                                    let isTargetTeam = false;
+
+                                                    if (draftSide === 'BLUE') {
+                                                        const blueMap = {
+                                                            15: { tag: 'TEAM B', idx: 'PICK 4', target: false },
+                                                            16: { tag: 'TEAM A', idx: 'PICK 4', target: true },
+                                                            17: { tag: 'TEAM A', idx: 'PICK 5', target: true },
+                                                            18: { tag: 'TEAM B', idx: 'PICK 5', target: false },
+                                                        } as any;
+                                                        teamTag = blueMap[slot].tag;
+                                                        relIdx = blueMap[slot].idx;
+                                                        isTargetTeam = blueMap[slot].target;
+                                                    } else {
+                                                        const redMap = {
+                                                            15: { tag: 'TEAM A', idx: 'PICK 4', target: true },
+                                                            16: { tag: 'TEAM B', idx: 'PICK 4', target: false },
+                                                            17: { tag: 'TEAM B', idx: 'PICK 5', target: false },
+                                                            18: { tag: 'TEAM A', idx: 'PICK 5', target: true },
+                                                        } as any;
+                                                        teamTag = redMap[slot].tag;
+                                                        relIdx = redMap[slot].idx;
+                                                        isTargetTeam = redMap[slot].target;
+                                                    }
+
+                                                    return (
+                                                        <div key={slot} className="flex items-center gap-4">
+                                                            <div className={`w-28 flex-shrink-0 font-mono text-[10px] leading-tight flex flex-col ${isTargetTeam ? 'text-cyan-400' : 'text-slate-500 opacity-70'}`}>
+                                                                <span className="font-bold">{teamTag} {relIdx}</span>
+                                                                <span className="opacity-50 text-[8px]">Slot {slot}</span>
+                                                            </div>
+                                                            <div className="flex-1 flex gap-2 h-8">
+                                                                {sortedRoles.map(([role, count]: any) => {
+                                                                    const percent = totalPicksInSlot > 0 ? (count / totalPicksInSlot) * 100 : 0;
+                                                                    const playerName = stats.roster ? stats.roster[role] : null;
+                                                                    return (
+                                                                        <div
+                                                                            key={role}
+                                                                            className={`h-full flex items-center justify-center px-2 text-[10px] font-bold rounded relative overflow-hidden ${role === 'Roam' ? 'bg-yellow-500/20 text-yellow-500 border border-yellow-500/50' :
+                                                                                role === 'Mid' ? 'bg-red-500/20 text-red-500 border border-red-500/50' :
+                                                                                    role === 'Jungle' ? 'bg-green-500/20 text-green-500 border border-green-500/50' :
+                                                                                        role === 'Dark Slayer' ? 'bg-purple-500/20 text-purple-500 border border-purple-500/50' :
+                                                                                            'bg-blue-500/20 text-blue-500 border border-blue-500/50'
+                                                                                }`}
+                                                                            style={{ width: `${percent}%` }}
+                                                                            title={`${role} ${playerName ? `(${playerName})` : ''}: ${percent.toFixed(1)}%`}
+                                                                        >
+                                                                            <span className="truncate">
+                                                                                {role === 'Roam' ? 'SUP' : role === 'Dark Slayer' ? 'DSL' : role === 'Abyssal' ? 'ADL' : role === 'Jungle' ? 'JUG' : 'MID'}
+                                                                            </span>
+                                                                        </div>
+                                                                    )
+                                                                })}
+                                                                {sortedRoles.length === 0 && <span className="text-[10px] text-slate-600 self-center">No data</span>}
                                                             </div>
                                                         </div>
                                                     )
@@ -376,70 +645,212 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                         </CardContent>
                                     </Card>
 
-                                    {/* Ban Analysis */}
+                                    {/* Ban Priority by Slot */}
                                     <Card className="bg-slate-900 border-slate-800 text-white">
                                         <CardHeader className="border-b border-white/5 bg-slate-950/30">
-                                            <CardTitle className="text-base flex items-center gap-2">
-                                                <Shield className="text-red-400" size={18} />
-                                                Most Dangerous (Top Bans)
-                                            </CardTitle>
+                                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                                <CardTitle className="text-base flex items-center gap-2">
+                                                    <div className="text-red-400">🚫</div>
+                                                    Ban Priority by Slot
+                                                </CardTitle>
+                                            </div>
                                         </CardHeader>
-                                        <CardContent className="p-0">
-                                            <div className="overflow-x-auto">
-                                                <table className="w-full text-sm text-left">
-                                                    <thead className="bg-slate-950/50 text-slate-400 uppercase text-xs font-bold">
-                                                        <tr>
-                                                            <th className="px-4 py-3">Hero</th>
-                                                            <th className="px-4 py-3 text-center">Ban Rate</th>
-                                                            <th className="px-4 py-3 text-right">Phase Priority</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-white/5">
-                                                        {sortedHeroes
-                                                            .sort((a, b) => b.bans - a.bans)
-                                                            .filter(h => h.bans > 0)
-                                                            .slice(0, 8)
-                                                            .map((hero: any) => {
-                                                                const banRate = stats.totalGames > 0 ? (hero.bans / stats.totalGames) * 100 : 0;
-                                                                let phase1Bans = 0;
-                                                                let phase2Bans = 0;
-                                                                if (stats.banOrderStats) {
-                                                                    phase1Bans = (stats.banOrderStats[1]?.[hero.id] || 0) + (stats.banOrderStats[2]?.[hero.id] || 0);
-                                                                    phase2Bans = (stats.banOrderStats[3]?.[hero.id] || 0) + (stats.banOrderStats[4]?.[hero.id] || 0);
-                                                                }
-                                                                const isPhase1 = phase1Bans >= phase2Bans;
+                                        <CardContent className="p-6">
+                                            <div className="space-y-6">
+                                                <div className="text-[10px] uppercase font-bold text-slate-500 mb-2 px-1">Phase 1 (Bans)</div>
+                                                <div className="flex flex-wrap gap-x-8 gap-y-6">
+                                                    {[1, 2, 3, 4].map((slot) => {
+                                                        let banData = stats.banOrderStats[slot] || {};
+                                                        if (draftSide === 'BLUE') banData = stats.sideStats?.BLUE.banOrderStats[slot] || {};
+                                                        if (draftSide === 'RED') banData = stats.sideStats?.RED.banOrderStats[slot] || {};
 
-                                                                return (
-                                                                    <tr key={hero.id} className="hover:bg-white/5">
-                                                                        <td className="px-4 py-2 flex items-center gap-3">
-                                                                            <div className="w-8 h-8 relative rounded overflow-hidden border border-white/10">
-                                                                                <Image src={hero.icon} alt={hero.name} fill className="object-cover" />
+                                                        const sortedBans = Object.entries(banData)
+                                                            .sort((a: any, b: any) => b[1] - a[1])
+                                                            .slice(0, 3);
+                                                        const totalBansInSlot = Object.values(banData).reduce((a: any, b: any) => a + b, 0) as number;
+
+                                                        let teamTag = '';
+                                                        let relIdx = '';
+                                                        let isTargetTeam = false;
+                                                        let isRedColor = false;
+
+                                                        if (draftSide === 'BLUE') {
+                                                            const blueMap = {
+                                                                1: { tag: 'TEAM A', idx: 'BAN 1', target: true, red: false },
+                                                                2: { tag: 'TEAM B', idx: 'BAN 1', target: false, red: true },
+                                                                3: { tag: 'TEAM A', idx: 'BAN 2', target: true, red: false },
+                                                                4: { tag: 'TEAM B', idx: 'BAN 2', target: false, red: true },
+                                                            } as any;
+                                                            teamTag = blueMap[slot].tag;
+                                                            relIdx = blueMap[slot].idx;
+                                                            isTargetTeam = blueMap[slot].target;
+                                                            isRedColor = blueMap[slot].red;
+                                                        } else {
+                                                            const redMap = {
+                                                                1: { tag: 'TEAM B', idx: 'BAN 1', target: false, red: false },
+                                                                2: { tag: 'TEAM A', idx: 'BAN 1', target: true, red: true },
+                                                                3: { tag: 'TEAM B', idx: 'BAN 2', target: false, red: false },
+                                                                4: { tag: 'TEAM A', idx: 'BAN 2', target: true, red: true },
+                                                            } as any;
+                                                            teamTag = redMap[slot].tag;
+                                                            relIdx = redMap[slot].idx;
+                                                            isTargetTeam = redMap[slot].target;
+                                                            isRedColor = redMap[slot].red;
+                                                        }
+
+                                                        return (
+                                                            <div key={slot} className="flex min-w-[200px] flex-col gap-1.5 flex-1">
+                                                                <div className={`w-28 flex-shrink-0 font-mono text-[10px] leading-tight flex flex-col ${isRedColor ? 'text-red-400' : 'text-blue-400'} ${!isTargetTeam && 'opacity-70'}`}>
+                                                                    <span className="font-bold">{teamTag} {relIdx}</span>
+                                                                    <span className="opacity-50 text-[8px]">Slot {slot}</span>
+                                                                </div>
+                                                                <div className="flex flex-col gap-2">
+                                                                    {sortedBans.map(([heroId, count]: any) => {
+                                                                        const percent = totalBansInSlot > 0 ? (count / totalBansInSlot) * 100 : 0;
+                                                                        const hero = stats.heroStats[heroId];
+                                                                        if (!hero) return null;
+                                                                        return (
+                                                                            <div
+                                                                                key={heroId}
+                                                                                className={`h-8 flex items-center justify-start px-2 text-xs font-bold rounded relative overflow-hidden border ${isRedColor
+                                                                                    ? 'bg-red-500/10 border-red-500/30 text-red-100'
+                                                                                    : 'bg-blue-500/10 border-blue-500/30 text-blue-100'
+                                                                                    }`}
+                                                                                title={`${hero.name}: ${percent.toFixed(1)}%`}
+                                                                            >
+                                                                                <div className="flex items-center gap-1 relative z-10 w-full px-1">
+                                                                                    <img src={hero.icon} className="w-5 h-5 rounded-full flex-shrink-0" alt={hero.name} />
+                                                                                    <span className="text-[10px] font-bold">
+                                                                                        {percent.toFixed(0)}% <span className="text-[9px] opacity-60 font-medium">({count})</span>
+                                                                                    </span>
+                                                                                </div>
                                                                             </div>
-                                                                            <span className="font-medium text-slate-200">{hero.name}</span>
-                                                                        </td>
-                                                                        <td className="px-4 py-2 text-center text-red-400 font-bold">
-                                                                            {banRate.toFixed(1)}%
-                                                                        </td>
-                                                                        <td className="px-4 py-2 text-right">
-                                                                            <Badge variant="outline" className={isPhase1 ? "border-red-500/50 text-red-500" : "border-yellow-500/50 text-yellow-500"}>
-                                                                                {isPhase1 ? "Phase 1" : "Phase 2"}
-                                                                            </Badge>
-                                                                        </td>
-                                                                    </tr>
-                                                                )
-                                                            })}
-                                                    </tbody>
-                                                </table>
+                                                                        )
+                                                                    })}
+                                                                    {sortedBans.length === 0 && <span className="text-[10px] text-slate-600 self-center">No data</span>}
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+
+                                                <div className="pt-2 border-t border-white/5 mx-4"></div>
+                                                <div className="text-[10px] uppercase font-bold text-slate-500 mb-2 px-1">Phase 2 (Bans)</div>
+                                                <div className="flex flex-wrap gap-x-8 gap-y-6">
+                                                    {[11, 12, 13, 14].map((slot) => {
+                                                        let banData = stats.banOrderStats[slot] || {};
+                                                        if (draftSide === 'BLUE') banData = stats.sideStats?.BLUE.banOrderStats[slot] || {};
+                                                        if (draftSide === 'RED') banData = stats.sideStats?.RED.banOrderStats[slot] || {};
+
+                                                        const sortedBans = Object.entries(banData)
+                                                            .sort((a: any, b: any) => b[1] - a[1])
+                                                            .slice(0, 3);
+                                                        const totalBansInSlot = Object.values(banData).reduce((a: any, b: any) => a + b, 0) as number;
+
+                                                        let teamTag = '';
+                                                        let relIdx = '';
+                                                        let isTargetTeam = false;
+                                                        let isRedColor = false;
+
+                                                        if (draftSide === 'BLUE') {
+                                                            const blueMap = {
+                                                                11: { tag: 'TEAM B', idx: 'BAN 3', target: false, red: true },
+                                                                12: { tag: 'TEAM A', idx: 'BAN 3', target: true, red: false },
+                                                                13: { tag: 'TEAM B', idx: 'BAN 4', target: false, red: true },
+                                                                14: { tag: 'TEAM A', idx: 'BAN 4', target: true, red: false },
+                                                            } as any;
+                                                            teamTag = blueMap[slot].tag;
+                                                            relIdx = blueMap[slot].idx;
+                                                            isTargetTeam = blueMap[slot].target;
+                                                            isRedColor = blueMap[slot].red;
+                                                        } else {
+                                                            const redMap = {
+                                                                11: { tag: 'TEAM A', idx: 'BAN 3', target: true, red: true },
+                                                                12: { tag: 'TEAM B', idx: 'BAN 3', target: false, red: false },
+                                                                13: { tag: 'TEAM A', idx: 'BAN 4', target: true, red: true },
+                                                                14: { tag: 'TEAM B', idx: 'BAN 4', target: false, red: false },
+                                                            } as any;
+                                                            teamTag = redMap[slot].tag;
+                                                            relIdx = redMap[slot].idx;
+                                                            isTargetTeam = redMap[slot].target;
+                                                            isRedColor = redMap[slot].red;
+                                                        }
+
+                                                        return (
+                                                            <div key={slot} className="flex min-w-[200px] flex-col gap-1.5 flex-1">
+                                                                <div className={`w-28 flex-shrink-0 font-mono text-[10px] leading-tight flex flex-col ${isRedColor ? 'text-red-400' : 'text-blue-400'} ${!isTargetTeam && 'opacity-70'}`}>
+                                                                    <span className="font-bold">{teamTag} {relIdx}</span>
+                                                                    <span className="opacity-50 text-[8px]">Slot {slot}</span>
+                                                                </div>
+                                                                <div className="flex flex-col gap-2">
+                                                                    {sortedBans.map(([heroId, count]: any) => {
+                                                                        const percent = totalBansInSlot > 0 ? (count / totalBansInSlot) * 100 : 0;
+                                                                        const hero = stats.heroStats[heroId];
+                                                                        if (!hero) return null;
+                                                                        return (
+                                                                            <div
+                                                                                key={heroId}
+                                                                                className={`h-8 flex items-center justify-start px-2 text-xs font-bold rounded relative overflow-hidden border ${isRedColor
+                                                                                    ? 'bg-red-500/10 border-red-500/30 text-red-100'
+                                                                                    : 'bg-blue-500/10 border-blue-500/30 text-blue-100'
+                                                                                    }`}
+                                                                                title={`${hero.name}: ${percent.toFixed(1)}%`}
+                                                                            >
+                                                                                <div className="flex items-center gap-1 relative z-10 w-full px-1">
+                                                                                    <img src={hero.icon} className="w-5 h-5 rounded-full flex-shrink-0" alt={hero.name} />
+                                                                                    <span className="text-[10px] font-bold">
+                                                                                        {percent.toFixed(0)}% <span className="text-[9px] opacity-60 font-medium">({count})</span>
+                                                                                    </span>
+                                                                                </div>
+                                                                            </div>
+                                                                        )
+                                                                    })}
+                                                                    {sortedBans.length === 0 && <span className="text-[10px] text-slate-600 self-center">No data</span>}
+                                                                </div>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
                                             </div>
                                         </CardContent>
                                     </Card>
+                                    {/* End of Ban Priority Card */}
                                 </div>
                             </div>
-                        )}
-                    </div>
+                        )
+                        }
+                    </div >
+                    {/* End of Main Content (col-span-4) */}
 
-                    {/* Sidebar Stats */}
-                    <div className="md:col-span-1 space-y-6">
+                    {/* Sidebar Stats (col-span-1) */}
+                    <div className="col-span-1 md:col-span-2 lg:col-span-1 space-y-6">
+
+                        {/* Knowledge Base Link */}
+                        <Link href="/admin/cerebro/knowledge">
+                            <Card className="bg-slate-900/50 border-slate-800 hover:bg-slate-800 transition-colors cursor-pointer group mb-6">
+                                <CardHeader className="bg-cyan-950/20 border-b border-cyan-500/10">
+                                    <div className="w-12 h-12 rounded-xl bg-cyan-500/10 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform duration-300">
+                                        <Brain className="w-6 h-6 text-cyan-400" />
+                                    </div>
+                                    <CardTitle className="text-white group-hover:text-cyan-400 transition-colors text-lg">Knowledge Base</CardTitle>
+                                    <p className="text-xs text-slate-400 leading-relaxed">Teach Cerebro about hero synergies, counter-picks, and game mechanics.</p>
+                                </CardHeader>
+                            </Card>
+                        </Link>
+
+                        {/* Recent Trophies */}
+                        <Card className="bg-slate-900 border-slate-800 text-white">
+                            <CardHeader className="pb-3 border-b border-white/5">
+                                <CardTitle className="text-sm uppercase tracking-wider flex items-center gap-2">
+                                    <Trophy size={16} className="text-yellow-400" /> Recent Trophies
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-4">
+                                <div className="text-center py-6 text-slate-500 text-xs italic">
+                                    No tournaments won yet... time to grind!
+                                </div>
+                            </CardContent>
+                        </Card>
 
                         {/* Top Combos */}
                         <Card className="bg-slate-900 border-slate-800 text-white">
@@ -451,8 +862,9 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                             <CardContent className="p-0">
                                 <div className="divide-y divide-white/5">
                                     {topCombos.map((combo: any, idx) => {
-                                        const h1 = sortedHeroes.find((h: any) => h.id === combo.heroes[0]);
-                                        const h2 = sortedHeroes.find((h: any) => h.id === combo.heroes[1]);
+                                        // Use ALL stats to find heroes, ensuring filter doesn't hide them
+                                        const h1 = stats.heroStats[combo.heroes[0]];
+                                        const h2 = stats.heroStats[combo.heroes[1]];
                                         const wr = (combo.wins / combo.count) * 100;
 
                                         if (!h1 || !h2) return null;
@@ -480,12 +892,9 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                 </div>
                             </CardContent>
                         </Card>
-
                     </div>
-
-                </div>
-            )
-            }
+                </div >
+            )}
         </div >
     );
 }

@@ -37,12 +37,19 @@ export default function PostDraftForm({
     const router = useRouter()
     const [assignments, setAssignments] = useState<Record<string, string>>({})
     const [winner, setWinner] = useState<'Blue' | 'Red' | null>(null)
-    const [mvpId, setMvpId] = useState<string>("")
+    const [blueKeyPlayer, setBlueKeyPlayer] = useState<string>("")
+    const [redKeyPlayer, setRedKeyPlayer] = useState<string>("")
     const [notes, setNotes] = useState("")
     const [submitting, setSubmitting] = useState(false)
 
     // Helper: Get Hero
     const getHero = (id: string) => heroes.find(h => h.id === id)
+
+    // Draft Slot Mappings (Absolute 1-18)
+    const BLUE_PICK_SLOTS = [5, 8, 9, 16, 17]
+    const RED_PICK_SLOTS = [6, 7, 10, 15, 18]
+    const BLUE_BAN_SLOTS = [1, 3, 12, 14]
+    const RED_BAN_SLOTS = [2, 4, 11, 13]
 
     // 1. Auto-fill logic
     useEffect(() => {
@@ -78,10 +85,11 @@ export default function PostDraftForm({
     }
 
     const handleSubmit = async () => {
-        if (!winner || !mvpId) {
-            alert("Please select a Winner and an MVP.")
+        if (!winner) {
+            alert("Please select a Winner.")
             return
         }
+        // MVP is optional but recommended
 
         setSubmitting(true)
 
@@ -95,49 +103,60 @@ export default function PostDraftForm({
         }[] = []
 
         // Process Blue Picks
-        Object.entries(bluePicks).forEach(([idx, heroId]) => {
-            picksData.push({
-                hero_id: heroId,
-                type: 'PICK' as const,
-                side: 'BLUE' as const,
-                position_index: parseInt(idx) + 1,
-                assigned_role: assignments[heroId] || 'Flex'
-            })
+        Object.entries(bluePicks).forEach(([idxStr, heroId]) => {
+            const idx = parseInt(idxStr) // 0-4
+            if (idx >= 0 && idx < BLUE_PICK_SLOTS.length) {
+                picksData.push({
+                    hero_id: heroId,
+                    type: 'PICK' as const,
+                    side: 'BLUE' as const,
+                    position_index: BLUE_PICK_SLOTS[idx],
+                    assigned_role: assignments[heroId] || 'Flex'
+                })
+            }
         })
 
         // Process Red Picks
-        Object.entries(redPicks).forEach(([idx, heroId]) => {
-            picksData.push({
-                hero_id: heroId,
-                type: 'PICK' as const,
-                side: 'RED' as const,
-                position_index: parseInt(idx) + 1,
-                assigned_role: assignments[heroId] || 'Flex'
-            })
+        Object.entries(redPicks).forEach(([idxStr, heroId]) => {
+            const idx = parseInt(idxStr) // 0-4
+            if (idx >= 0 && idx < RED_PICK_SLOTS.length) {
+                picksData.push({
+                    hero_id: heroId,
+                    type: 'PICK' as const,
+                    side: 'RED' as const,
+                    position_index: RED_PICK_SLOTS[idx],
+                    assigned_role: assignments[heroId] || 'Flex'
+                })
+            }
         })
 
         // Process Bans
         blueBans.forEach((heroId, idx) => {
-            picksData.push({
-                hero_id: heroId,
-                type: 'BAN' as const,
-                side: 'BLUE' as const,
-                position_index: idx + 1
-            })
+            if (idx >= 0 && idx < BLUE_BAN_SLOTS.length) {
+                picksData.push({
+                    hero_id: heroId,
+                    type: 'BAN' as const,
+                    side: 'BLUE' as const,
+                    position_index: BLUE_BAN_SLOTS[idx]
+                })
+            }
         })
         redBans.forEach((heroId, idx) => {
-            picksData.push({
-                hero_id: heroId,
-                type: 'BAN' as const,
-                side: 'RED' as const,
-                position_index: idx + 1
-            })
+            if (idx >= 0 && idx < RED_BAN_SLOTS.length) {
+                picksData.push({
+                    hero_id: heroId,
+                    type: 'BAN' as const,
+                    side: 'RED' as const,
+                    position_index: RED_BAN_SLOTS[idx]
+                })
+            }
         })
 
         const res = await finishGame({
             gameId,
             winner,
-            mvpHeroId: mvpId,
+            blueKeyPlayer,
+            redKeyPlayer,
             notes,
             picks: picksData
         })
@@ -219,25 +238,37 @@ export default function PostDraftForm({
                                 </RadioGroup>
                             </div>
 
-                            <div>
-                                <Label className="text-base mb-3 block">Key Player (MVP)</Label>
-                                <Select value={mvpId} onValueChange={setMvpId}>
-                                    <SelectTrigger className="h-14 bg-slate-900 border-slate-700 text-lg">
-                                        <SelectValue placeholder="Select MVP Hero" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <div className="p-2 text-xs font-bold text-slate-500 uppercase tracking-wider">Blue Team</div>
-                                        {Object.values(bluePicks).map(id => {
-                                            const h = getHero(id); if (!h) return null;
-                                            return <SelectItem key={id} value={id}>{h.name}</SelectItem>
-                                        })}
-                                        <div className="p-2 text-xs font-bold text-slate-500 uppercase tracking-wider mt-2">Red Team</div>
-                                        {Object.values(redPicks).map(id => {
-                                            const h = getHero(id); if (!h) return null;
-                                            return <SelectItem key={id} value={id}>{h.name}</SelectItem>
-                                        })}
-                                    </SelectContent>
-                                </Select>
+                            <div className="grid grid-cols-2 gap-4">
+                                {/* Blue MVP */}
+                                <div>
+                                    <Label className="text-base mb-3 block text-blue-400">Blue MVP</Label>
+                                    <Select value={blueKeyPlayer} onValueChange={setBlueKeyPlayer}>
+                                        <SelectTrigger className="h-14 bg-slate-900 border-slate-700 text-lg">
+                                            <SelectValue placeholder="Blue MVP" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {Object.values(bluePicks).map(id => {
+                                                const h = getHero(id); if (!h) return null;
+                                                return <SelectItem key={id} value={id}>{h.name}</SelectItem>
+                                            })}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                {/* Red MVP */}
+                                <div>
+                                    <Label className="text-base mb-3 block text-red-400">Red MVP</Label>
+                                    <Select value={redKeyPlayer} onValueChange={setRedKeyPlayer}>
+                                        <SelectTrigger className="h-14 bg-slate-900 border-slate-700 text-lg">
+                                            <SelectValue placeholder="Red MVP" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {Object.values(redPicks).map(id => {
+                                                const h = getHero(id); if (!h) return null;
+                                                return <SelectItem key={id} value={id}>{h.name}</SelectItem>
+                                            })}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                             </div>
                         </div>
 

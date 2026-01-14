@@ -314,6 +314,34 @@ export async function createTeam(formData: FormData) {
     return { data }
 }
 
+export async function updateTeam(formData: FormData) {
+    const supabase = await createClient()
+    const id = formData.get('id') as string
+    const tournamentId = formData.get('tournament_id') as string
+    const name = formData.get('name') as string
+    const shortName = formData.get('short_name') as string
+    const logoUrl = formData.get('logo_url') as string
+
+    if (!id || !name || !tournamentId) return { error: 'ID, Name and Tournament ID are required' }
+
+    const newSlug = slugify(name)
+
+    const { error } = await supabase
+        .from('teams')
+        .update({
+            name,
+            slug: newSlug,
+            short_name: shortName || null,
+            logo_url: logoUrl || null,
+        })
+        .eq('id', id)
+
+    if (error) return { error: error.message }
+
+    revalidatePath(`/admin/tournaments/${tournamentId}`)
+    return { success: true }
+}
+
 export async function deleteTeam(id: string, tournamentId: string) {
     const supabase = await createClient()
     const { error } = await supabase.from('teams').delete().eq('id', id)

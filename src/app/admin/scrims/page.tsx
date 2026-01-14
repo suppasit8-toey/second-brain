@@ -11,6 +11,13 @@ import DeleteMatchButton from '../draft/_components/DeleteMatchButton'
 import { cn } from '@/lib/utils'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { ChevronDown } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { useRef } from 'react'
 
@@ -20,6 +27,8 @@ export default function ScrimManagerPage() {
     const [scrims, setScrims] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [heroes, setHeroes] = useState<any[]>([]) // Store heroes for mapping
+    const [pageLimit, setPageLimit] = useState(20)
+    const [hasMore, setHasMore] = useState(false)
 
     // Filter States
     const [versions, setVersions] = useState<any[]>([])
@@ -78,7 +87,7 @@ export default function ScrimManagerPage() {
             .in('match_type', ['scrim', 'scrim_summary', 'scrim_simulator'])
             .order('match_date', { ascending: false })
             .order('created_at', { ascending: false })
-            .limit(50)
+            .limit(pageLimit)
 
         // Apply Filters
         if (searchQuery) {
@@ -112,6 +121,9 @@ export default function ScrimManagerPage() {
 
         let filteredData = data || []
 
+        // Determine if there are more records (if we got exactly the limit, assume yes)
+        setHasMore(filteredData.length === pageLimit)
+
         // Client-side date filtering (Month/Day) because SQL date_part is annoying via JS client without RPC
         if (selectedYear !== 'All' && selectedMonth !== 'All') {
             filteredData = filteredData.filter(s => {
@@ -133,7 +145,7 @@ export default function ScrimManagerPage() {
 
         setScrims(filteredData)
         setLoading(false)
-    }, [searchQuery, selectedYear, selectedMonth, selectedDay, selectedPatch, selectedMode, selectedRecordingMode, selectedTeam])
+    }, [searchQuery, selectedYear, selectedMonth, selectedDay, selectedPatch, selectedMode, selectedRecordingMode, selectedTeam, pageLimit])
 
     useEffect(() => {
         loadGlobalOptions()
@@ -165,6 +177,7 @@ export default function ScrimManagerPage() {
         setSelectedRecordingMode('All')
         setSelectedTeam('All')
         setSearchQuery('')
+        setPageLimit(20)
     }
 
     // Export Logic
@@ -209,77 +222,242 @@ export default function ScrimManagerPage() {
 
                 const picks = g.picks || []
 
-                // Helper to get hero/role by Side
-                const getHero = (side: string, type: string, index: number) => {
-                    const p = picks.find((p: any) => p.side === side && p.type === type && p.position_index === (index + 1))
-                    return p ? (heroes.find(h => h.id === p.hero_id)?.name || p.hero_id) : ''
+                // TEAM A Columns
+                // Team A Positions (Match Team A Pick 1..5)
+                // We need to know which slots belong to Team A to get the right role
+                // If Team A is Blue: Slots 5, 8, 9, 16, 17
+                // If Team A is Red:  Slots 6, 7, 10, 15, 18
+                const getTeamPickSlot = (isTeamBlue: boolean, pickNum: number) => {
+                    const bluePicks = [5, 8, 9, 16, 17]
+                    const redPicks = [6, 7, 10, 15, 18]
+                    return isTeamBlue ? bluePicks[pickNum - 1] : redPicks[pickNum - 1]
                 }
-                const getRole = (side: string, type: string, index: number) => {
-                    const p = picks.find((p: any) => p.side === side && p.type === type && p.position_index === (index + 1))
-                    return p?.assigned_role || ''
+
+
+                const SLOT_CONFIG: any = {
+                    1: { side: 'BLUE', type: 'BAN', idx: 1, label: '1-Blue-BAN1' },
+                    2: { side: 'RED', type: 'BAN', idx: 1, label: '2-Red-BAN2' },
+                    3: { side: 'BLUE', type: 'BAN', idx: 2, label: '3-Blue-BAN3' },
+                    4: { side: 'RED', type: 'BAN', idx: 2, label: '4-Red-BAN4' },
+                    5: { side: 'BLUE', type: 'PICK', idx: 1, label: '5-Blue-Pick1' },
+                    6: { side: 'RED', type: 'PICK', idx: 1, label: '6-Red-Pick2' },
+                    7: { side: 'RED', type: 'PICK', idx: 2, label: '7-Red-Pick3' },
+                    8: { side: 'BLUE', type: 'PICK', idx: 2, label: '8-Blue-Pick4' },
+                    9: { side: 'BLUE', type: 'PICK', idx: 3, label: '9-Blue-Pick5' },
+                    10: { side: 'RED', type: 'PICK', idx: 3, label: '10-Red-Pick6' },
+                    11: { side: 'RED', type: 'BAN', idx: 3, label: '11-Red-BAN5' },
+                    12: { side: 'BLUE', type: 'BAN', idx: 3, label: '12-Blue-BAN6' },
+                    13: { side: 'RED', type: 'BAN', idx: 4, label: '13-Red-BAN7' },
+                    14: { side: 'BLUE', type: 'BAN', idx: 4, label: '14-Blue-BAN8' },
+                    15: { side: 'RED', type: 'PICK', idx: 4, label: '15-Red-Pick7' },
+                    16: { side: 'BLUE', type: 'PICK', idx: 4, label: '16-Blue-Pick8' },
+                    17: { side: 'BLUE', type: 'PICK', idx: 5, label: '17-Blue-Pick9' },
+                    18: { side: 'RED', type: 'PICK', idx: 5, label: '18-Red-Pick10' },
                 }
 
-                // Map to TEAM A / TEAM B columns based on their side
-                const teamASideCode = teamASide // 'BLUE' or 'RED'
-                const teamBSideCode = teamASide === 'BLUE' ? 'RED' : 'BLUE'
+                // Populate Chronological Columns
+                if (isSimulator) {
+                    // Standard Simulator Logic (Strict 1-18 Slots)
+                    for (let i = 1; i <= 18; i++) {
+                        const cfg = SLOT_CONFIG[i]
+                        let p = picks.find((p: any) => p.position_index === i)
+                        // Verify Side matches Config (Consistency check)
+                        if (p && p.side !== cfg.side) {
+                            // Mismatch found (e.g. legacy data collision). Try finding by strict Side+Idx if strictly needed?
+                            // But usually Simulator data is correct. 
+                        }
+                        const hName = p ? (heroes.find(h => h.id === p.hero_id)?.name || p.hero_id) : ''
+                        row[cfg.label] = hName
+                    }
+                } else {
+                    // Quick Result Entry Logic (Legacy Support + No Bans)
+                    // We need to map Blue Picks 1-5 and Red Picks 1-5 to the correct columns
+                    // Blue Picks: [5, 8, 9, 16, 17]
+                    // Red Picks:  [6, 7, 10, 15, 18]
 
-                // TEAM A Data
-                for (let i = 0; i < 4; i++) row[`TEAM A BAN${i + 1}`] = getHero(teamASideCode, 'BAN', i)
-                for (let i = 0; i < 5; i++) row[`TEAM A PICK${i + 1}`] = getHero(teamASideCode, 'PICK', i)
-                for (let i = 0; i < 5; i++) row[`TEAM A POSITION${i + 1}`] = getRole(teamASideCode, 'PICK', i)
+                    const bluePicks = picks.filter((p: any) => p.side === 'BLUE' && p.type === 'PICK').sort((a: any, b: any) => a.position_index - b.position_index)
+                    const redPicks = picks.filter((p: any) => p.side === 'RED' && p.type === 'PICK').sort((a: any, b: any) => a.position_index - b.position_index)
 
-                // TEAM B Data
-                for (let i = 0; i < 4; i++) row[`TEAM B BAN${i + 1}`] = getHero(teamBSideCode, 'BAN', i)
-                for (let i = 0; i < 5; i++) row[`TEAM B PICK${i + 1}`] = getHero(teamBSideCode, 'PICK', i)
-                for (let i = 0; i < 5; i++) row[`TEAM B POSITION${i + 1}`] = getRole(teamBSideCode, 'PICK', i)
+                    // Map Ordered Picks to Columns
+                    // Blue
+                    if (bluePicks[0]) row['5-Blue-Pick1'] = heroes.find(h => h.id === bluePicks[0].hero_id)?.name
+                    if (bluePicks[1]) row['8-Blue-Pick4'] = heroes.find(h => h.id === bluePicks[1].hero_id)?.name
+                    if (bluePicks[2]) row['9-Blue-Pick5'] = heroes.find(h => h.id === bluePicks[2].hero_id)?.name
+                    if (bluePicks[3]) row['16-Blue-Pick8'] = heroes.find(h => h.id === bluePicks[3].hero_id)?.name
+                    if (bluePicks[4]) row['17-Blue-Pick9'] = heroes.find(h => h.id === bluePicks[4].hero_id)?.name
+
+                    // Red
+                    if (redPicks[0]) row['6-Red-Pick2'] = heroes.find(h => h.id === redPicks[0].hero_id)?.name
+                    if (redPicks[1]) row['7-Red-Pick3'] = heroes.find(h => h.id === redPicks[1].hero_id)?.name
+                    if (redPicks[2]) row['10-Red-Pick6'] = heroes.find(h => h.id === redPicks[2].hero_id)?.name
+                    if (redPicks[3]) row['15-Red-Pick7'] = heroes.find(h => h.id === redPicks[3].hero_id)?.name
+                    if (redPicks[4]) row['18-Red-Pick10'] = heroes.find(h => h.id === redPicks[4].hero_id)?.name
+                }
+
+                // Populate Team Positions
+                const isTeamABlue = teamASide === 'BLUE'
+                const STANDARD_ROLES = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
+
+                if (!isSimulator) {
+                    // Quick Result Entry: Enforce Standard Roles
+                    for (let k = 1; k <= 5; k++) {
+                        row[`TEAM A POSITION${k}`] = STANDARD_ROLES[k - 1]
+                        row[`TEAM B POSITION${k}`] = STANDARD_ROLES[k - 1]
+                    }
+                } else {
+                    // Simulator: Use Assgined Roles from DB
+                    // TEAM A POSITIONS (1-5)
+                    for (let k = 1; k <= 5; k++) {
+                        const slot = getTeamPickSlot(isTeamABlue, k)
+                        let p = picks.find((p: any) => p.position_index === slot)
+                        if (!p) {
+                            const side = isTeamABlue ? 'BLUE' : 'RED'
+                            p = picks.find((p: any) => p.side === side && p.type === 'PICK' && p.position_index === k)
+                        }
+                        row[`TEAM A POSITION${k}`] = p?.assigned_role || ''
+                    }
+
+                    // TEAM B POSITIONS (1-5)
+                    for (let k = 1; k <= 5; k++) {
+                        const slot = getTeamPickSlot(!isTeamABlue, k)
+                        let p = picks.find((p: any) => p.position_index === slot)
+                        if (!p) {
+                            const side = !isTeamABlue ? 'BLUE' : 'RED'
+                            p = picks.find((p: any) => p.side === side && p.type === 'PICK' && p.position_index === k)
+                        }
+                        row[`TEAM B POSITION${k}`] = p?.assigned_role || ''
+                    }
+                }
+
+                // Extras
+                const getHeroName = (id: string) => heroes.find(h => h.id === id)?.name || ''
+                // Determine MVP for Team A
+                // If Team A is Blue, use blue_key_player_id. Else red.
+                const mvpAId = isTeamABlue ? g.blue_key_player_id : g.red_key_player_id
+                const mvpBId = isTeamABlue ? g.red_key_player_id : g.blue_key_player_id
+
+                row['MVPTEAM A'] = getHeroName(mvpAId)
+                row['MVPTEAM B'] = getHeroName(mvpBId)
+
+                // Winrate Team A (1 if A won, 0 if lost) for this game
+                const winnerName = g.winner === 'Blue' ? g.blue_team_name : (g.winner === 'Red' ? g.red_team_name : '')
+                const teamAWon = winnerName === s.team_a_name
+
+                // WINRATE TEAM A: User requested this to be "Blue Team Win %"
+                // So we always output Blue's status
+                // const blueWon = g.winner === 'Blue'
+                // let winRateA = blueWon ? 1 : 0
+
+                // UPDATE: If no prediction, show 50
+                let winRateA = 50
+
+                if (g.analysis_data?.winPrediction?.blue !== undefined) {
+                    winRateA = Number(g.analysis_data.winPrediction.blue)
+                }
+
+                row['WIN % BLUE TEAM'] = winRateA
 
                 rows.push(row)
             })
         })
 
-        const ws = XLSX.utils.json_to_sheet(rows)
+        // Enforce Strict Headers to ensure Ban columns appear even if empty (Quick Entry)
+        const headers = [
+            'MATCH ID', 'Date', 'Tournament', 'Patch',
+            'Recording Mode (Full,Quick)', 'Number of Games (1Game..... 7 games)', 'GAME(เกมที่ 1,2,3,4....)',
+            'TEAM A', 'Team B', 'TEAM A SIDE (BLUE OR RED)', 'MATCH WIN (name TEAM A or name TEAM B)',
+            '1-Blue-BAN1', '2-Red-BAN2', '3-Blue-BAN3', '4-Red-BAN4',
+            '5-Blue-Pick1', '6-Red-Pick2', '7-Red-Pick3', '8-Blue-Pick4', '9-Blue-Pick5', '10-Red-Pick6',
+            '11-Red-BAN5', '12-Blue-BAN6', '13-Red-BAN7', '14-Blue-BAN8',
+            '15-Red-Pick7', '16-Blue-Pick8', '17-Blue-Pick9', '18-Red-Pick10',
+            'TEAM A POSITION1', 'TEAM A POSITION2', 'TEAM A POSITION3', 'TEAM A POSITION4', 'TEAM A POSITION5',
+            'TEAM B POSITION1', 'TEAM B POSITION2', 'TEAM B POSITION3', 'TEAM B POSITION4', 'TEAM B POSITION5',
+            'MVPTEAM A', 'MVPTEAM B', 'WIN % BLUE TEAM'
+        ]
+
+        const ws = XLSX.utils.json_to_sheet(rows, { header: headers })
         const wb = XLSX.utils.book_new()
         XLSX.utils.book_append_sheet(wb, ws, "Draft Logs")
         XLSX.writeFile(wb, `Draft_Logs_${new Date().toISOString().split('T')[0]}.xlsx`)
     }
 
-    const handleDownloadTemplate = () => {
-        const headers = [
-            'MATCH ID', 'Date', 'Tournament', 'Patch',
-            'Recording Mode (Full,Quick)', 'Number of Games (1Game..... 7 games)', 'GAME(เกมที่ 1,2,3,4....)',
-            'TEAM A', 'Team B', 'TEAM A SIDE (BLUE OR RED)', 'MATCH WIN (name TEAM A or name TEAM B)',
-            'TEAM A BAN1', 'TEAM A BAN2', 'TEAM A BAN3', 'TEAM A BAN4',
-            'TEAM A PICK1', 'TEAM A PICK2', 'TEAM A PICK3', 'TEAM A PICK4', 'TEAM A PICK5',
-            'TEAM A POSITION1', 'TEAM A POSITION2', 'TEAM A POSITION3', 'TEAM A POSITION4', 'TEAM A POSITION5',
-            'TEAM B BAN1', 'TEAM B BAN2', 'TEAM B BAN3', 'TEAM B BAN4',
-            'TEAM B PICK1', 'TEAM B PICK2', 'TEAM B PICK3', 'TEAM B PICK4', 'TEAM B PICK5',
-            'TEAM B POSITION1', 'TEAM B POSITION2', 'TEAM B POSITION3', 'TEAM B POSITION4', 'TEAM B POSITION5'
-        ]
+    const handleDownloadTemplate = (mode: 'FULL' | 'QUICK') => {
+        let headers: string[] = []
+        let exampleRow: any = {}
 
-        const exampleRow = {
-            'MATCH ID': 'SCRIM-EXAMPLE-01',
-            'Date': '2024-01-01',
-            'Tournament': 'RPL 2024',
-            'Patch': 'S1 2024',
-            'Recording Mode (Full,Quick)': 'Quick Result Entry',
-            'Number of Games (1Game..... 7 games)': '3 Games',
-            'GAME(เกมที่ 1,2,3,4....)': 'Game 1',
-            'TEAM A': 'BAC',
-            'Team B': 'TALON',
-            'TEAM A SIDE (BLUE OR RED)': 'BLUE',
-            'MATCH WIN (name TEAM A or name TEAM B)': 'BAC',
-            'TEAM A BAN1': 'Krizzix',
-            'TEAM A PICK1': 'Yena',
-            'TEAM A POSITION1': 'Dark Slayer',
-            'TEAM B BAN1': 'Nakroth',
-            'TEAM B PICK1': 'Violet',
-            'TEAM B POSITION1': 'Abyssal Dragon'
+        if (mode === 'FULL') {
+            headers = [
+                'MATCH ID', 'Date', 'Tournament', 'Patch',
+                'Recording Mode (Full,Quick)', 'Number of Games (1Game..... 7 games)', 'GAME(เกมที่ 1,2,3,4....)',
+                'TEAM A', 'Team B', 'TEAM A SIDE (BLUE OR RED)', 'MATCH WIN (name TEAM A or name TEAM B)',
+                '1-Blue-BAN1', '2-Red-BAN2', '3-Blue-BAN3', '4-Red-BAN4',
+                '5-Blue-Pick1', '6-Red-Pick2', '7-Red-Pick3', '8-Blue-Pick4', '9-Blue-Pick5', '10-Red-Pick6',
+                '11-Red-BAN5', '12-Blue-BAN6', '13-Red-BAN7', '14-Blue-BAN8',
+                '15-Red-Pick7', '16-Blue-Pick8', '17-Blue-Pick9', '18-Red-Pick10',
+                'TEAM A POSITION1', 'TEAM A POSITION2', 'TEAM A POSITION3', 'TEAM A POSITION4', 'TEAM A POSITION5',
+                'TEAM B POSITION1', 'TEAM B POSITION2', 'TEAM B POSITION3', 'TEAM B POSITION4', 'TEAM B POSITION5',
+                'MVPTEAM A', 'MVPTEAM B', 'WIN % BLUE TEAM'
+            ]
+            exampleRow = {
+                'MATCH ID': 'SCRIM-EXAMPLE-FULL-01',
+                'Date': '2024-01-01',
+                'Tournament': 'RPL 2024',
+                'Patch': 'S1 2024',
+                'Recording Mode (Full,Quick)': 'Full Draft Simulator',
+                'Number of Games (1Game..... 7 games)': '3 Games',
+                'GAME(เกมที่ 1,2,3,4....)': 'Game 1',
+                'TEAM A': 'BAC',
+                'Team B': 'TALON',
+                'TEAM A SIDE (BLUE OR RED)': 'BLUE',
+                'MATCH WIN (name TEAM A or name TEAM B)': 'BAC',
+                '1-Blue-BAN1': 'Krizzix',
+                '5-Blue-Pick1': 'Yena',
+                'TEAM A POSITION1': 'Dark Slayer',
+                '2-Red-BAN2': 'Nakroth',
+                '6-Red-Pick2': 'Violet',
+                'TEAM B POSITION1': 'Abyssal Dragon',
+                'MVPTEAM A': 'Yena',
+                'MVPTEAM B': 'Violet',
+                'WIN % BLUE TEAM': '50'
+            }
+        } else {
+            // Quick Entry (No Bans)
+            headers = [
+                'MATCH ID', 'Date', 'Tournament', 'Patch',
+                'Recording Mode (Full,Quick)', 'Number of Games (1Game..... 7 games)', 'GAME(เกมที่ 1,2,3,4....)',
+                'TEAM A', 'Team B', 'TEAM A SIDE (BLUE OR RED)', 'MATCH WIN (name TEAM A or name TEAM B)',
+                '5-Blue-Pick1', '6-Red-Pick2', '7-Red-Pick3', '8-Blue-Pick4', '9-Blue-Pick5', '10-Red-Pick6',
+                '15-Red-Pick7', '16-Blue-Pick8', '17-Blue-Pick9', '18-Red-Pick10',
+                'TEAM A POSITION1', 'TEAM A POSITION2', 'TEAM A POSITION3', 'TEAM A POSITION4', 'TEAM A POSITION5',
+                'TEAM B POSITION1', 'TEAM B POSITION2', 'TEAM B POSITION3', 'TEAM B POSITION4', 'TEAM B POSITION5',
+                'MVPTEAM A', 'MVPTEAM B', 'WIN % BLUE TEAM'
+            ]
+            exampleRow = {
+                'MATCH ID': 'SCRIM-EXAMPLE-QUICK-01',
+                'Date': '2024-01-01',
+                'Tournament': 'RPL 2024',
+                'Patch': 'S1 2024',
+                'Recording Mode (Full,Quick)': 'Quick Result Entry',
+                'Number of Games (1Game..... 7 games)': '3 Games',
+                'GAME(เกมที่ 1,2,3,4....)': 'Game 1',
+                'TEAM A': 'BAC',
+                'Team B': 'TALON',
+                'TEAM A SIDE (BLUE OR RED)': 'BLUE',
+                'MATCH WIN (name TEAM A or name TEAM B)': 'BAC',
+                '5-Blue-Pick1': 'Yena',
+                '6-Red-Pick2': 'Violet',
+                'TEAM A POSITION1': 'Dark Slayer',
+                'TEAM B POSITION1': 'Abyssal Dragon',
+                'MVPTEAM A': 'Yena',
+                'MVPTEAM B': 'Violet',
+                'WIN % BLUE TEAM': '50'
+            }
         }
 
         const ws = XLSX.utils.json_to_sheet([exampleRow], { header: headers })
         const wb = XLSX.utils.book_new()
         XLSX.utils.book_append_sheet(wb, ws, "Template")
-        XLSX.writeFile(wb, "Scrim_Upload_Template.xlsx")
+        XLSX.writeFile(wb, mode === 'FULL' ? "Full_Draft_Template.xlsx" : "Quick_Entry_Template.xlsx")
     }
 
     // Import Logic
@@ -471,12 +649,28 @@ export default function ScrimManagerPage() {
                             .eq('game_number', gameIndex)
                             .single()
 
+                        // Prepare Game Data
+                        const mvpAName = row['MVPTEAM A']
+                        const mvpBName = row['MVPTEAM B']
+
+                        const isTeamABlue = teamASideStr.includes('BLUE')
+
+                        // We need to resolve Name -> ID
+                        const mvpAId = findHeroId(mvpAName)
+                        const mvpBId = findHeroId(mvpBName)
+
+                        // Map to Blue/Red Key Player
+                        const blueKeyId = isTeamABlue ? mvpAId : mvpBId
+                        const redKeyId = isTeamABlue ? mvpBId : mvpAId
+
                         const gamePayload = {
                             match_id: matchDbId,
                             game_number: gameIndex,
                             blue_team_name: blueTeamName,
                             red_team_name: redTeamName,
                             winner: winnerSide,
+                            blue_key_player_id: blueKeyId,
+                            red_key_player_id: redKeyId,
                             status: 'finished'
                         }
 
@@ -505,59 +699,117 @@ export default function ScrimManagerPage() {
                             continue
                         }
 
-                        // 3. Process Picks
+                        // 3. Process Picks (Chronological Schema) 
                         const picksToInsert: any[] = []
 
-                        const processSide = (prefix: string, isTeamA: boolean) => {
-                            // Determine if this 'Team' (A or B) is Blue or Red
-                            // If Team A is Blue (teamASideStr='BLUE'), then Team A data -> Blue Data
-                            // If Team A is Red, then Team A data -> Red Data
+                        const SLOT_CONFIG: any = {
+                            1: { side: 'BLUE', type: 'BAN', idx: 1, label: '1-Blue-BAN1' },
+                            2: { side: 'RED', type: 'BAN', idx: 1, label: '2-Red-BAN2' },
+                            3: { side: 'BLUE', type: 'BAN', idx: 2, label: '3-Blue-BAN3' },
+                            4: { side: 'RED', type: 'BAN', idx: 2, label: '4-Red-BAN4' },
+                            5: { side: 'BLUE', type: 'PICK', idx: 1, label: '5-Blue-Pick1' },
+                            6: { side: 'RED', type: 'PICK', idx: 1, label: '6-Red-Pick2' },
+                            7: { side: 'RED', type: 'PICK', idx: 2, label: '7-Red-Pick3' },
+                            8: { side: 'BLUE', type: 'PICK', idx: 2, label: '8-Blue-Pick4' },
+                            9: { side: 'BLUE', type: 'PICK', idx: 3, label: '9-Blue-Pick5' },
+                            10: { side: 'RED', type: 'PICK', idx: 3, label: '10-Red-Pick6' },
+                            11: { side: 'RED', type: 'BAN', idx: 3, label: '11-Red-BAN5' },
+                            12: { side: 'BLUE', type: 'BAN', idx: 3, label: '12.Blue-BAN6' },
+                            13: { side: 'RED', type: 'BAN', idx: 4, label: '13-Red-BAN7' },
+                            14: { side: 'BLUE', type: 'BAN', idx: 4, label: '14-Blue-BAN8' },
+                            15: { side: 'RED', type: 'PICK', idx: 4, label: '15-Red-Pick7' },
+                            16: { side: 'BLUE', type: 'PICK', idx: 4, label: '16-Blue-Pick8' },
+                            17: { side: 'BLUE', type: 'PICK', idx: 5, label: '17-Blue-Pick9' },
+                            18: { side: 'RED', type: 'PICK', idx: 5, label: '18-Red-Pick10' },
+                        }
 
-                            // Let's deduce the SIDE for this prefix block
-                            let actualSide = '' // 'BLUE' or 'RED'
-                            if (isTeamA) {
-                                actualSide = teamASideStr.includes('BLUE') ? 'BLUE' : 'RED'
-                            } else {
-                                // Team B
-                                actualSide = teamASideStr.includes('BLUE') ? 'RED' : 'BLUE'
-                            }
+                        // Parse Draft Slots (1-18)
+                        for (let i = 1; i <= 18; i++) {
+                            const cfg = SLOT_CONFIG[i]
+                            // Try finding the label. Handle potential user typos in label if needed.
+                            // Config is dot (12.Blue-BAN6), check for hyphen (12-Blue-BAN6) as fallback.
+                            let hName = row[cfg.label]
+                            if (!hName && i === 12) hName = row['12-Blue-BAN6']
 
-                            // Bans
-                            for (let i = 1; i <= 4; i++) {
-                                const hName = row[`${prefix} BAN${i}`]
-                                const hid = findHeroId(hName)
-                                if (hid) {
-                                    picksToInsert.push({
-                                        game_id: gameData.id,
-                                        hero_id: hid,
-                                        side: actualSide,
-                                        type: 'BAN',
-                                        position_index: i,
-                                        assigned_role: null
-                                    })
+
+                            const hid = findHeroId(hName)
+                            if (hid) {
+                                // For Quick Result Entry, we must remap 1-18 slots to 1-5 role indices
+                                // so that [id]/page.tsx can load them correctly without 'assigned_role' reliance.
+                                let finalPosIndex = i
+
+                                if (matchType === 'scrim_summary') {
+                                    // Skip Bans for Quick Entry
+                                    if (cfg.type === 'BAN') continue
+
+                                    // Map Blue: 5,8,9,16,17 -> 1,2,3,4,5
+                                    if (cfg.side === 'BLUE') {
+                                        const bMap = [5, 8, 9, 16, 17]
+                                        const idx = bMap.indexOf(i)
+                                        if (idx !== -1) finalPosIndex = idx + 1
+                                        else continue // Invalid slot for Blue Pick
+                                    }
+                                    // Map Red: 6,7,10,15,18 -> 1,2,3,4,5
+                                    else if (cfg.side === 'RED') {
+                                        const rMap = [6, 7, 10, 15, 18]
+                                        const idx = rMap.indexOf(i)
+                                        if (idx !== -1) finalPosIndex = idx + 1
+                                        else continue // Invalid slot for Red Pick
+                                    }
                                 }
-                            }
 
-                            // Picks
-                            for (let i = 1; i <= 5; i++) {
-                                const hName = row[`${prefix} PICK${i}`]
-                                const role = row[`${prefix} POSITION${i}`]
-                                const hid = findHeroId(hName)
-                                if (hid) {
-                                    picksToInsert.push({
-                                        game_id: gameData.id,
-                                        hero_id: hid,
-                                        side: actualSide,
-                                        type: 'PICK',
-                                        position_index: i,
-                                        assigned_role: role || null
-                                    })
+                                picksToInsert.push({
+                                    game_id: gameData.id,
+                                    hero_id: hid,
+                                    side: cfg.side,
+                                    type: cfg.type,
+                                    position_index: finalPosIndex, // 1-5 for Quick, 1-18 for Sim
+                                    assigned_role: null // assigned later
+                                })
+                            }
+                        }
+
+                        // Apply Positions (Role Assignment)
+                        // Need to verify if Team A is Blue or Red
+                        // isTeamABlue already defined above
+
+                        const applyRoles = (prefix: string, isBlue: boolean) => {
+                            const mySide = isBlue ? 'BLUE' : 'RED'
+
+                            if (matchType === 'scrim_summary') {
+                                // Logic for Quick Result Entry (1-5 Indices per side)
+                                for (let k = 1; k <= 5; k++) {
+                                    const roleName = row[`${prefix} POSITION${k}`]
+                                    if (roleName) {
+                                        // Find pick by relative index (k) and side
+                                        const pickObj = picksToInsert.find(p => p.position_index === k && p.side === mySide && p.type === 'PICK')
+                                        if (pickObj) {
+                                            pickObj.assigned_role = roleName
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Logic for Full Simulator (1-18 Standard Slots)
+                                const teamBluePicks = [5, 8, 9, 16, 17] // Slot IDs
+                                const teamRedPicks = [6, 7, 10, 15, 18] // Slot IDs
+                                const mySlots = isBlue ? teamBluePicks : teamRedPicks
+
+                                for (let k = 1; k <= 5; k++) {
+                                    const roleName = row[`${prefix} POSITION${k}`]
+                                    if (roleName) {
+                                        const slotId = mySlots[k - 1]
+                                        // Find pick by absolute slot index
+                                        const pickObj = picksToInsert.find(p => p.position_index === slotId)
+                                        if (pickObj) {
+                                            pickObj.assigned_role = roleName
+                                        }
+                                    }
                                 }
                             }
                         }
 
-                        processSide('TEAM A', true)
-                        processSide('TEAM B', false) // Note: User specified "TEAM B BAN1"
+                        applyRoles('TEAM A', isTeamABlue)
+                        applyRoles('TEAM B', !isTeamABlue)
 
                         await supabase.from('draft_picks').delete().eq('game_id', gameData.id)
                         if (picksToInsert.length > 0) {
@@ -605,10 +857,29 @@ export default function ScrimManagerPage() {
                         <FileDown className="w-4 h-4 mr-2" />
                         Export
                     </Button>
-                    <Button variant="outline" className="bg-slate-900 border-slate-700 text-indigo-300 hover:text-white" onClick={handleDownloadTemplate}>
-                        <FileDown className="w-4 h-4 mr-2" />
-                        Template
-                    </Button>
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="outline" className="bg-slate-900 border-slate-700 text-indigo-300 hover:text-white">
+                                <FileDown className="w-4 h-4 mr-2" />
+                                Template
+                                <ChevronDown className="w-3 h-3 ml-2 opacity-50" />
+                            </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent className="bg-slate-900 border-slate-800 text-slate-200">
+                            <DropdownMenuItem
+                                className="cursor-pointer hover:bg-slate-800 hover:text-white"
+                                onClick={() => handleDownloadTemplate('QUICK')}
+                            >
+                                Quick Result Entry (No Bans)
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                                className="cursor-pointer hover:bg-slate-800 hover:text-white"
+                                onClick={() => handleDownloadTemplate('FULL')}
+                            >
+                                Full Draft Simulator (Wtih Bans)
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
                     <Link href="/admin/scrims/new">
                         <Button className="bg-indigo-600 hover:bg-indigo-500 font-medium">
                             <Plus className="w-4 h-4 mr-2" />
@@ -964,6 +1235,19 @@ export default function ScrimManagerPage() {
                                     </div>
                                 )
                             })}
+                        </div>
+                    )}
+
+                    {/* Load More Button */}
+                    {!loading && hasMore && (
+                        <div className="flex justify-center pt-4 pb-8">
+                            <Button
+                                variant="outline"
+                                className="bg-slate-900 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800 min-w-[200px]"
+                                onClick={() => setPageLimit(prev => prev + 20)}
+                            >
+                                Load More Matches
+                            </Button>
                         </div>
                     )}
                 </div>

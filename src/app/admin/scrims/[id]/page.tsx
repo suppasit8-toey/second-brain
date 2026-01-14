@@ -6,10 +6,24 @@ import { saveBatchScrimSummary } from '../actions' // One level up
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Save, ArrowLeft, Loader2, RotateCcw, Check } from 'lucide-react'
 import Link from 'next/link'
 import { HeroCombobox } from '@/components/admin/scrims/HeroCombobox' // Imported
 import { cn } from '@/lib/utils'
+import { useRouter } from 'next/navigation'
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+    DialogFooter,
+    DialogClose
+} from "@/components/ui/dialog"
+import { Plus, Edit2, FileUp, FileDown } from 'lucide-react'
+import * as XLSX from 'xlsx'
+import { useRef } from 'react'
 
 
 const ROLES = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
@@ -33,10 +47,13 @@ type GameState = {
     redPicks: Record<number, string> // index -> heroId
     winner: 'blue' | 'red' | ''
     isTeamABlue: boolean
+    blueKeyPlayer?: string
+    redKeyPlayer?: string
 }
 
 export default function ScrimPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params)
+    const router = useRouter()
     const [match, setMatch] = useState<any>(null)
     const [heroes, setHeroes] = useState<Hero[]>([])
     const [loading, setLoading] = useState(true)
@@ -104,9 +121,28 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
 
                 if (existing) {
                     existing.picks.forEach((p: any) => {
-                        const idx = p.position_index - 1
-                        if (p.side === 'BLUE') bluePicks[idx] = p.hero_id
-                        else redPicks[idx] = p.hero_id
+                        // Improved Mapping Logic:
+                        // 1. Try to map by Role first (most robust for mixed sources)
+                        // 2. Fallback to Position Index (handle 1-5 legacy or Simulator specific)
+
+                        let idx = -1
+                        if (p.assigned_role && ROLES.includes(p.assigned_role)) {
+                            idx = ROLES.indexOf(p.assigned_role)
+                        } else {
+                            // Fallback: If 1-5, use as is. If > 5, this might be simulator data.
+                            // But usually simulator data has roles.
+                            // If index is 1-5, map to 0-4.
+                            if (p.position_index >= 1 && p.position_index <= 5) {
+                                idx = p.position_index - 1
+                            }
+                            // TODO: If simulator data comes in with indices like 6, 7, etc. and NO role, we can't map easily.
+                            // But our Simulator ALWAYS saves roles.
+                        }
+
+                        if (idx !== -1) {
+                            if (p.side === 'BLUE') bluePicks[idx] = p.hero_id
+                            else redPicks[idx] = p.hero_id
+                        }
                     })
                     // Determine side from saved names
                     if (existing.blue_team_name === m.team_b_name) {
@@ -119,7 +155,9 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
                     bluePicks,
                     redPicks,
                     winner: existing ? (existing.winner === 'Blue' ? 'blue' : existing.winner === 'Red' ? 'red' : '') : '',
-                    isTeamABlue
+                    isTeamABlue,
+                    blueKeyPlayer: existing?.blue_key_player_id || '',
+                    redKeyPlayer: existing?.red_key_player_id || ''
                 }
             }
             setGamesData(initialData)
@@ -164,7 +202,19 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
                 ...prev[gameNum],
                 bluePicks: {},
                 redPicks: {},
-                winner: ''
+                winner: '',
+                blueKeyPlayer: '',
+                redKeyPlayer: ''
+            }
+        }))
+    }
+
+    const setKeyPlayer = (gameNum: number, side: 'blue' | 'red', heroId: string) => {
+        setGamesData(prev => ({
+            ...prev,
+            [gameNum]: {
+                ...prev[gameNum],
+                [side === 'blue' ? 'blueKeyPlayer' : 'redKeyPlayer']: heroId
             }
         }))
     }
@@ -194,12 +244,18 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
                 blueTeamName: getTeamName(g.gameNumber, 'blue'),
                 redTeamName: getTeamName(g.gameNumber, 'red'),
                 winner: g.winner,
+                blueKeyPlayer: g.blueKeyPlayer,
+                redKeyPlayer: g.redKeyPlayer,
                 bluePicks: Object.entries(g.bluePicks).map(([idx, hId]) => ({ heroId: hId, role: ROLES[parseInt(idx)], index: parseInt(idx) + 1 })),
                 redPicks: Object.entries(g.redPicks).map(([idx, hId]) => ({ heroId: hId, role: ROLES[parseInt(idx)], index: parseInt(idx) + 1 }))
             }))
         }
 
         await saveBatchScrimSummary(match.id, payload)
+
+        // Redirect to Simulator Summary -> REMOVED per user request
+        // router.push(`/admin/simulator/${match.id}`)
+        alert("Saved successfully!")
     }
 
     // Helper to determine Team Names based on Game Number (Side Swap Logic)
@@ -220,7 +276,218 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
         }
     }
 
-    // Helper to calculate excluded IDs for a specific selector
+    // Helper to determine Team Names
+    const fileInputRef = useRef<HTMLInputElement>(null)
+
+    const handleDownloadTemplate = () => {
+        const headers = [
+            'MATCH ID', 'Date', 'Tournament', 'Patch',
+            'Recording Mode (Full,Quick)', 'Number of Games (1Game..... 7 games)', 'GAME(เกมที่ 1,2,3,4....)',
+            'TEAM A', 'Team B', 'TEAM A SIDE (BLUE OR RED)', 'MATCH WIN (name TEAM A or name TEAM B)',
+            // No Bans
+            '5-Blue-Pick1', '6-Red-Pick2', '7-Red-Pick3', '8-Blue-Pick4', '9-Blue-Pick5', '10-Red-Pick6',
+            '15-Red-Pick7', '16-Blue-Pick8', '17-Blue-Pick9', '18-Red-Pick10',
+            'TEAM A POSITION1', 'TEAM A POSITION2', 'TEAM A POSITION3', 'TEAM A POSITION4', 'TEAM A POSITION5',
+            'TEAM B POSITION1', 'TEAM B POSITION2', 'TEAM B POSITION3', 'TEAM B POSITION4', 'TEAM B POSITION5',
+            'MVPTEAM A', 'MVPTEAM B', 'WIN % BLUE TEAM'
+        ]
+
+        const exampleRow = {
+            'MATCH ID': match.slug || match.id,
+            'Date': new Date().toISOString().split('T')[0],
+            'Tournament': 'Example Tournament',
+            'Patch': 'Current Patch',
+            'Recording Mode (Full,Quick)': 'Quick Result Entry',
+            'Number of Games (1Game..... 7 games)': match.mode || 'BO1',
+            'GAME(เกมที่ 1,2,3,4....)': 'Game 1',
+            'TEAM A': match.team_a_name,
+            'Team B': match.team_b_name,
+            'TEAM A SIDE (BLUE OR RED)': 'BLUE',
+            'MATCH WIN (name TEAM A or name TEAM B)': match.team_a_name,
+            '5-Blue-Pick1': 'Yena',
+            '6-Red-Pick2': 'Violet',
+            'TEAM A POSITION1': 'Dark Slayer',
+            'TEAM B POSITION1': 'Abyssal Dragon',
+            'MVPTEAM A': 'Yena',
+            'MVPTEAM B': 'Violet',
+            'WIN % BLUE TEAM': '50'
+        }
+
+        const ws = XLSX.utils.json_to_sheet([exampleRow], { header: headers })
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb, ws, "Import Template")
+        XLSX.writeFile(wb, "Quick_Entry_Import_Template.xlsx")
+    }
+
+
+    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+
+        setLoading(true)
+        const reader = new FileReader()
+        reader.onload = async (evt) => {
+            try {
+                const bstr = evt.target?.result
+                const wb = XLSX.read(bstr, { type: 'binary' })
+                const wsname = wb.SheetNames[0]
+                const ws = wb.Sheets[wsname]
+                const rawData = XLSX.utils.sheet_to_json(ws) as any[]
+
+                // Process Data - Assume Rows correspond to Games 1, 2, 3...
+                // Filter matches current match (optional) but user wants bulk upload 
+                // We will just iterate the first N rows found and map them to Game 1, 2, 3...
+
+                const supabase = createClient()
+
+                // Group by MATCH ID to find relevant rows if mixed
+                // Group by MATCH ID matches current?
+                // Or just filter rows that have "MATCH ID" matching current slug?
+                // Or just take all rows? 
+                // Risk: Importing wrong match. 
+                // Check: match.slug or match.id
+
+                let relevantRows = rawData
+                if (rawData.length > 0 && rawData[0]['MATCH ID']) {
+                    // If existing, match against current
+                    const rows = rawData.filter(r => r['MATCH ID'] === match.slug || r['MATCH ID'] === match.id)
+                    if (rows.length > 0) relevantRows = rows
+                }
+
+                // Sort by Game Number if present?
+                // "GAME(เกมที่ 1,2,3,4....)" -> "Game 1"
+                relevantRows.sort((a, b) => {
+                    const getG = (r: any) => {
+                        const val = r['GAME(เกมที่ 1,2,3,4....)'] || r['GAME'] || r['Game']
+                        const num = parseInt(String(val).replace(/\D/g, ''))
+                        return isNaN(num) ? 0 : num
+                    }
+                    return getG(a) - getG(b)
+                })
+
+
+                const newGamesData = { ...gamesData } as Record<number, GameState>
+
+                // Limit to Total Games defined in Match
+                const totalGamesToProcess = Math.min(relevantRows.length, parseInt(match.mode.replace('BO', '')) || 1)
+
+                for (let i = 0; i < totalGamesToProcess; i++) {
+                    const row = relevantRows[i]
+                    const gameNum = i + 1
+
+                    // Parse Data
+                    const teamASideStr = String(row['TEAM A SIDE (BLUE OR RED)'] || '').toUpperCase()
+                    const matchWinName = row['MATCH WIN (name TEAM A or name TEAM B)']
+                    const isTeamABlue = teamASideStr.includes('BLUE')
+
+                    // Winner
+                    let winner: 'blue' | 'red' | '' = ''
+                    // Determine Blue/Red Team Names for logic
+                    let blueTeamName = isTeamABlue ? match.team_a_name : match.team_b_name
+                    let redTeamName = !isTeamABlue ? match.team_a_name : match.team_b_name
+
+                    if (matchWinName) {
+                        if (String(matchWinName).toLowerCase().includes(blueTeamName.trim().toLowerCase())) winner = 'blue'
+                        else if (String(matchWinName).toLowerCase().includes(redTeamName.trim().toLowerCase())) winner = 'red'
+                        // Fallback check against Team A/B
+                        else if (String(matchWinName).toLowerCase().includes(match.team_a_name.trim().toLowerCase())) {
+                            // If A won, and A is Blue -> Blue. If A is Red -> Red.
+                            winner = isTeamABlue ? 'blue' : 'red'
+                        }
+                        else if (String(matchWinName).toLowerCase().includes(match.team_b_name.trim().toLowerCase())) {
+                            // If B won, and B is Blue -> Blue. If B is Red -> Red.
+                            winner = !isTeamABlue ? 'blue' : 'red'
+                        }
+                    }
+
+                    const findHeroId = (name: string) => {
+                        if (!name) return ''
+                        const n = String(name).trim().toLowerCase()
+                        return heroes.find(h => h.name.toLowerCase() === n || h.id === name)?.id || ''
+                    }
+
+                    const bluePicks: Record<number, string> = {}
+                    const redPicks: Record<number, string> = {}
+
+                    // FIXED MAPPING: Pick Columns -> Role Indices (0=DS, 1=JG, 2=MID, 3=AD, 4=SP)
+                    // Based on specific user request:
+                    // 5-Blue-Pick1 = Dark Slayer (0)
+                    // 8-Blue-Pick4 = Jungle (1)
+                    // 9-Blue-Pick5 = Mid (2)
+                    // 16-Blue-Pick8 = Abyssal (3)
+                    // 17-Blue-Pick9 = Roam (4)
+                    const BLUE_MAPPING: Record<string, number> = {
+                        '5-Blue-Pick1': 0,
+                        '8-Blue-Pick4': 1,
+                        '9-Blue-Pick5': 2,
+                        '16-Blue-Pick8': 3,
+                        '17-Blue-Pick9': 4
+                    }
+
+                    // 6-Red-Pick2 = Dark Slayer (0)
+                    // 7-Red-Pick3 = Jungle (1)
+                    // 10-Red-Pick6 = Mid (2)
+                    // 15-Red-Pick7 = Abyssal (3)
+                    // 18-Red-Pick10 = Roam (4)
+                    const RED_MAPPING: Record<string, number> = {
+                        '6-Red-Pick2': 0,
+                        '7-Red-Pick3': 1,
+                        '10-Red-Pick6': 2,
+                        '15-Red-Pick7': 3,
+                        '18-Red-Pick10': 4
+                    }
+
+                    // Apply Blue Mappings
+                    Object.entries(BLUE_MAPPING).forEach(([col, roleIdx]) => {
+                        const hName = row[col]
+                        const hId = findHeroId(hName)
+                        if (hId) bluePicks[roleIdx] = hId
+                    })
+
+                    // Apply Red Mappings
+                    Object.entries(RED_MAPPING).forEach(([col, roleIdx]) => {
+                        const hName = row[col]
+                        const hId = findHeroId(hName)
+                        if (hId) redPicks[roleIdx] = hId
+                    })
+
+                    // MVP Import
+                    const mvpAName = row['MVPTEAM A']
+                    const mvpBName = row['MVPTEAM B']
+                    const mvpAId = findHeroId(mvpAName)
+                    const mvpBId = findHeroId(mvpBName)
+
+                    const blueKeyId = isTeamABlue ? mvpAId : mvpBId
+                    const redKeyId = isTeamABlue ? mvpBId : mvpAId
+
+                    newGamesData[gameNum] = {
+                        gameNumber: gameNum,
+                        bluePicks,
+                        redPicks,
+                        winner,
+                        isTeamABlue,
+                        blueKeyPlayer: blueKeyId,
+                        redKeyPlayer: redKeyId
+                    }
+                }
+
+                setGamesData(newGamesData)
+                // Trigger save automatically? Or let user review?
+                // Let user review.
+                alert("Imported " + totalGamesToProcess + " games from Excel. Please review and Save.")
+
+            } catch (err) {
+                console.error(err)
+                alert("Import failed. Check file format.")
+            } finally {
+                setLoading(false)
+                if (fileInputRef.current) fileInputRef.current.value = ''
+            }
+        }
+        reader.readAsBinaryString(file)
+    }
+
+    // Helper to calculate excluded IDs
     const getExcludedIds = (gameNum: number, currentSide: 'blue' | 'red', roleIndex: number) => {
         const game = gamesData[gameNum]
         if (!game) return new Set<string>()
@@ -304,6 +571,34 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
                         <div className="px-3 py-1 rounded-full bg-slate-800 text-xs text-slate-400 font-mono border border-slate-700">
                             QUICK ENTRY
                         </div>
+                    </div>
+                    {/* Import Section */}
+                    <div className="flex justify-end -mt-4 gap-2">
+                        <Button
+                            variant="outline"
+                            className="bg-slate-900 border-slate-700 text-indigo-400 hover:text-indigo-300 hover:bg-slate-800 text-xs h-8"
+                            onClick={handleDownloadTemplate}
+                        >
+                            <FileDown className="w-3 h-3 mr-2" />
+                            Template
+                        </Button>
+
+                        <input
+                            type="file"
+                            ref={fileInputRef}
+                            onChange={(e) => handleFileUpload(e)}
+                            className="hidden"
+                            accept=".xlsx, .xls"
+                        />
+                        <Button
+                            variant="outline"
+                            className="bg-slate-900 border-slate-700 text-slate-300 hover:text-white text-xs h-8"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={loading}
+                        >
+                            {loading ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <FileUp className="w-3 h-3 mr-2" />}
+                            Import Games (Excel)
+                        </Button>
                     </div>
 
                     {/* Scoreboard Header */}
@@ -404,10 +699,13 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
                                             {gameState.winner === 'blue' && <span className="bg-blue-500/20 text-blue-300 px-3 py-1 rounded text-xs font-bold border border-blue-500/50">VICTORY</span>}
                                         </div>
 
-                                        <div className="space-y-2">
+                                        <div className="space-y-3">
                                             {ROLES.map((role, i) => (
-                                                <div key={`g${n}-blue-${i}`} className="flex items-center gap-4">
-                                                    <span className="w-20 text-[10px] font-bold text-slate-500 uppercase text-right shrink-0 tracking-wider">{role}</span>
+                                                <div key={`g${n}-blue-${i}`} className="flex items-center gap-3 p-1 rounded-lg transition-colors hover:bg-white/5">
+                                                    <div className="w-24 shrink-0 flex flex-col items-end gap-0.5 pr-2 border-r border-slate-800">
+                                                        <span className="text-[10px] font-black text-blue-400 uppercase tracking-wider">{role}</span>
+                                                        <span className="text-[9px] text-slate-600 font-mono hidden">Slot {i + 1}</span>
+                                                    </div>
                                                     <div className="flex-1">
                                                         <HeroCombobox
                                                             value={gameState.bluePicks[i]}
@@ -431,10 +729,13 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
                                             {gameState.winner === 'red' && <span className="bg-red-500/20 text-red-300 px-3 py-1 rounded text-xs font-bold border border-red-500/50">VICTORY</span>}
                                         </div>
 
-                                        <div className="space-y-2">
+                                        <div className="space-y-3">
                                             {ROLES.map((role, i) => (
-                                                <div key={`g${n}-red-${i}`} className="flex items-center gap-4">
-                                                    <span className="w-20 text-[10px] font-bold text-slate-500 uppercase text-right shrink-0 tracking-wider">{role}</span>
+                                                <div key={`g${n}-red-${i}`} className="flex items-center gap-3 p-1 rounded-lg transition-colors hover:bg-white/5">
+                                                    <div className="w-24 shrink-0 flex flex-col items-end gap-0.5 pr-2 border-r border-slate-800">
+                                                        <span className="text-[10px] font-black text-red-400 uppercase tracking-wider">{role}</span>
+                                                        <span className="text-[9px] text-slate-600 font-mono hidden">Slot {i + 1}</span>
+                                                    </div>
                                                     <div className="flex-1">
                                                         <HeroCombobox
                                                             value={gameState.redPicks[i]}
@@ -476,6 +777,64 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
                                             Red Win
                                         </button>
                                     </div>
+
+                                    {/* MVP Selection */}
+                                    <div className="flex justify-center gap-12 mt-8">
+                                        {/* Blue MVP */}
+                                        <div className="flex flex-col items-center gap-3">
+                                            <div className="text-xs font-bold text-blue-500 uppercase tracking-widest">Blue MVP</div>
+                                            <div className="flex gap-2">
+                                                {Object.values(gameState.bluePicks).map((id) => {
+                                                    const h = heroes.find(hero => hero.id === id)
+                                                    if (!h) return null
+                                                    const isSelected = gameState.blueKeyPlayer === id
+                                                    return (
+                                                        <button
+                                                            key={id}
+                                                            onClick={() => setKeyPlayer(n, 'blue', id)}
+                                                            className={cn(
+                                                                "relative w-10 h-10 rounded border-2 overflow-hidden transition-all hover:scale-110",
+                                                                isSelected
+                                                                    ? "border-blue-400 shadow-[0_0_15px_rgba(96,165,250,0.6)] scale-110 ring-2 ring-blue-500/50"
+                                                                    : "border-slate-800 grayscale opacity-60 hover:grayscale-0 hover:opacity-100"
+                                                            )}
+                                                            title={h.name}
+                                                        >
+                                                            <img src={h.icon_url} alt={h.name} className="w-full h-full object-cover" />
+                                                        </button>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+
+                                        {/* Red MVP */}
+                                        <div className="flex flex-col items-center gap-3">
+                                            <div className="text-xs font-bold text-red-500 uppercase tracking-widest">Red MVP</div>
+                                            <div className="flex gap-2">
+                                                {Object.values(gameState.redPicks).map((id) => {
+                                                    const h = heroes.find(hero => hero.id === id)
+                                                    if (!h) return null
+                                                    const isSelected = gameState.redKeyPlayer === id
+                                                    return (
+                                                        <button
+                                                            key={id}
+                                                            onClick={() => setKeyPlayer(n, 'red', id)}
+                                                            className={cn(
+                                                                "relative w-10 h-10 rounded border-2 overflow-hidden transition-all hover:scale-110",
+                                                                isSelected
+                                                                    ? "border-red-400 shadow-[0_0_15px_rgba(248,113,113,0.6)] scale-110 ring-2 ring-red-500/50"
+                                                                    : "border-slate-800 grayscale opacity-60 hover:grayscale-0 hover:opacity-100"
+                                                            )}
+                                                            title={h.name}
+                                                        >
+                                                            <img src={h.icon_url} alt={h.name} className="w-full h-full object-cover" />
+                                                        </button>
+                                                    )
+                                                })}
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <div className="mt-8 flex justify-center gap-4">
                                         <Button
                                             variant="ghost"
@@ -562,6 +921,12 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
                                 const winningSideClass = g.winner === 'blue' ? "bg-blue-500/10 text-blue-400 border-blue-500/20" : "bg-red-500/10 text-red-400 border-red-500/20"
                                 const shortRoles = ['DS', 'JG', 'MID', 'AD', 'SP']
 
+                                // MVP Logic
+                                const teamAMVPId = g.isTeamABlue ? g.blueKeyPlayer : g.redKeyPlayer
+                                const teamBMVPId = g.isTeamABlue ? g.redKeyPlayer : g.blueKeyPlayer
+                                const teamAMVP = heroes.find(h => h.id === teamAMVPId)
+                                const teamBMVP = heroes.find(h => h.id === teamBMVPId)
+
                                 return (
                                     <div key={n} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden p-6 hover:border-slate-700 transition-colors">
                                         <div className="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
@@ -578,7 +943,68 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
                                         <div className="flex items-center justify-between gap-8">
                                             {/* Team A Picks */}
                                             <div className="flex flex-col gap-2 flex-1">
-                                                <span className={cn("text-sm font-black uppercase mb-2", isGameWinnerA ? winnerColor : "text-slate-500")}>{match.team_a_name}</span>
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className={cn("text-sm font-black uppercase", isGameWinnerA ? winnerColor : "text-slate-500")}>{match.team_a_name}</span>
+
+                                                    {/* MVP Selection Dialog for Team A */}
+                                                    <Dialog>
+                                                        <DialogTrigger asChild>
+                                                            <button className="outline-none group/mvp">
+                                                                {teamAMVP ? (
+                                                                    <div className="flex items-center gap-1.5 bg-slate-950/50 px-2 py-1 rounded border border-slate-800/50 transition-colors hover:border-indigo-500/50 hover:bg-indigo-500/10" title={`MVP: ${teamAMVP.name}`}>
+                                                                        <span className="text-[8px] font-bold text-yellow-500 uppercase tracking-wider">MVP</span>
+                                                                        <div className="w-5 h-5 rounded-full border border-yellow-500/30 overflow-hidden relative">
+                                                                            <img src={teamAMVP.icon_url} alt="MVP" className="w-full h-full object-cover" />
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-dashed border-indigo-500/50 bg-indigo-500/5 hover:bg-indigo-500/10 hover:border-indigo-400 transition-all group-hover/mvp:shadow-[0_0_10px_rgba(99,102,241,0.4)] animate-pulse">
+                                                                        <Plus className="w-3 h-3 text-indigo-400 group-hover/mvp:text-indigo-300" />
+                                                                        <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest group-hover/mvp:text-indigo-300">ADD MVP</span>
+                                                                    </div>
+                                                                )}
+                                                            </button>
+                                                        </DialogTrigger>
+                                                        <DialogContent className="bg-slate-900 border-slate-800 text-white">
+                                                            <DialogHeader>
+                                                                <DialogTitle>Select MVP for {match.team_a_name} (Game {n})</DialogTitle>
+                                                            </DialogHeader>
+                                                            <div className="grid grid-cols-5 gap-2 py-4">
+                                                                {ROLES.map((_, i) => {
+                                                                    const heroId = teamAPicks[i]
+                                                                    const hero = heroes.find(h => h.id === heroId)
+                                                                    if (!hero) return null
+                                                                    const isSelected = teamAMVPId === heroId
+                                                                    return (
+                                                                        <button
+                                                                            key={heroId}
+                                                                            onClick={() => setKeyPlayer(n, g.isTeamABlue ? 'blue' : 'red', heroId)}
+                                                                            className={cn(
+                                                                                "relative aspect-square rounded-lg border-2 overflow-hidden transition-all",
+                                                                                isSelected
+                                                                                    ? "border-yellow-500 ring-2 ring-yellow-500/20 scale-95"
+                                                                                    : "border-slate-700 hover:border-slate-500 hover:scale-105"
+                                                                            )}
+                                                                        >
+                                                                            <img src={hero.icon_url} alt={hero.name} className="w-full h-full object-cover" />
+                                                                            {isSelected && (
+                                                                                <div className="absolute inset-0 bg-yellow-500/20 flex items-center justify-center">
+                                                                                    <div className="bg-yellow-500 text-black text-[10px] font-bold px-1 rounded-sm">MVP</div>
+                                                                                </div>
+                                                                            )}
+                                                                        </button>
+                                                                    )
+                                                                })}
+                                                            </div>
+                                                            <DialogFooter>
+                                                                <DialogClose asChild>
+                                                                    <Button variant="secondary">Done</Button>
+                                                                </DialogClose>
+                                                            </DialogFooter>
+                                                        </DialogContent>
+                                                    </Dialog>
+
+                                                </div>
                                                 <div className="flex gap-2">
                                                     {ROLES.map((_, i) => {
                                                         const heroId = teamAPicks[i]
@@ -604,7 +1030,68 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
 
                                             {/* Team B Picks */}
                                             <div className="flex flex-col gap-2 flex-1 items-end">
-                                                <span className={cn("text-sm font-black uppercase mb-2 text-right", !isGameWinnerA ? winnerColor : "text-slate-500")}>{match.team_b_name}</span>
+                                                <div className="flex items-center justify-between mb-2 w-full flex-row-reverse">
+                                                    <span className={cn("text-sm font-black uppercase text-right", !isGameWinnerA ? winnerColor : "text-slate-500")}>{match.team_b_name}</span>
+
+                                                    {/* MVP Selection Dialog for Team B */}
+                                                    <Dialog>
+                                                        <DialogTrigger asChild>
+                                                            <button className="outline-none group/mvp">
+                                                                {teamBMVP ? (
+                                                                    <div className="flex items-center gap-1.5 bg-slate-950/50 px-2 py-1 rounded border border-slate-800/50 flex-row-reverse transition-colors hover:border-red-500/50 hover:bg-red-500/10" title={`MVP: ${teamBMVP.name}`}>
+                                                                        <span className="text-[8px] font-bold text-yellow-500 uppercase tracking-wider">MVP</span>
+                                                                        <div className="w-5 h-5 rounded-full border border-yellow-500/30 overflow-hidden relative">
+                                                                            <img src={teamBMVP.icon_url} alt="MVP" className="w-full h-full object-cover" />
+                                                                        </div>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-dashed border-red-500/50 bg-red-500/5 hover:bg-red-500/10 hover:border-red-400 transition-all group-hover/mvp:shadow-[0_0_10px_rgba(248,113,113,0.4)] animate-pulse flex-row-reverse">
+                                                                        <Plus className="w-3 h-3 text-red-400 group-hover/mvp:text-red-300" />
+                                                                        <span className="text-[9px] font-black text-red-400 uppercase tracking-widest group-hover/mvp:text-red-300">ADD MVP</span>
+                                                                    </div>
+                                                                )}
+                                                            </button>
+                                                        </DialogTrigger>
+                                                        <DialogContent className="bg-slate-900 border-slate-800 text-white">
+                                                            <DialogHeader>
+                                                                <DialogTitle>Select MVP for {match.team_b_name} (Game {n})</DialogTitle>
+                                                            </DialogHeader>
+                                                            <div className="grid grid-cols-5 gap-2 py-4">
+                                                                {ROLES.map((_, i) => {
+                                                                    const heroId = teamBPicks[i]
+                                                                    const hero = heroes.find(h => h.id === heroId)
+                                                                    if (!hero) return null
+                                                                    const isSelected = teamBMVPId === heroId
+                                                                    return (
+                                                                        <button
+                                                                            key={heroId}
+                                                                            onClick={() => setKeyPlayer(n, g.isTeamABlue ? 'red' : 'blue', heroId)}
+                                                                            className={cn(
+                                                                                "relative aspect-square rounded-lg border-2 overflow-hidden transition-all",
+                                                                                isSelected
+                                                                                    ? "border-yellow-500 ring-2 ring-yellow-500/20 scale-95"
+                                                                                    : "border-slate-700 hover:border-slate-500 hover:scale-105"
+                                                                            )}
+                                                                        >
+                                                                            <img src={hero.icon_url} alt={hero.name} className="w-full h-full object-cover" />
+                                                                            {isSelected && (
+                                                                                <div className="absolute inset-0 bg-yellow-500/20 flex items-center justify-center">
+                                                                                    <div className="bg-yellow-500 text-black text-[10px] font-bold px-1 rounded-sm">MVP</div>
+                                                                                </div>
+                                                                            )}
+                                                                        </button>
+                                                                    )
+                                                                })}
+                                                            </div>
+                                                            <DialogFooter>
+                                                                <DialogClose asChild>
+                                                                    <Button variant="secondary">Done</Button>
+                                                                </DialogClose>
+                                                            </DialogFooter>
+                                                        </DialogContent>
+                                                    </Dialog>
+
+                                                </div>
                                                 <div className="flex gap-2 justify-end">
                                                     {ROLES.map((_, i) => {
                                                         const heroId = teamBPicks[i]
@@ -638,6 +1125,6 @@ export default function ScrimPage({ params }: { params: Promise<{ id: string }> 
                     </TabsContent>
                 </Tabs>
             </div>
-        </div>
+        </div >
     )
 }

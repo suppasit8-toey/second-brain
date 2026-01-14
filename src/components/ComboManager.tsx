@@ -6,7 +6,7 @@ import { getHeroesByVersion } from '@/app/admin/heroes/actions'
 import { getCombos, saveCombo, deleteCombo, updateCombo } from '@/app/admin/combos/actions'
 import { Plus, Link as LinkIcon, Handshake, Trash2, Edit2, SlidersHorizontal, X } from 'lucide-react'
 import Image from 'next/image'
-import { ConfigProvider, theme, Card, Select, Segmented, Button, Input, Avatar, Space, message, Modal } from 'antd'
+import { ConfigProvider, theme, Card, Select, Segmented, Button, Input, Avatar, Space, message as antdMessage, Modal, App } from 'antd'
 import ComboSuggestions from '@/app/admin/combos/_components/ComboSuggestions'
 
 interface ComboManagerProps {
@@ -16,7 +16,9 @@ interface ComboManagerProps {
 const { Option } = Select;
 const { TextArea } = Input;
 
-export default function ComboManager({ initialVersions }: ComboManagerProps) {
+function ComboManagerContent({ initialVersions }: ComboManagerProps) {
+    const { message, modal } = App.useApp();
+
     // 1. Data States
     const [selectedVersionId, setSelectedVersionId] = useState<number>(initialVersions.find(v => v.is_active)?.id || initialVersions[0]?.id || 0)
     const [heroes, setHeroes] = useState<Hero[]>([])
@@ -183,7 +185,7 @@ export default function ComboManager({ initialVersions }: ComboManagerProps) {
 
     const handleDelete = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation()
-        Modal.confirm({
+        modal.confirm({
             title: 'Delete Combo',
             content: 'Are you sure you want to delete this combo?',
             onOk: async () => {
@@ -236,306 +238,314 @@ export default function ComboManager({ initialVersions }: ComboManagerProps) {
     // --- RENDER ---
 
     return (
-        <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
-            <div className="space-y-8 animate-in fade-in duration-500">
-                {/* TOP BAR */}
-                <div className="glass-card p-4 md:p-6 flex flex-col md:flex-row items-center justify-between gap-4">
-                    <div>
-                        <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">Combo Duo System</h1>
-                        <p className="text-text-muted mt-1">Manage synergy pairs for the selected patch.</p>
-                    </div>
+        <div className="space-y-8 animate-in fade-in duration-500">
+            {/* TOP BAR */}
+            <div className="glass-card p-4 md:p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">Combo Duo System</h1>
+                    <p className="text-text-muted mt-1">Manage synergy pairs for the selected patch.</p>
+                </div>
 
-                    <div className="flex items-center gap-2 w-full md:w-auto">
-                        <div className="relative w-full md:w-auto flex-1 md:flex-none">
-                            <select
-                                value={selectedVersionId}
-                                onChange={(e) => setSelectedVersionId(Number(e.target.value))}
-                                className="dark-input pl-10 pr-4 py-2 w-full md:w-48 appearance-none cursor-pointer"
-                            >
-                                {initialVersions.map(v => (
-                                    <option key={v.id} value={v.id}>{v.name} {v.is_active ? '(Active)' : ''}</option>
-                                ))}
-                            </select>
-                            <SlidersHorizontal size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
-                        </div>
-
-                        <button
-                            onClick={openModal}
-                            className="glow-button px-6 py-2 rounded-lg flex items-center gap-2 whitespace-nowrap"
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                    <div className="relative w-full md:w-auto flex-1 md:flex-none">
+                        <select
+                            value={selectedVersionId}
+                            onChange={(e) => setSelectedVersionId(Number(e.target.value))}
+                            className="dark-input pl-10 pr-4 py-2 w-full md:w-48 appearance-none cursor-pointer"
                         >
-                            <Plus size={20} /> Add Combo Duo
-                        </button>
-                    </div>
-                </div>
-
-                {/* AI SUGGESTIONS */}
-                <ComboSuggestions
-                    versionId={selectedVersionId}
-                    onComboAdded={async () => {
-                        const newCombos = await getCombos(selectedVersionId)
-                        setCombos(newCombos)
-                    }}
-                />
-
-                {/* LIST OF COMBOS */}
-                <div className="space-y-4">
-                    <div className="flex items-center justify-between px-2">
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                            Registered Pairs <span className="bg-white/10 px-2 py-0.5 rounded-full text-xs text-text-muted">{combos.length}</span>
-                        </h3>
-                    </div>
-
-                    {isLoading ? (
-                        <div className="text-center py-20 animate-pulse text-text-muted">Loading version data...</div>
-                    ) : combos.length === 0 ? (
-                        <div className="text-center py-20 glass-card text-text-muted flex flex-col items-center border border-dashed border-white/10">
-                            <Handshake className="w-12 h-12 mb-4 opacity-20" />
-                            <p className="text-lg font-medium text-white/50">No combos found for this version.</p>
-                            <button onClick={openModal} className="mt-4 text-primary hover:text-white underline text-sm">Create the first pair</button>
-                        </div>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {combos.map(combo => (
-                                <div key={combo.id} className="glass-card p-4 flex items-center gap-4 hover:bg-white/5 transition-all group border-l-4 border-l-primary relative overflow-hidden">
-                                    {/* Hero A */}
-                                    <div className="flex items-center gap-3 w-[40%]">
-                                        <div className="relative w-10 h-10 rounded-full border-2 border-primary/50 overflow-hidden shadow-lg shadow-purple-900/20 shrink-0">
-                                            {combo.hero_a?.icon_url && <Image src={combo.hero_a.icon_url} alt="" fill className="object-cover" />}
-                                        </div>
-                                        <div className="flex flex-col min-w-0">
-                                            <span className="text-sm font-bold text-white truncate">{combo.hero_a?.name}</span>
-                                            <span className="text-[10px] text-primary uppercase font-bold tracking-wide">
-                                                {combo.hero_a_position === 'Any' ? 'Any Lane' : combo.hero_a_position}
-                                            </span>
-                                        </div>
-                                    </div>
-
-                                    {/* Link */}
-                                    <div className="flex items-center justify-center w-[20%] opacity-30 group-hover:opacity-100 transition-opacity">
-                                        <LinkIcon size={16} className="text-white transform rotate-45" />
-                                    </div>
-
-                                    {/* Hero B */}
-                                    <div className="flex items-center justify-end gap-3 w-[40%] text-right">
-                                        <div className="flex flex-col min-w-0 items-end">
-                                            <span className="text-sm font-bold text-white truncate">{combo.hero_b?.name}</span>
-                                            <span className="text-[10px] text-blue-400 uppercase font-bold tracking-wide">
-                                                {combo.hero_b_position === 'Any' ? 'Any Lane' : combo.hero_b_position}
-                                            </span>
-                                        </div>
-                                        <div className="relative w-10 h-10 rounded-full border-2 border-blue-500/50 overflow-hidden shadow-lg shadow-blue-900/20 shrink-0">
-                                            {combo.hero_b?.icon_url && <Image src={combo.hero_b.icon_url} alt="" fill className="object-cover" />}
-                                        </div>
-                                    </div>
-
-                                    {/* Hover Analysis Text */}
-                                    {combo.description && (
-                                        <div className="absolute inset-x-0 bottom-0 bg-black/90 text-text-muted text-[10px] italic p-2 transform translate-y-full group-hover:translate-y-0 transition-transform">
-                                            {combo.description}
-                                        </div>
-                                    )}
-
-                                    <button
-                                        onClick={(e) => handleDelete(combo.id, e)}
-                                        className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 hover:bg-red-500 text-white/50 hover:text-white opacity-0 group-hover:opacity-100 transition-all z-20"
-                                    >
-                                        <Trash2 size={12} />
-                                    </button>
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); handleEdit(combo); }}
-                                        className="absolute top-2 right-8 p-1.5 rounded-full bg-black/60 hover:bg-primary text-white/50 hover:text-white opacity-0 group-hover:opacity-100 transition-all z-20"
-                                    >
-                                        <Edit2 size={12} />
-                                    </button>
-                                </div>
+                            {initialVersions.map(v => (
+                                <option key={v.id} value={v.id}>{v.name} {v.is_active ? '(Active)' : ''}</option>
                             ))}
-                        </div>
-                    )}
+                        </select>
+                        <SlidersHorizontal size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+                    </div>
+
+                    <button
+                        onClick={openModal}
+                        className="glow-button px-6 py-2 rounded-lg flex items-center gap-2 whitespace-nowrap"
+                    >
+                        <Plus size={20} /> Add Combo Duo
+                    </button>
+                </div>
+            </div>
+
+            {/* AI SUGGESTIONS */}
+            <ComboSuggestions
+                versionId={selectedVersionId}
+                onComboAdded={async () => {
+                    const newCombos = await getCombos(selectedVersionId)
+                    setCombos(newCombos)
+                }}
+            />
+
+            {/* LIST OF COMBOS */}
+            <div className="space-y-4">
+                <div className="flex items-center justify-between px-2">
+                    <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                        Registered Pairs <span className="bg-white/10 px-2 py-0.5 rounded-full text-xs text-text-muted">{combos.length}</span>
+                    </h3>
                 </div>
 
-                {/* MODAL */}
-                <Modal
-                    open={isModalOpen}
-                    onCancel={() => setIsModalOpen(false)}
-                    footer={null}
-                    closable={false}
-                    centered
-                    width={450} // Mobile-first narrow width
-                    className="modal-glass"
-                    style={{ padding: 0 }}
-                    styles={{ body: { padding: 0, overflow: 'hidden' } }}
-                >
-                    <div className="flex flex-col h-[85vh] md:h-auto">
-                        {/* Header */}
-                        <div className="flex items-center justify-between p-4 border-b border-white/10 bg-white/5">
-                            <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                                {editingComboId ? <Edit2 size={18} className="text-primary" /> : <Plus size={18} className="text-primary" />}
-                                {editingComboId ? 'Edit Combo' : 'New Combo'}
-                            </h2>
-                            <Button type="text" icon={<X size={20} />} onClick={() => setIsModalOpen(false)} className="text-white/50 hover:text-white" />
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                            {/* HERO A BLOCK */}
-                            <Card size="small" bordered={false} className="bg-white/5 border border-white/10">
-                                <Space direction="vertical" style={{ width: '100%' }} size="small">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-xs font-bold text-white">A</div>
-                                        <span className="text-sm font-bold text-primary">Hero A</span>
-                                    </div>
-                                    <Select
-                                        showSearch
-                                        placeholder="Select Hero A"
-                                        style={{ width: '100%' }}
-                                        value={heroA?.id}
-                                        onChange={handleSetHeroA}
-                                        optionLabelProp="label"
-                                        filterOption={(input, option) =>
-                                            ((option as any)?.name ?? '').toLowerCase().includes(input.toLowerCase())
-                                        }
-                                        options={sortedHeroes.filter(h => h.id !== heroB?.id).map(h => ({
-                                            value: h.id,
-                                            label: (
-                                                <div className="flex items-center gap-2">
-                                                    <Avatar src={h.icon_url} size="small" shape="square" />
-                                                    <span className="font-medium">{h.name}</span>
-                                                </div>
-                                            ),
-                                            name: h.name, // Used for search filtering
-                                        }))}
-                                        className="custom-select-hero"
-                                    />
-
-                                    {/* Position A */}
-                                    {heroA && !ignorePosition && (
-                                        <div className="animate-in fade-in slide-in-from-top-2 pt-2">
-                                            <div className="text-xs text-text-muted mb-1.5 ml-1">Position</div>
-                                            <Segmented
-                                                block
-                                                options={getHeroPositions(heroA).length > 0 ? getHeroPositions(heroA).map(p => ({
-                                                    label: formatPosition(p),
-                                                    value: p,
-                                                    disabled: p === positionB
-                                                })) : POSITIONS.map(p => ({ label: formatPosition(p), value: p }))} // Fallback if no positions found
-                                                value={positionA}
-                                                onChange={setPositionA}
-                                                className="bg-slate-900"
-                                            />
-                                        </div>
-                                    )}
-                                </Space>
-                            </Card>
-
-                            {/* LINK ICON */}
-                            <div className="flex justify-center -my-3 relative z-10">
-                                <div className="bg-slate-800 p-1.5 rounded-full border border-white/10 shadow-lg">
-                                    <LinkIcon size={16} className="text-text-muted rotate-45" />
-                                </div>
-                            </div>
-
-                            {/* HERO B BLOCK */}
-                            <Card size="small" bordered={false} className="bg-white/5 border border-white/10">
-                                <Space direction="vertical" style={{ width: '100%' }} size="small">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold text-white">B</div>
-                                        <span className="text-sm font-bold text-blue-400">Hero B</span>
-                                    </div>
-                                    <Select
-                                        showSearch
-                                        placeholder="Select Hero B"
-                                        style={{ width: '100%' }}
-                                        value={heroB?.id}
-                                        onChange={handleSetHeroB}
-                                        optionLabelProp="label"
-                                        filterOption={(input, option) =>
-                                            ((option as any)?.name ?? '').toLowerCase().includes(input.toLowerCase())
-                                        }
-                                        options={sortedHeroes.filter(h => h.id !== heroA?.id).map(h => ({
-                                            value: h.id,
-                                            label: (
-                                                <div className="flex items-center gap-2">
-                                                    <Avatar src={h.icon_url} size="small" shape="square" />
-                                                    <span className="font-medium">{h.name}</span>
-                                                </div>
-                                            ),
-                                            name: h.name, // Used for search filtering
-                                        }))}
-                                        className="custom-select-hero"
-                                    />
-
-                                    {/* Position B */}
-                                    {heroB && !ignorePosition && (
-                                        <div className="animate-in fade-in slide-in-from-top-2 pt-2">
-                                            <div className="text-xs text-text-muted mb-1.5 ml-1">Position</div>
-                                            <Segmented
-                                                block
-                                                options={getHeroPositions(heroB).length > 0 ? getHeroPositions(heroB).map(p => ({
-                                                    label: formatPosition(p),
-                                                    value: p,
-                                                    disabled: p === positionA
-                                                })) : POSITIONS.map(p => ({ label: formatPosition(p), value: p }))} // Fallback
-                                                value={positionB}
-                                                onChange={setPositionB}
-                                                className="bg-slate-900"
-                                            />
-                                        </div>
-                                    )}
-                                </Space>
-                            </Card>
-
-                            {/* EXTRAS */}
-                            <div className="bg-white/5 rounded-lg p-3 border border-white/10">
-                                <div className="flex items-center justify-between mb-2">
-                                    <span className="text-xs font-bold text-text-muted uppercase">Description / Analysis</span>
-                                    <Button
-                                        size="small"
-                                        type={ignorePosition ? 'primary' : 'default'}
-                                        onClick={() => setIgnorePosition(!ignorePosition)}
-                                        className="text-xs h-6"
-                                    >
-                                        Ignore Positions
-                                    </Button>
-                                </div>
-                                <TextArea
-                                    value={description}
-                                    onChange={e => setDescription(e.target.value)}
-                                    placeholder="Enter combo analysis or synergy notes..."
-                                    autoSize={{ minRows: 2, maxRows: 4 }}
-                                    className="!bg-slate-900 !border-slate-800 !text-white text-sm"
-                                />
-                            </div>
-
-                            {/* WARNINGS */}
-                            {isSamePosition && (
-                                <div className="bg-red-900/20 text-red-300 text-xs p-2 rounded border border-red-900/50 text-center">
-                                    Warning: Both heroes cannot handle the same position.
-                                </div>
-                            )}
-                            {isDuplicate && (
-                                <div className="bg-yellow-900/20 text-yellow-300 text-xs p-2 rounded border border-yellow-900/50 text-center">
-                                    Notification: This combo pair already exists.
-                                </div>
-                            )}
-
-                        </div>
-
-                        {/* Footer Action */}
-                        <div className="p-4 border-t border-white/10 bg-white/5">
-                            <Button
-                                type="primary"
-                                block
-                                size="large"
-                                onClick={handleSave}
-                                loading={isPending}
-                                disabled={!heroA || !heroB || ((!positionA || !positionB) && !ignorePosition) || isDuplicate || isSamePosition}
-                                className="bg-gradient-to-r from-primary to-accent border-0 hover:opacity-90 shadow-lg shadow-purple-900/20 font-bold"
-                            >
-                                {editingComboId ? 'Update Combo' : 'Save Combo Duo'}
-                            </Button>
-                        </div>
+                {isLoading ? (
+                    <div className="text-center py-20 animate-pulse text-text-muted">Loading version data...</div>
+                ) : combos.length === 0 ? (
+                    <div className="text-center py-20 glass-card text-text-muted flex flex-col items-center border border-dashed border-white/10">
+                        <Handshake className="w-12 h-12 mb-4 opacity-20" />
+                        <p className="text-lg font-medium text-white/50">No combos found for this version.</p>
+                        <button onClick={openModal} className="mt-4 text-primary hover:text-white underline text-sm">Create the first pair</button>
                     </div>
-                </Modal>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {combos.map(combo => (
+                            <div key={combo.id} className="glass-card p-4 flex flex-col md:flex-row items-center gap-4 hover:bg-white/5 transition-all group border-t-4 md:border-t-0 md:border-l-4 border-primary relative overflow-hidden">
+                                {/* Hero A */}
+                                <div className="flex flex-col md:flex-row items-center md:items-center gap-3 w-full md:w-[40%] text-center md:text-left">
+                                    <div className="relative w-12 h-12 md:w-10 md:h-10 rounded-full border-2 border-primary/50 overflow-hidden shadow-lg shadow-purple-900/20 shrink-0">
+                                        {combo.hero_a?.icon_url && <Image src={combo.hero_a.icon_url} alt="" fill className="object-cover" />}
+                                    </div>
+                                    <div className="flex flex-col min-w-0 items-center md:items-start">
+                                        <span className="text-sm font-bold text-white truncate">{combo.hero_a?.name}</span>
+                                        <span className="text-[10px] text-primary uppercase font-bold tracking-wide">
+                                            {combo.hero_a_position === 'Any' ? 'Any Lane' : combo.hero_a_position}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Link */}
+                                <div className="flex items-center justify-center w-full md:w-[20%] opacity-30 group-hover:opacity-100 transition-opacity py-2 md:py-0">
+                                    <LinkIcon size={16} className="text-white transform rotate-90 md:rotate-45" />
+                                </div>
+
+                                {/* Hero B */}
+                                <div className="flex flex-col-reverse md:flex-row items-center justify-end gap-3 w-full md:w-[40%] text-center md:text-right">
+                                    <div className="flex flex-col min-w-0 items-center md:items-end">
+                                        <span className="text-sm font-bold text-white truncate">{combo.hero_b?.name}</span>
+                                        <span className="text-[10px] text-blue-400 uppercase font-bold tracking-wide">
+                                            {combo.hero_b_position === 'Any' ? 'Any Lane' : combo.hero_b_position}
+                                        </span>
+                                    </div>
+                                    <div className="relative w-12 h-12 md:w-10 md:h-10 rounded-full border-2 border-blue-500/50 overflow-hidden shadow-lg shadow-blue-900/20 shrink-0">
+                                        {combo.hero_b?.icon_url && <Image src={combo.hero_b.icon_url} alt="" fill className="object-cover" />}
+                                    </div>
+                                </div>
+
+                                {/* Hover Analysis Text */}
+                                {combo.description && (
+                                    <div className="absolute inset-x-0 bottom-0 bg-black/95 text-text-muted text-[10px] italic p-2 transform translate-y-full group-hover:translate-y-0 transition-transform z-10 text-center md:text-left">
+                                        {combo.description}
+                                    </div>
+                                )}
+
+                                <button
+                                    onClick={(e) => handleDelete(combo.id, e)}
+                                    className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 hover:bg-red-500 text-white/50 hover:text-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all z-20"
+                                >
+                                    <Trash2 size={12} />
+                                </button>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleEdit(combo); }}
+                                    className="absolute top-2 right-8 p-1.5 rounded-full bg-black/60 hover:bg-primary text-white/50 hover:text-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all z-20"
+                                >
+                                    <Edit2 size={12} />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
+
+            {/* MODAL */}
+            <Modal
+                open={isModalOpen}
+                onCancel={() => setIsModalOpen(false)}
+                footer={null}
+                closable={false}
+                centered
+                width={450} // Mobile-first narrow width
+                className="modal-glass"
+                style={{ padding: 0 }}
+                styles={{ body: { padding: 0, overflow: 'hidden' } }}
+            >
+                <div className="flex flex-col h-[85vh] md:h-auto">
+                    {/* Header */}
+                    <div className="flex items-center justify-between p-4 border-b border-white/10 bg-white/5">
+                        <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                            {editingComboId ? <Edit2 size={18} className="text-primary" /> : <Plus size={18} className="text-primary" />}
+                            {editingComboId ? 'Edit Combo' : 'New Combo'}
+                        </h2>
+                        <Button type="text" icon={<X size={20} />} onClick={() => setIsModalOpen(false)} className="text-white/50 hover:text-white" />
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                        {/* HERO A BLOCK */}
+                        <Card size="small" bordered={false} className="bg-white/5 border border-white/10">
+                            <Space direction="vertical" style={{ width: '100%' }} size="small">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <div className="w-5 h-5 rounded-full bg-primary flex items-center justify-center text-xs font-bold text-white">A</div>
+                                    <span className="text-sm font-bold text-primary">Hero A</span>
+                                </div>
+                                <Select
+                                    showSearch
+                                    placeholder="Select Hero A"
+                                    style={{ width: '100%' }}
+                                    value={heroA?.id}
+                                    onChange={handleSetHeroA}
+                                    optionLabelProp="label"
+                                    filterOption={(input, option) =>
+                                        ((option as any)?.name ?? '').toLowerCase().includes(input.toLowerCase())
+                                    }
+                                    options={sortedHeroes.filter(h => h.id !== heroB?.id).map(h => ({
+                                        value: h.id,
+                                        label: (
+                                            <div className="flex items-center gap-2">
+                                                <Avatar src={h.icon_url} size="small" shape="square" />
+                                                <span className="font-medium">{h.name}</span>
+                                            </div>
+                                        ),
+                                        name: h.name, // Used for search filtering
+                                    }))}
+                                    className="custom-select-hero"
+                                />
+
+                                {/* Position A */}
+                                {heroA && !ignorePosition && (
+                                    <div className="animate-in fade-in slide-in-from-top-2 pt-2">
+                                        <div className="text-xs text-text-muted mb-1.5 ml-1">Position</div>
+                                        <Segmented
+                                            block
+                                            options={getHeroPositions(heroA).length > 0 ? getHeroPositions(heroA).map(p => ({
+                                                label: formatPosition(p),
+                                                value: p,
+                                                disabled: p === positionB
+                                            })) : POSITIONS.map(p => ({ label: formatPosition(p), value: p }))} // Fallback if no positions found
+                                            value={positionA}
+                                            onChange={setPositionA}
+                                            className="bg-slate-900"
+                                        />
+                                    </div>
+                                )}
+                            </Space>
+                        </Card>
+
+                        {/* LINK ICON */}
+                        <div className="flex justify-center -my-3 relative z-10">
+                            <div className="bg-slate-800 p-1.5 rounded-full border border-white/10 shadow-lg">
+                                <LinkIcon size={16} className="text-text-muted rotate-45" />
+                            </div>
+                        </div>
+
+                        {/* HERO B BLOCK */}
+                        <Card size="small" bordered={false} className="bg-white/5 border border-white/10">
+                            <Space direction="vertical" style={{ width: '100%' }} size="small">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold text-white">B</div>
+                                    <span className="text-sm font-bold text-blue-400">Hero B</span>
+                                </div>
+                                <Select
+                                    showSearch
+                                    placeholder="Select Hero B"
+                                    style={{ width: '100%' }}
+                                    value={heroB?.id}
+                                    onChange={handleSetHeroB}
+                                    optionLabelProp="label"
+                                    filterOption={(input, option) =>
+                                        ((option as any)?.name ?? '').toLowerCase().includes(input.toLowerCase())
+                                    }
+                                    options={sortedHeroes.filter(h => h.id !== heroA?.id).map(h => ({
+                                        value: h.id,
+                                        label: (
+                                            <div className="flex items-center gap-2">
+                                                <Avatar src={h.icon_url} size="small" shape="square" />
+                                                <span className="font-medium">{h.name}</span>
+                                            </div>
+                                        ),
+                                        name: h.name, // Used for search filtering
+                                    }))}
+                                    className="custom-select-hero"
+                                />
+
+                                {/* Position B */}
+                                {heroB && !ignorePosition && (
+                                    <div className="animate-in fade-in slide-in-from-top-2 pt-2">
+                                        <div className="text-xs text-text-muted mb-1.5 ml-1">Position</div>
+                                        <Segmented
+                                            block
+                                            options={getHeroPositions(heroB).length > 0 ? getHeroPositions(heroB).map(p => ({
+                                                label: formatPosition(p),
+                                                value: p,
+                                                disabled: p === positionA
+                                            })) : POSITIONS.map(p => ({ label: formatPosition(p), value: p }))} // Fallback
+                                            value={positionB}
+                                            onChange={setPositionB}
+                                            className="bg-slate-900"
+                                        />
+                                    </div>
+                                )}
+                            </Space>
+                        </Card>
+
+                        {/* EXTRAS */}
+                        <div className="bg-white/5 rounded-lg p-3 border border-white/10">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-bold text-text-muted uppercase">Description / Analysis</span>
+                                <Button
+                                    size="small"
+                                    type={ignorePosition ? 'primary' : 'default'}
+                                    onClick={() => setIgnorePosition(!ignorePosition)}
+                                    className="text-xs h-6"
+                                >
+                                    Ignore Positions
+                                </Button>
+                            </div>
+                            <TextArea
+                                value={description}
+                                onChange={e => setDescription(e.target.value)}
+                                placeholder="Enter combo analysis or synergy notes..."
+                                autoSize={{ minRows: 2, maxRows: 4 }}
+                                className="!bg-slate-900 !border-slate-800 !text-white text-sm"
+                            />
+                        </div>
+
+                        {/* WARNINGS */}
+                        {isSamePosition && (
+                            <div className="bg-red-900/20 text-red-300 text-xs p-2 rounded border border-red-900/50 text-center">
+                                Warning: Both heroes cannot handle the same position.
+                            </div>
+                        )}
+                        {isDuplicate && (
+                            <div className="bg-yellow-900/20 text-yellow-300 text-xs p-2 rounded border border-yellow-900/50 text-center">
+                                Notification: This combo pair already exists.
+                            </div>
+                        )}
+
+                    </div>
+
+                    {/* Footer Action */}
+                    <div className="p-4 border-t border-white/10 bg-white/5">
+                        <Button
+                            type="primary"
+                            block
+                            size="large"
+                            onClick={handleSave}
+                            loading={isPending}
+                            disabled={!heroA || !heroB || ((!positionA || !positionB) && !ignorePosition) || isDuplicate || isSamePosition}
+                            className="bg-gradient-to-r from-primary to-accent border-0 hover:opacity-90 shadow-lg shadow-purple-900/20 font-bold"
+                        >
+                            {editingComboId ? 'Update Combo' : 'Save Combo Duo'}
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+        </div>
+    )
+}
+
+export default function ComboManager(props: ComboManagerProps) {
+    return (
+        <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
+            <App>
+                <ComboManagerContent {...props} />
+            </App>
         </ConfigProvider>
     )
 }
