@@ -220,7 +220,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             )
 
             // Select array based on mode
-            let results = data.hybrid || []
+            let results: any[] = data.hybrid || []
             if (mode === 'analyst') results = data.analyst
             else if (mode === 'history') results = data.history
             else if (mode === 'counter') results = data.hybrid // Counter logic often mixed in hybrid, or need specific return
