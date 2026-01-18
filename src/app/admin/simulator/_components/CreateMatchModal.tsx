@@ -199,7 +199,7 @@ export default function CreateMatchModal({ versions, tournaments }: CreateMatchM
                                 </div>
                                 <div className="grid gap-2">
                                     <Label className="text-xs text-slate-400">Team B {aiMode === 'PVE' ? '(AI Opponent)' : '(Opponent)'}</Label>
-                                    <input type="hidden" name="team_b_name" value={teamB} />
+                                    <input type="hidden" name="team_b_name" value={aiMode === 'PVE' && teamB && !teamB.includes('(Bot)') ? `${teamB} (Bot)` : teamB} />
                                     {/* Always allow selection if teams are available, even in PVE */}
                                     <Select value={teamB} onValueChange={setTeamB}>
                                         <SelectTrigger className="bg-slate-800 border-slate-700" disabled={loadingTeams}>
@@ -245,9 +245,9 @@ export default function CreateMatchModal({ versions, tournaments }: CreateMatchM
                                     </div>
                                     <div className="grid gap-2">
                                         <Label htmlFor="team_b" className="text-xs text-slate-400">Team B {aiMode === 'PVE' ? '(AI)' : ''}</Label>
+                                        <input type="hidden" name="team_b_name" value={aiMode === 'PVE' && teamB && !teamB.includes('(Bot)') ? `${teamB} (Bot)` : teamB} />
                                         <Input
                                             id="team_b"
-                                            name="team_b_name"
                                             placeholder="Team B Name"
                                             value={teamB || (aiMode === 'PVE' ? 'Cerebro AI' : 'Team B')}
                                             onChange={(e) => setTeamB(e.target.value)}

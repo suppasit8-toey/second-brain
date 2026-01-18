@@ -164,3 +164,18 @@ export interface DraftPick {
     hero?: Hero;
 }
 
+export interface AnalysisLayerConfig {
+    id: 'meta' | 'counter' | 'synergy' | 'comfort' | 'roster' | 'ban' | 'recent' | 'composition';
+    name: string;
+    isActive: boolean;
+    weight: number; // 0.0 - 2.0
+    order: number;
+}
+
+export interface AnalysisMode {
+    id: string;
+    name: string;
+    description: string; // Can support markdown/multi-line
+    layers: AnalysisLayerConfig[];
+}
+

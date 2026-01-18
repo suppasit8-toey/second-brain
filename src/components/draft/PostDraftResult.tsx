@@ -65,25 +65,52 @@ export default function PostDraftResult({
     // Helper: Get Hero
     const getHero = (id: string | number) => heroes.find(h => String(h.id) === String(id))
 
-    // 1. Auto-fill logic
+    // 1. Smart Auto-fill logic - assigns positions with NO duplicates
     useEffect(() => {
-        const newAssignments: Record<string, string> = { ...assignments }
-        const allPickIds = [...Object.values(bluePicks), ...Object.values(redPicks)]
+        // Helper: Assign positions to a team's picks without duplicates
+        const assignTeamPositions = (pickIds: string[]) => {
+            const teamAssignments: Record<string, string> = {}
+            const usedPositions = new Set<string>()
 
-        allPickIds.forEach(id => {
-            // Only auto-assign if NOT manually set during draft
-            if (!newAssignments[id]) {
+            // Sort heroes by their position flexibility (fewer options first = more constrained)
+            const heroesWithOptions = pickIds.map(id => {
                 const h = getHero(id)
-                // Filter main_position to find one that matches valid POSITIONS
-                // This prevents assigning "Mage" or "Marksman" if they are not in POSITIONS
-                const validRole = h?.main_position?.find(p => (POSITIONS as readonly string[]).includes(p))
+                const validRoles = (h?.main_position || []).filter(p => (POSITIONS as readonly string[]).includes(p))
+                return { id, hero: h, validRoles }
+            }).sort((a, b) => a.validRoles.length - b.validRoles.length)
 
-                if (validRole) {
-                    newAssignments[id] = validRole
+            // Assign positions greedily (most constrained first)
+            heroesWithOptions.forEach(({ id, validRoles }) => {
+                // Find first available role for this hero
+                const availableRole = validRoles.find(r => !usedPositions.has(r))
+                if (availableRole) {
+                    teamAssignments[id] = availableRole
+                    usedPositions.add(availableRole)
+                } else {
+                    // Fallback: assign any unused position
+                    const fallbackRole = (POSITIONS as readonly string[]).find(p => !usedPositions.has(p))
+                    if (fallbackRole) {
+                        teamAssignments[id] = fallbackRole
+                        usedPositions.add(fallbackRole)
+                    }
                 }
-            }
-        })
-        setAssignments(newAssignments)
+            })
+
+            return teamAssignments
+        }
+
+        const blueIds = Object.values(bluePicks)
+        const redIds = Object.values(redPicks)
+
+        const blueAssignments = assignTeamPositions(blueIds)
+        const redAssignments = assignTeamPositions(redIds)
+
+        setAssignments({ ...manualLanes, ...blueAssignments, ...redAssignments })
+
+        // Auto-select winner based on winPrediction (50% threshold)
+        if (!initialData?.winner && winPrediction !== 50) {
+            setWinner(winPrediction > 50 ? 'Blue' : 'Red')
+        }
     }, [])
 
     const handleAssignmentChange = (heroId: string, role: string) => {
@@ -102,10 +129,26 @@ export default function PostDraftResult({
     }
 
     const [showSuccess, setShowSuccess] = useState(false)
+    const [autoSaved, setAutoSaved] = useState(false)
 
-    // ... existing helper ...
+    // 2. Bot Auto-Save: Automatically save when positions are assigned and winner is set
+    useEffect(() => {
+        // Skip if already saved, or if this is a manual edit session
+        if (autoSaved || initialData?.winner || submitting) return
 
-    // ... existing logic ...
+        // Check if we have all assignments and a winner selected
+        const allPickIds = [...Object.values(bluePicks), ...Object.values(redPicks)]
+        const allAssigned = allPickIds.every(id => assignments[id])
+
+        if (allAssigned && winner && Object.keys(assignments).length > 0) {
+            // Auto-save after a short delay to allow UI to render
+            const timer = setTimeout(() => {
+                setAutoSaved(true)
+                handleSubmit()
+            }, 500)
+            return () => clearTimeout(timer)
+        }
+    }, [assignments, winner, autoSaved, submitting])
 
     const handleSubmit = async () => {
         // Validation Check - DISABLED per user request

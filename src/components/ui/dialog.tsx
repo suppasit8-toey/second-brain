@@ -140,8 +140,8 @@ const DialogTitle = React.forwardRef<HTMLHeadingElement, React.HTMLAttributes<HT
 ))
 DialogTitle.displayName = "DialogTitle"
 
-const DialogDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(({ className, ...props }, ref) => (
-    <p ref={ref} className={cn("text-sm text-slate-500 dark:text-slate-400", className)} {...props} />
+const DialogDescription = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(({ className, ...props }, ref) => (
+    <div ref={ref} className={cn("text-sm text-slate-500 dark:text-slate-400", className)} {...props} />
 ))
 DialogDescription.displayName = "DialogDescription"
 

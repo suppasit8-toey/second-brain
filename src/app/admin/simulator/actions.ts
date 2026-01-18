@@ -105,6 +105,84 @@ export async function getMatches() {
     return data
 }
 
+export async function getBanSlotStats(versionId: number) {
+    const supabase = await createClient()
+
+    console.log(`[getBanSlotStats] Fetching for version ${versionId}`)
+
+    const { data, error } = await supabase
+        .from('draft_picks')
+        .select(`
+            hero_id,
+            position_index,
+            hero:heroes(id, name, icon_url),
+            game:draft_games!inner(
+                match:draft_matches!inner(version_id)
+            )
+        `)
+        .eq('type', 'BAN')
+        .eq('game.match.version_id', versionId)
+
+    if (error) {
+        console.error("[getBanSlotStats] Error:", error)
+        return { phase1: {}, phase2: {} }
+    }
+
+    const stats: Record<number, Record<string, { count: number, hero: any }>> = {}
+    const slotTotals: Record<number, number> = {}
+
+    data?.forEach((pick: any) => {
+        const slot = pick.position_index
+        const heroId = pick.hero_id
+        if (!heroId) return
+
+        if (!stats[slot]) stats[slot] = {}
+        if (!slotTotals[slot]) slotTotals[slot] = 0
+
+        if (!stats[slot][heroId]) {
+            stats[slot][heroId] = {
+                count: 0,
+                hero: pick.hero
+            }
+        }
+
+        stats[slot][heroId].count++
+        slotTotals[slot]++
+    })
+
+    const formatSlot = (slotIdx: number) => {
+        const raw = stats[slotIdx] || {}
+        const total = slotTotals[slotIdx] || 0
+        if (total === 0) return []
+
+        return Object.values(raw)
+            .map((item: any) => ({
+                hero: item.hero,
+                count: item.count,
+                percentage: Number(((item.count / total) * 100).toFixed(0))
+            }))
+            .sort((a, b) => b.count - a.count)
+            .slice(0, 3)
+    }
+
+    return {
+        phase1: {
+            blueBan1: formatSlot(1),
+            redBan1: formatSlot(2),
+            blueBan2: formatSlot(3),
+            redBan2: formatSlot(4),
+        },
+        phase2: {
+            redBan3: formatSlot(11),
+            blueBan3: formatSlot(12),
+            redBan4: formatSlot(13),
+            blueBan4: formatSlot(14),
+        },
+        totals: slotTotals
+    }
+}
+
+
 export async function getMatch(matchId: string) {
     const supabase = await createClient()
 
@@ -114,6 +192,7 @@ export async function getMatch(matchId: string) {
         .select(`
             *,
             version:versions(*),
+            tournament:tournaments(id, name),
             games:draft_games(
                 *,
                 picks:draft_picks(*)
@@ -133,7 +212,11 @@ export async function getMatch(matchId: string) {
         .single()
 
     if (error) {
-        console.error('Error fetching match:', error)
+        if (error.code === 'PGRST116') {
+            console.warn(`Match not found for ID/Slug: ${matchId}`)
+            return null
+        }
+        console.error(`Error fetching match (${matchId}):`, JSON.stringify(error, null, 2))
         return null
     }
 

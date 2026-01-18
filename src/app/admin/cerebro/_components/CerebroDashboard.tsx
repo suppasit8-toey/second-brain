@@ -23,6 +23,7 @@ import { useRouter } from 'next/navigation';
 import { CerebroMode, getCerebroStats } from '../actions';
 import { getTournaments } from '../../tournaments/actions';
 import TeamDeepDiveStats from './TeamDeepDiveStats';
+import BanStrategyBoard from './BanStrategyBoard';
 
 // Register ChartJS
 ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
@@ -66,7 +67,9 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                     tournamentId === 'ALL' ? undefined : tournamentId,
                     teamName
                 );
-                setStats(data);
+                if (data) {
+                    setStats(data.stats);
+                }
             } catch (e) {
                 console.error(e);
             } finally {
@@ -238,8 +241,8 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                         blueGames = stats.gamesOnBlue || 0;
                                     } else {
                                         // Global
-                                        blueWins = stats.firstPickWinRate.wins;
-                                        blueGames = stats.firstPickWinRate.total;
+                                        blueWins = stats.firstPickWinRate?.wins || 0;
+                                        blueGames = stats.firstPickWinRate?.total || 0;
                                     }
                                     blueWR = blueGames > 0 ? (blueWins / blueGames) * 100 : 0;
 
@@ -273,8 +276,8 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                     } else {
                                         // Global
                                         // Red Wins = Total - Blue Wins
-                                        const total = stats.firstPickWinRate.total;
-                                        const blueWins = stats.firstPickWinRate.wins;
+                                        const total = stats.firstPickWinRate?.total || 0;
+                                        const blueWins = stats.firstPickWinRate?.wins || 0;
                                         redWins = total - blueWins;
                                         redGames = total;
                                     }
@@ -329,7 +332,7 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                         <CardHeader className="pb-2"><CardTitle className="text-sm text-slate-400 uppercase">Team Performance Leaderboard</CardTitle></CardHeader>
                         <CardContent>
                             <div className="space-y-2 max-h-[120px] overflow-y-auto custom-scrollbar pr-2">
-                                {Object.values(stats.teamStats as Record<string, any>)
+                                {Object.values((stats.teamStats || {}) as Record<string, any>)
                                     .sort((a, b) => b.wins - a.wins)
                                     .map((team, idx) => (
                                         <Link
@@ -358,8 +361,9 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
 
                         {/* TEAM DEEP DIVE MODULE */}
                         {teamName && (
-                            <div className="mb-8">
+                            <div className="mb-8 space-y-8">
                                 <TeamDeepDiveStats teamName={teamName} versionId={Number(versionId)} />
+                                <BanStrategyBoard stats={stats} teamName={teamName} />
                             </div>
                         )}
 
@@ -494,11 +498,11 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                         <CardContent className="p-6">
                                             <div className="space-y-6">
                                                 <div className="text-[10px] uppercase font-bold text-slate-500 mb-2 px-1">Phase 1 (Picks)</div>
-                                                {[5, 6, 7, 8, 9, 10].map((slot) => {
+                                                {(draftSide === 'BLUE' ? [5, 8, 9] : draftSide === 'RED' ? [6, 7, 10] : [5, 6, 7, 8, 9, 10]).map((slot) => {
                                                     // Determine Source Data
-                                                    let roleData = stats.pickOrderStats[slot] || {};
-                                                    if (draftSide === 'BLUE') roleData = stats.sideStats?.BLUE.pickOrderStats[slot] || {};
-                                                    if (draftSide === 'RED') roleData = stats.sideStats?.RED.pickOrderStats[slot] || {};
+                                                    let roleData = stats.pickOrderStats?.[slot] || {};
+                                                    if (draftSide === 'BLUE') roleData = stats.sideStats?.BLUE?.pickOrderStats?.[slot] || {};
+                                                    if (draftSide === 'RED') roleData = stats.sideStats?.RED?.pickOrderStats?.[slot] || {};
 
                                                     const sortedRoles = Object.entries(roleData)
                                                         .sort((a: any, b: any) => b[1] - a[1])
@@ -510,7 +514,21 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                                     let relIdx = '';
                                                     let isTargetTeam = false;
 
-                                                    if (draftSide === 'BLUE') {
+                                                    if (draftSide === 'ALL') {
+                                                        const globalMap = {
+                                                            5: { tag: 'BLUE', idx: 'PICK 1', color: 'text-blue-400' },
+                                                            6: { tag: 'RED', idx: 'PICK 1', color: 'text-red-400' },
+                                                            7: { tag: 'RED', idx: 'PICK 2', color: 'text-red-400' },
+                                                            8: { tag: 'BLUE', idx: 'PICK 2', color: 'text-blue-400' },
+                                                            9: { tag: 'BLUE', idx: 'PICK 3', color: 'text-blue-400' },
+                                                            10: { tag: 'RED', idx: 'PICK 3', color: 'text-red-400' },
+                                                        } as any;
+                                                        teamTag = globalMap[slot].tag;
+                                                        relIdx = globalMap[slot].idx;
+                                                        // For ALL view, we use custom coloring instead of target/slate
+                                                        isTargetTeam = true; // Force opacity 100
+                                                        // We'll handle color override below
+                                                    } else if (draftSide === 'BLUE') {
                                                         const blueMap = {
                                                             5: { tag: 'TEAM A', idx: 'PICK 1', target: true },
                                                             6: { tag: 'TEAM B', idx: 'PICK 1', target: false },
@@ -523,13 +541,14 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                                         relIdx = blueMap[slot].idx;
                                                         isTargetTeam = blueMap[slot].target;
                                                     } else {
+                                                        // RED Side Perspective: TEAM A = Blue (Opponent), TEAM B = Red (Us)
                                                         const redMap = {
-                                                            5: { tag: 'TEAM B', idx: 'PICK 1', target: false },
-                                                            6: { tag: 'TEAM A', idx: 'PICK 1', target: true },
-                                                            7: { tag: 'TEAM A', idx: 'PICK 2', target: true },
-                                                            8: { tag: 'TEAM B', idx: 'PICK 2', target: false },
-                                                            9: { tag: 'TEAM B', idx: 'PICK 3', target: false },
-                                                            10: { tag: 'TEAM A', idx: 'PICK 3', target: true },
+                                                            5: { tag: 'TEAM A', idx: 'PICK 1', target: false },  // Blue's 1st pick (Opponent)
+                                                            6: { tag: 'TEAM B', idx: 'PICK 1', target: true },   // Red's 1st pick (Us)
+                                                            7: { tag: 'TEAM B', idx: 'PICK 2', target: true },   // Red's 2nd pick (Us)
+                                                            8: { tag: 'TEAM A', idx: 'PICK 2', target: false },  // Blue's 2nd pick (Opponent)
+                                                            9: { tag: 'TEAM A', idx: 'PICK 3', target: false },  // Blue's 3rd pick (Opponent)
+                                                            10: { tag: 'TEAM B', idx: 'PICK 3', target: true },  // Red's 3rd pick (Us)
                                                         } as any;
                                                         teamTag = redMap[slot].tag;
                                                         relIdx = redMap[slot].idx;
@@ -538,7 +557,7 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
 
                                                     return (
                                                         <div key={slot} className="flex items-center gap-4">
-                                                            <div className={`w-28 flex-shrink-0 font-mono text-[10px] leading-tight flex flex-col ${isTargetTeam ? 'text-cyan-400' : 'text-slate-500 opacity-70'}`}>
+                                                            <div className={`w-28 flex-shrink-0 font-mono text-[10px] leading-tight flex flex-col ${draftSide === 'ALL' ? ((slot === 5 || slot === 8 || slot === 9) ? 'text-blue-400' : 'text-red-400') : (isTargetTeam ? 'text-cyan-400' : 'text-slate-500 opacity-70')}`}>
                                                                 <span className="font-bold">{teamTag} {relIdx}</span>
                                                                 <span className="opacity-50 text-[8px]">Slot {slot}</span>
                                                             </div>
@@ -572,10 +591,10 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                                 })}
                                                 <div className="pt-2 border-t border-white/5 mx-4"></div>
                                                 <div className="text-[10px] uppercase font-bold text-slate-500 mb-2 px-1">Phase 2 (Picks)</div>
-                                                {[15, 16, 17, 18].map((slot) => {
-                                                    let roleData = stats.pickOrderStats[slot] || {};
-                                                    if (draftSide === 'BLUE') roleData = stats.sideStats?.BLUE.pickOrderStats[slot] || {};
-                                                    if (draftSide === 'RED') roleData = stats.sideStats?.RED.pickOrderStats[slot] || {};
+                                                {(draftSide === 'BLUE' ? [16, 17] : draftSide === 'RED' ? [15, 18] : [15, 16, 17, 18]).map((slot) => {
+                                                    let roleData = stats.pickOrderStats?.[slot] || {};
+                                                    if (draftSide === 'BLUE') roleData = stats.sideStats?.BLUE?.pickOrderStats?.[slot] || {};
+                                                    if (draftSide === 'RED') roleData = stats.sideStats?.RED?.pickOrderStats?.[slot] || {};
 
                                                     const sortedRoles = Object.entries(roleData)
                                                         .sort((a: any, b: any) => b[1] - a[1])
@@ -586,7 +605,17 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                                     let relIdx = '';
                                                     let isTargetTeam = false;
 
-                                                    if (draftSide === 'BLUE') {
+                                                    if (draftSide === 'ALL') {
+                                                        const globalMap = {
+                                                            15: { tag: 'RED', idx: 'PICK 4', color: 'text-red-400' },
+                                                            16: { tag: 'BLUE', idx: 'PICK 4', color: 'text-blue-400' },
+                                                            17: { tag: 'BLUE', idx: 'PICK 5', color: 'text-blue-400' },
+                                                            18: { tag: 'RED', idx: 'PICK 5', color: 'text-red-400' },
+                                                        } as any;
+                                                        teamTag = globalMap[slot].tag;
+                                                        relIdx = globalMap[slot].idx;
+                                                        isTargetTeam = true;
+                                                    } else if (draftSide === 'BLUE') {
                                                         const blueMap = {
                                                             15: { tag: 'TEAM B', idx: 'PICK 4', target: false },
                                                             16: { tag: 'TEAM A', idx: 'PICK 4', target: true },
@@ -597,11 +626,12 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                                         relIdx = blueMap[slot].idx;
                                                         isTargetTeam = blueMap[slot].target;
                                                     } else {
+                                                        // RED Side Perspective: TEAM A = Blue (Opponent), TEAM B = Red (Us)
                                                         const redMap = {
-                                                            15: { tag: 'TEAM A', idx: 'PICK 4', target: true },
-                                                            16: { tag: 'TEAM B', idx: 'PICK 4', target: false },
-                                                            17: { tag: 'TEAM B', idx: 'PICK 5', target: false },
-                                                            18: { tag: 'TEAM A', idx: 'PICK 5', target: true },
+                                                            15: { tag: 'TEAM B', idx: 'PICK 4', target: true },  // Red's 4th pick (Us)
+                                                            16: { tag: 'TEAM A', idx: 'PICK 4', target: false }, // Blue's 4th pick (Opponent)
+                                                            17: { tag: 'TEAM A', idx: 'PICK 5', target: false }, // Blue's 5th pick (Opponent)
+                                                            18: { tag: 'TEAM B', idx: 'PICK 5', target: true },  // Red's 5th pick (Us)
                                                         } as any;
                                                         teamTag = redMap[slot].tag;
                                                         relIdx = redMap[slot].idx;
@@ -610,7 +640,7 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
 
                                                     return (
                                                         <div key={slot} className="flex items-center gap-4">
-                                                            <div className={`w-28 flex-shrink-0 font-mono text-[10px] leading-tight flex flex-col ${isTargetTeam ? 'text-cyan-400' : 'text-slate-500 opacity-70'}`}>
+                                                            <div className={`w-28 flex-shrink-0 font-mono text-[10px] leading-tight flex flex-col ${draftSide === 'ALL' ? ((slot === 16 || slot === 17) ? 'text-blue-400' : 'text-red-400') : (isTargetTeam ? 'text-cyan-400' : 'text-slate-500 opacity-70')}`}>
                                                                 <span className="font-bold">{teamTag} {relIdx}</span>
                                                                 <span className="opacity-50 text-[8px]">Slot {slot}</span>
                                                             </div>
@@ -660,9 +690,9 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                                 <div className="text-[10px] uppercase font-bold text-slate-500 mb-2 px-1">Phase 1 (Bans)</div>
                                                 <div className="flex flex-wrap gap-x-8 gap-y-6">
                                                     {[1, 2, 3, 4].map((slot) => {
-                                                        let banData = stats.banOrderStats[slot] || {};
-                                                        if (draftSide === 'BLUE') banData = stats.sideStats?.BLUE.banOrderStats[slot] || {};
-                                                        if (draftSide === 'RED') banData = stats.sideStats?.RED.banOrderStats[slot] || {};
+                                                        let banData = stats.banOrderStats?.[slot] || {};
+                                                        if (draftSide === 'BLUE') banData = stats.sideStats?.BLUE?.banOrderStats?.[slot] || {};
+                                                        if (draftSide === 'RED') banData = stats.sideStats?.RED?.banOrderStats?.[slot] || {};
 
                                                         const sortedBans = Object.entries(banData)
                                                             .sort((a: any, b: any) => b[1] - a[1])
@@ -674,7 +704,18 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                                         let isTargetTeam = false;
                                                         let isRedColor = false;
 
-                                                        if (draftSide === 'BLUE') {
+                                                        if (draftSide === 'ALL') {
+                                                            const globalMap = {
+                                                                1: { tag: 'BLUE', idx: 'BAN 1', red: false },
+                                                                2: { tag: 'RED', idx: 'BAN 1', red: true },
+                                                                3: { tag: 'BLUE', idx: 'BAN 2', red: false },
+                                                                4: { tag: 'RED', idx: 'BAN 2', red: true },
+                                                            } as any;
+                                                            teamTag = globalMap[slot].tag;
+                                                            relIdx = globalMap[slot].idx;
+                                                            isTargetTeam = true;
+                                                            isRedColor = globalMap[slot].red;
+                                                        } else if (draftSide === 'BLUE') {
                                                             const blueMap = {
                                                                 1: { tag: 'TEAM A', idx: 'BAN 1', target: true, red: false },
                                                                 2: { tag: 'TEAM B', idx: 'BAN 1', target: false, red: true },
@@ -700,7 +741,7 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
 
                                                         return (
                                                             <div key={slot} className="flex min-w-[200px] flex-col gap-1.5 flex-1">
-                                                                <div className={`w-28 flex-shrink-0 font-mono text-[10px] leading-tight flex flex-col ${isRedColor ? 'text-red-400' : 'text-blue-400'} ${!isTargetTeam && 'opacity-70'}`}>
+                                                                <div className={`w-28 flex-shrink-0 font-mono text-[10px] leading-tight flex flex-col ${isRedColor ? 'text-red-400' : 'text-blue-400'} ${(!isTargetTeam && draftSide !== 'ALL') ? 'opacity-70' : ''}`}>
                                                                     <span className="font-bold">{teamTag} {relIdx}</span>
                                                                     <span className="opacity-50 text-[8px]">Slot {slot}</span>
                                                                 </div>
@@ -752,7 +793,18 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                                         let isTargetTeam = false;
                                                         let isRedColor = false;
 
-                                                        if (draftSide === 'BLUE') {
+                                                        if (draftSide === 'ALL') {
+                                                            const globalMap = {
+                                                                11: { tag: 'RED', idx: 'BAN 3', red: true },
+                                                                12: { tag: 'BLUE', idx: 'BAN 3', red: false },
+                                                                13: { tag: 'RED', idx: 'BAN 4', red: true },
+                                                                14: { tag: 'BLUE', idx: 'BAN 4', red: false },
+                                                            } as any;
+                                                            teamTag = globalMap[slot].tag;
+                                                            relIdx = globalMap[slot].idx;
+                                                            isTargetTeam = true;
+                                                            isRedColor = globalMap[slot].red;
+                                                        } else if (draftSide === 'BLUE') {
                                                             const blueMap = {
                                                                 11: { tag: 'TEAM B', idx: 'BAN 3', target: false, red: true },
                                                                 12: { tag: 'TEAM A', idx: 'BAN 3', target: true, red: false },
@@ -778,7 +830,7 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
 
                                                         return (
                                                             <div key={slot} className="flex min-w-[200px] flex-col gap-1.5 flex-1">
-                                                                <div className={`w-28 flex-shrink-0 font-mono text-[10px] leading-tight flex flex-col ${isRedColor ? 'text-red-400' : 'text-blue-400'} ${!isTargetTeam && 'opacity-70'}`}>
+                                                                <div className={`w-28 flex-shrink-0 font-mono text-[10px] leading-tight flex flex-col ${isRedColor ? 'text-red-400' : 'text-blue-400'} ${(!isTargetTeam && draftSide !== 'ALL') ? 'opacity-70' : ''}`}>
                                                                     <span className="font-bold">{teamTag} {relIdx}</span>
                                                                     <span className="opacity-50 text-[8px]">Slot {slot}</span>
                                                                 </div>
@@ -863,8 +915,8 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                                 <div className="divide-y divide-white/5">
                                     {topCombos.map((combo: any, idx) => {
                                         // Use ALL stats to find heroes, ensuring filter doesn't hide them
-                                        const h1 = stats.heroStats[combo.heroes[0]];
-                                        const h2 = stats.heroStats[combo.heroes[1]];
+                                        const h1 = stats.heroStats?.[combo.heroes[0]];
+                                        const h2 = stats.heroStats?.[combo.heroes[1]];
                                         const wr = (combo.wins / combo.count) * 100;
 
                                         if (!h1 || !h2) return null;

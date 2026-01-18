@@ -9,9 +9,10 @@ interface UseDraftBotProps {
     onLockIn: (heroId: string) => void;
     isPaused: boolean;
     initialHeroes: Hero[];
+    analysisConfig?: { layers: { id: string, weight: number, isActive: boolean, order: number }[] }; // Correct type from AnalysisMode
 }
 
-export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initialHeroes }: UseDraftBotProps) {
+export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initialHeroes, analysisConfig }: UseDraftBotProps) {
     const isBotTurn = (
         match.ai_metadata?.mode === 'PVE' &&
         draftState.currentStep &&
@@ -64,19 +65,43 @@ export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initi
                 const bannedIds = [...draftState.blueBans, ...draftState.redBans]
                 const pickedIds = [...Object.values(draftState.bluePicks), ...Object.values(draftState.redPicks)]
 
+                // Calculate global bans (heroes played in previous games)
+                // Bot is Team B, so opponent is Team A
+                const previousGames = match.games?.filter((g: any) => g.winner) || []
+                const opponentGlobalBans: string[] = []
+                const allyGlobalBans: string[] = []
+
+                previousGames.forEach((prevGame: any) => {
+                    const pGame = match.games?.find((g: any) => g.id === prevGame.id)
+                    if (!pGame?.picks) return
+
+                    const sideOfA = pGame.blue_team_name === match.team_a_name ? 'BLUE' : 'RED'
+
+                    pGame.picks.forEach((p: any) => {
+                        if (p.type === 'PICK') {
+                            if (p.side === sideOfA) opponentGlobalBans.push(p.hero_id)
+                            else allyGlobalBans.push(p.hero_id)
+                        }
+                    })
+                })
+
+                // For ban phase, ALSO exclude opponent's global bans (banning them is useless)
+                const excludeFromBans = currentPhase === 'BAN' ? [...bannedIds, ...pickedIds, ...opponentGlobalBans] : [...bannedIds, ...pickedIds]
+
                 const recs = await getRecommendations(
                     match.version_id,
                     allyPicks as string[],
                     enemyPicks as string[],
-                    [...bannedIds, ...pickedIds], // Must exclude all unavailable
-                    [], // global bans (not implemented for bot yet)
+                    excludeFromBans, // Must exclude all unavailable + opponent's global bans
+                    allyGlobalBans, // Our own global bans (can't pick these)
                     {
                         matchId: match.id,
                         phase: currentPhase,
                         side: draftState.currentStep.side,
                         tournamentId: match.ai_metadata?.settings?.tournamentId,
                         targetTeamName: match.team_b_name // The Bot simulates Team B
-                    }
+                    },
+                    analysisConfig // Pass the config
                 )
 
                 // Pick Strategy:
@@ -94,19 +119,103 @@ export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initi
                         bestHeroId = recs.analyst[0].hero.id
                     }
                 } else {
-                    if (recs.hybrid && recs.hybrid.length > 0) {
-                        bestHeroId = recs.hybrid[0].hero.id
-                    } else if (recs.history && recs.history.length > 0) {
-                        bestHeroId = recs.history[0].hero.id
+                    // For PICK phase, filter out heroes we've already picked in previous games
+                    // AND prioritize filling missing roles
+
+                    // 1. Identify Needed Roles
+                    const STANDARD_ROLES = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam']
+
+                    // Simple Greedy Assignment to find what we have
+                    const filledRoles = new Set<string>()
+                    const allyHeroes = initialHeroes.filter(h => allyPicks.includes(h.id))
+
+                    // Sort allies by flexibility (ascending) to assign stiff heroes first
+                    const sortedAllies = [...allyHeroes].sort((a, b) => (a.main_position?.length || 0) - (b.main_position?.length || 0))
+
+                    const tempRoles = new Set<string>()
+                    sortedAllies.forEach(h => {
+                        // Find first available role this hero can play
+                        const role = h.main_position?.find(r => {
+                            const normalized = r === 'Abyssal' ? 'Abyssal Dragon' : (r === 'Support' ? 'Roam' : r)
+                            return STANDARD_ROLES.includes(normalized) && !tempRoles.has(normalized)
+                        })
+                        if (role) {
+                            const normalized = role === 'Abyssal' ? 'Abyssal Dragon' : (role === 'Support' ? 'Roam' : role)
+                            tempRoles.add(normalized)
+                        }
+                    })
+
+                    const missingRoles = STANDARD_ROLES.filter(r => !tempRoles.has(r))
+                    console.log("[Bot] Missing Roles:", missingRoles)
+
+                    const baseRecs = recs.hybrid || []
+                    const validRecs = baseRecs.filter(rec => !allyGlobalBans.includes(rec.hero.id))
+
+                    // 2. Filter for Missing Roles
+                    let bestRec = null
+
+                    // Attempt to find top rec that fills a missing role
+                    if (missingRoles.length > 0) {
+                        const neededRecs = validRecs.filter(r => {
+                            return r.hero.main_position?.some((pos: string) => {
+                                const norm = pos === 'Abyssal' ? 'Abyssal Dragon' : (pos === 'Support' ? 'Roam' : pos)
+                                return missingRoles.includes(norm)
+                            })
+                        })
+
+                        if (neededRecs.length > 0) {
+                            console.log("[Bot] Found recommendation for missing role:", neededRecs[0].hero.name)
+                            bestRec = neededRecs[0]
+                        } else {
+                            // No recommendation found for missing role? 
+                            // Fallback: Search in history or initialHeroes for ANY high WR hero in that role
+                            console.log("[Bot] No recommendation for missing role, checking history...")
+                            const historyRecs = recs.history?.filter(rec => !allyGlobalBans.includes(rec.hero.id)) || []
+                            const neededHistory = historyRecs.filter(r => {
+                                return r.hero.main_position?.some((pos: string) => {
+                                    const norm = pos === 'Abyssal' ? 'Abyssal Dragon' : (pos === 'Support' ? 'Roam' : pos)
+                                    return missingRoles.includes(norm)
+                                })
+                            })
+                            if (neededHistory.length > 0) {
+                                bestRec = neededHistory[0]
+                            } else {
+                                // Ultimate Fallback: Just pick best available hero that fits role from raw list
+                                console.log("[Bot] Deep search for missing role...")
+                                // check initialHeroes excluding unavailable
+                                const excludeIds = [...bannedIds, ...pickedIds, ...allyGlobalBans]
+                                const availableForRole = initialHeroes.filter(h =>
+                                    !excludeIds.includes(h.id) &&
+                                    h.main_position?.some((pos: string) => {
+                                        const norm = pos === 'Abyssal' ? 'Abyssal Dragon' : (pos === 'Support' ? 'Roam' : pos)
+                                        return missingRoles.includes(norm)
+                                    })
+                                ).sort((a, b) => (b.hero_stats?.[0]?.win_rate || 0) - (a.hero_stats?.[0]?.win_rate || 0))
+
+                                if (availableForRole.length > 0) {
+                                    bestHeroId = availableForRole[0].id // Direct assignment
+                                }
+                            }
+                        }
+                    }
+
+                    if (!bestHeroId) {
+                        if (bestRec) {
+                            bestHeroId = bestRec.hero.id
+                        } else if (validRecs.length > 0) {
+                            bestHeroId = validRecs[0].hero.id
+                        }
                     }
                 }
 
                 // Fallback: Random High Win Rate if API fails or no recs
                 if (!bestHeroId) {
                     console.log("🤖 Bot fallback to random high WR")
+                    const excludeIds = currentPhase === 'BAN'
+                        ? [...bannedIds, ...pickedIds, ...opponentGlobalBans]
+                        : [...bannedIds, ...pickedIds, ...allyGlobalBans]
                     const available = initialHeroes.filter(h =>
-                        !bannedIds.includes(h.id) &&
-                        !pickedIds.includes(h.id)
+                        !excludeIds.includes(h.id)
                     ).sort((a, b) => (b.hero_stats?.[0]?.win_rate || 0) - (a.hero_stats?.[0]?.win_rate || 0))
 
                     if (available.length > 0) bestHeroId = available[0].id

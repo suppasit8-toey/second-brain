@@ -180,7 +180,7 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
 
                     <div className="flex items-center gap-4">
                         {/* Back to Lobby Button */}
-                        <Link href="/admin/scrims">
+                        <Link href="/admin/simulator">
                             <Button size="sm" variant="ghost" className="text-slate-400 hover:text-white">
                                 <ArrowLeft className="w-4 h-4 mr-2" />
                                 Back to Lobby

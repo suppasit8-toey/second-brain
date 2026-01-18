@@ -242,8 +242,15 @@ function ComboManagerContent({ initialVersions }: ComboManagerProps) {
             {/* TOP BAR */}
             <div className="glass-card p-4 md:p-6 flex flex-col md:flex-row items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">Combo Duo System</h1>
-                    <p className="text-text-muted mt-1">Manage synergy pairs for the selected patch.</p>
+                    <h1 className="text-3xl font-black text-white tracking-tight flex items-center gap-3">
+                        <div className="p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20">
+                            <LinkIcon className="w-8 h-8 text-emerald-400" />
+                        </div>
+                        Hero Synergies
+                    </h1>
+                    <p className="text-slate-400 text-lg mt-2">
+                        Suggests heroes that form strong registered combos with current ally picks.
+                    </p>
                 </div>
 
                 <div className="flex items-center gap-2 w-full md:w-auto">

@@ -11,9 +11,10 @@ import { Badge } from '@/components/ui/badge';
 interface Props {
     versionId: number;
     onMatchupAdded?: () => void;
+    onCountChange?: (count: number) => void;
 }
 
-export default function MatchupSuggestions({ versionId, onMatchupAdded }: Props) {
+export default function MatchupSuggestions({ versionId, onMatchupAdded, onCountChange }: Props) {
     const [suggestions, setSuggestions] = useState<any[]>([]);
     const [pool, setPool] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
@@ -42,6 +43,12 @@ export default function MatchupSuggestions({ versionId, onMatchupAdded }: Props)
     useEffect(() => {
         if (versionId) loadSuggestions();
     }, [versionId]);
+
+    useEffect(() => {
+        if (onCountChange) {
+            onCountChange(suggestions.length + pool.length);
+        }
+    }, [suggestions, pool, onCountChange]);
 
     // Helper to remove an item and optionally fill from pool
     const removeAndReplace = (itemToRemove: any) => {
