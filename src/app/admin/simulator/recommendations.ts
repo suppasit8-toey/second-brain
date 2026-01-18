@@ -246,6 +246,82 @@ export async function getRecommendations(
         }
     }
 
+    // --- 1.1 Scrim Simulator Specific Stats (For Ban Strategy) ---
+    // Enhanced: Phase-specific ban tracking
+    const scrimBanStats: Record<string, number> = {} // HeroID -> Ban Count (legacy, all phases combined)
+    const scrimPhase1Bans: Record<string, { count: number, slots: number[] }> = {} // BAN slots 1-4
+    const scrimPhase2Bans: Record<string, { count: number, slots: number[] }> = {} // BAN slots 11-14
+    const enemyMVPHeroes: Record<string, { mvpCount: number, wins: number, games: number }> = {} // Enemy's Key Players (MVP heroes)
+
+    if (context?.targetTeamName && context.targetTeamName !== 'Cerebro AI') {
+        const searchName = context.targetTeamName.replace(/\(Bot\)/i, '').trim()
+        console.log("[DEBUG] Fetching Scrim Bans for:", searchName)
+        const { data: scrimGames } = await supabase.from('draft_games')
+            .select(`winner, blue_team_name, red_team_name, blue_key_player_id, red_key_player_id, picks:draft_picks(hero_id, side, type, pick_order:position_index), match:draft_matches!inner(status, match_type, team_a_name, team_b_name)`)
+            .or(`blue_team_name.ilike.%${searchName}%,red_team_name.ilike.%${searchName}%`)
+            .eq('match.match_type', 'scrim_simulator') // STRICTLY Full Draft Simulator
+            .neq('match.status', 'ongoing')
+            .order('created_at', { ascending: false })
+            .limit(50) // Analyze last 50 scrims
+
+        if (scrimGames) {
+            console.log("[DEBUG] Found Scrim Games:", scrimGames.length)
+            scrimGames.forEach((g: any) => {
+                const targetName = searchName?.toLowerCase()
+                let isBlue = g.blue_team_name?.toLowerCase()?.includes(targetName)
+                let isRed = g.red_team_name?.toLowerCase()?.includes(targetName)
+                if (!isBlue && !isRed && g.match) {
+                    if (g.match.team_a_name?.toLowerCase()?.includes(targetName)) isBlue = true
+                    else if (g.match.team_b_name?.toLowerCase()?.includes(targetName)) isRed = true
+                }
+                if (!isBlue && !isRed) return
+                const mySide = isBlue ? 'BLUE' : 'RED'
+                const enemySide = isBlue ? 'RED' : 'BLUE'
+                const myWon = (g.winner === 'Blue' && isBlue) || (g.winner === 'Red' && isRed)
+
+                // Track our bans by phase
+                g.picks?.forEach((p: any) => {
+                    if (p.side === mySide && p.type === 'BAN') {
+                        scrimBanStats[p.hero_id] = (scrimBanStats[p.hero_id] || 0) + 1
+
+                        // Phase-specific tracking based on slot
+                        const slot = p.pick_order || 0
+                        if (slot >= 1 && slot <= 4) {
+                            // Phase 1 bans
+                            if (!scrimPhase1Bans[p.hero_id]) scrimPhase1Bans[p.hero_id] = { count: 0, slots: [] }
+                            scrimPhase1Bans[p.hero_id].count++
+                            if (!scrimPhase1Bans[p.hero_id].slots.includes(slot)) {
+                                scrimPhase1Bans[p.hero_id].slots.push(slot)
+                            }
+                        } else if (slot >= 11 && slot <= 14) {
+                            // Phase 2 bans
+                            if (!scrimPhase2Bans[p.hero_id]) scrimPhase2Bans[p.hero_id] = { count: 0, slots: [] }
+                            scrimPhase2Bans[p.hero_id].count++
+                            if (!scrimPhase2Bans[p.hero_id].slots.includes(slot)) {
+                                scrimPhase2Bans[p.hero_id].slots.push(slot)
+                            }
+                        }
+                    }
+                })
+
+                // Track enemy MVP heroes (Key Players)
+                const enemyMVPId = isBlue ? g.red_key_player_id : g.blue_key_player_id
+                if (enemyMVPId) {
+                    if (!enemyMVPHeroes[enemyMVPId]) {
+                        enemyMVPHeroes[enemyMVPId] = { mvpCount: 0, wins: 0, games: 0 }
+                    }
+                    enemyMVPHeroes[enemyMVPId].mvpCount++
+                    enemyMVPHeroes[enemyMVPId].games++
+                    if (!myWon) enemyMVPHeroes[enemyMVPId].wins++ // Enemy won with this MVP
+                }
+            })
+            console.log("[DEBUG] Scrim Phase1 Bans:", Object.keys(scrimPhase1Bans).length)
+            console.log("[DEBUG] Scrim Phase2 Bans:", Object.keys(scrimPhase2Bans).length)
+            console.log("[DEBUG] Enemy MVP Heroes:", Object.keys(enemyMVPHeroes).length)
+        }
+    }
+
+
     // Capture Enemy Stats
     const enemyTeamStats = { wins: 0, games: 0, heroStats: {} as Record<string, { picks: number, wins: number }> }
     if (context?.enemyTeamName && context.enemyTeamName !== 'Cerebro AI') {
@@ -303,6 +379,37 @@ export async function getRecommendations(
         const isPhase1 = currentBanSlot <= 4  // First 4 bans = Phase 1
         const isPhase2 = currentBanSlot > 4   // Last 2 bans = Phase 2
 
+        // --- SCENARIO: Recording Mode Full Draft Simulator Analysis ---
+        // Priority 1: Historical Phase-Specific Bans from Scrim Logs
+        if (isPhase1 && scrimPhase1Bans[h.id]) {
+            const phaseData = scrimPhase1Bans[h.id]
+            if (phaseData.count > 0) {
+                const scrimBonus = Math.min(phaseData.count * 25, 75) // High weight for phase-specific data
+                score += scrimBonus
+                const slotInfo = phaseData.slots.length > 0 ? ` (Slots ${phaseData.slots.join(',')})` : ''
+                reasons.push(`🎯 Scrim P1 Ban (${phaseData.count}x)${slotInfo}`)
+            }
+        } else if (isPhase1 && scrimBanStats[h.id]) {
+            // Fallback to general scrim ban stats if no phase-specific data
+            const count = scrimBanStats[h.id]
+            if (count > 0) {
+                const scrimBonus = Math.min(count * 15, 45)
+                score += scrimBonus
+                reasons.push(`📊 Scrim Ban Pattern (${count}x)`)
+            }
+        }
+
+        // --- PHASE 1: Enemy MVP Heroes - Priority Ban Target ---
+        if (isPhase1 && enemyMVPHeroes[h.id]) {
+            const mvpData = enemyMVPHeroes[h.id]
+            if (mvpData.mvpCount >= 1) {
+                const mvpWinRate = mvpData.games > 0 ? (mvpData.wins / mvpData.games) * 100 : 0
+                const mvpBonus = Math.min(mvpData.mvpCount * 30, 90) + (mvpWinRate > 60 ? 20 : 0)
+                score += mvpBonus
+                reasons.push(`⭐ Enemy MVP (${mvpData.mvpCount}x, ${mvpWinRate.toFixed(0)}% WR)`)
+            }
+        }
+
         // --- PHASE 1: Use Ban Statistics + Enemy Team's Preferred Heroes ---
         if (isPhase1) {
             // Check if hero is in enemy team's hero pool (they pick it often)
@@ -310,7 +417,7 @@ export async function getRecommendations(
             if (enemyHeroStat && enemyHeroStat.picks >= 2) {
                 const enemyPoolBonus = Math.min(enemyHeroStat.picks * 8, 30)
                 score += enemyPoolBonus
-                reasons.push(`Enemy Pool (${enemyHeroStat.picks} games) +${enemyPoolBonus}`)
+                reasons.push(`Enemy Pool (${enemyHeroStat.picks} games)`)
             }
 
             // [Strategy] Team Ban Pattern (Historical Bans for this Slot & Phase)
@@ -322,7 +429,7 @@ export async function getRecommendations(
                         const banCount = slotBans[h.id]
                         const frequencyBonus = Math.min(banCount * 15, 45) // Boosted
                         score += frequencyBonus
-                        reasons.push(`Team Pattern (Slot ${context.pickOrder}) - ${banCount} Bans`)
+                        reasons.push(`Team Pattern (Slot ${context.pickOrder})`)
                     }
                 }
 
@@ -341,10 +448,7 @@ export async function getRecommendations(
                     score += generalBonus
                     // e.g. "Create a solid baseline for frequent bans"
                     if (!reasons.some(r => r.includes('Team Pattern'))) {
-                        reasons.push(`Freq. Opening Ban (${phase1BanCount}) +${generalBonus}`)
-                    } else {
-                        // If slot match already exists, this reinforces it slightly silently or we can show it
-                        // Let's just add to score silently to make it "Very Recommended"
+                        reasons.push(`Freq. Opening Ban (${phase1BanCount})`)
                     }
                 }
             }
@@ -352,18 +456,86 @@ export async function getRecommendations(
             // S/A Tier Meta picks are priority bans in Phase 1
             if (h.hero_stats?.[0]?.tier === 'S') {
                 score += 15
-                reasons.push('S Tier Meta Target')
+                reasons.push('S Tier Meta')
             } else if (h.hero_stats?.[0]?.tier === 'A') {
                 score += 8
                 reasons.push('A Tier Meta')
             }
         }
 
-        // --- PHASE 2: High-Impact Denial - Target heroes that counter our comp ---
+        // --- PHASE 2: High-Impact Denial (Counter & Protect) ---
         if (isPhase2) {
             const totalPicks = allyHeroIds.length + enemyHeroIds.length
 
-            // 2.1 Predict Enemy Missing Roles and ban what they likely need
+            // 2.0 Historical Phase 2 Bans from Scrim
+            if (scrimPhase2Bans[h.id]) {
+                const phaseData = scrimPhase2Bans[h.id]
+                if (phaseData.count > 0) {
+                    const scrimBonus = Math.min(phaseData.count * 30, 90)
+                    score += scrimBonus
+                    const slotInfo = phaseData.slots.length > 0 ? ` (Slots ${phaseData.slots.join(',')})` : ''
+                    reasons.push(`🎯 Scrim P2 Ban (${phaseData.count}x)${slotInfo}`)
+                }
+            }
+
+            // 2.0b Enemy MVP Heroes - Also Priority in Phase 2
+            if (enemyMVPHeroes[h.id]) {
+                const mvpData = enemyMVPHeroes[h.id]
+                if (mvpData.mvpCount >= 1) {
+                    const mvpWinRate = mvpData.games > 0 ? (mvpData.wins / mvpData.games) * 100 : 0
+                    const mvpBonus = Math.min(mvpData.mvpCount * 25, 75) + (mvpWinRate > 60 ? 15 : 0)
+                    score += mvpBonus
+                    reasons.push(`⭐ Enemy MVP (${mvpData.mvpCount}x)`)
+                }
+            }
+
+            // 2.1 Protect Our Picks (Ban Enemy Counters to Pick 1-3)
+            // Look for heroes that win against OUR already picked heroes
+            const allyHeroes = heroes.filter(ah => allyHeroIds.includes(ah.id))
+            let protectScore = 0
+            const counteredAllies: string[] = []
+
+            // Iterate our team - picks 1-3 are most important to protect
+            for (let i = 0; i < allyHeroes.length && i < 3; i++) {
+                const ally = allyHeroes[i]
+                // Find enemies that counter 'ally'
+                const vsAlly = relativeMatchups?.find(m => m.hero_id === h.id && m.enemy_hero_id === ally.id)
+                if (vsAlly && vsAlly.win_rate > 53) { // 53% threshold
+                    const threat = (vsAlly.win_rate - 50) * 4 // Higher multiplier for Pick 1-3
+                    protectScore += threat
+                    counteredAllies.push(ally.name)
+                }
+            }
+
+            // Also check remaining picks (Pick 4-5 area) but with lower weight
+            for (let i = 3; i < allyHeroes.length; i++) {
+                const ally = allyHeroes[i]
+                const vsAlly = relativeMatchups?.find(m => m.hero_id === h.id && m.enemy_hero_id === ally.id)
+                if (vsAlly && vsAlly.win_rate > 55) { // Higher threshold for late picks
+                    const threat = (vsAlly.win_rate - 50) * 2
+                    protectScore += threat
+                    counteredAllies.push(ally.name)
+                }
+            }
+
+            if (protectScore > 0) {
+                score += protectScore
+                reasons.push(`⚔️ Counters: ${counteredAllies.slice(0, 2).join(', ')}`)
+            }
+
+            // 2.2 Deny Enemy Win Conditions (Comfort Picks)
+            // If Enemy plays this hero often and wins often -> Ban it
+            const enemyHeroStat = enemyTeamStats?.heroStats?.[h.id]
+            if (enemyHeroStat && enemyHeroStat.picks >= 1) { // Even 1 game in scrim is signal
+                const enemyWR = (enemyHeroStat.wins / enemyHeroStat.picks) * 100
+                if (enemyWR >= 60 || enemyHeroStat.picks >= 3) {
+                    const comfortBonus = 30 + (enemyHeroStat.picks * 5)
+                    score += comfortBonus
+                    reasons.push(`Enemy Comfort (${enemyHeroStat.picks}g, ${enemyWR.toFixed(0)}% WR)`)
+                }
+            }
+
+            // 2.3 Predict Missing Roles (Standard Logic preserved)
             if (totalPicks >= 6) {
                 const enemyHeroes = heroes.filter(eh => enemyHeroIds.includes(eh.id))
                 const enemyRolesFilled = new Set<string>()
@@ -373,34 +545,8 @@ export async function getRecommendations(
                 const missingRoles = roles.filter(r => !enemyRolesFilled.has(r))
 
                 if (h.main_position?.some((p: string) => missingRoles.includes(p))) {
-                    score += 25
-                    reasons.push(`Deny ${h.main_position[0]} (Enemy needs role)`)
-                }
-            }
-
-            // 2.2 Calculate Impact Score: Heroes that counter our picked heroes
-            // High priority: ban heroes that have good matchups against our team
-            const allyHeroes = heroes.filter(ah => allyHeroIds.includes(ah.id))
-            let impactScore = 0
-            for (const ally of allyHeroes) {
-                // Check if 'h' counters any of our allies (via matchup data if available)
-                const matchup = relativeMatchups?.find(m => m.hero_id === h.id && m.enemy_hero_id === ally.id)
-                if (matchup && matchup.win_rate > 55) {
-                    impactScore += (matchup.win_rate - 50) * 2
-                }
-            }
-            if (impactScore > 0) {
-                score += impactScore
-                reasons.push(`Counters Our Comp +${Math.round(impactScore)}`)
-            }
-
-            // 2.3 Enemy team's best heroes with high win rates
-            const enemyHeroStat = enemyTeamStats?.heroStats?.[h.id]
-            if (enemyHeroStat && enemyHeroStat.picks >= 2) {
-                const enemyWR = (enemyHeroStat.wins / enemyHeroStat.picks) * 100
-                if (enemyWR >= 60) {
-                    score += 20
-                    reasons.push(`Enemy WR ${enemyWR.toFixed(0)}% (Danger)`)
+                    score += 15
+                    reasons.push(`Deny Role: ${h.main_position[0]}`)
                 }
             }
         }
@@ -415,6 +561,8 @@ export async function getRecommendations(
 
         smartBanScores[h.id] = { score, reasons }
     })
+
+    console.log('[DEBUG] SmartBan Scores count:', Object.keys(smartBanScores).length)
 
     // Logic 2: Counter First Pick / Counter Us
     if (context?.phase === 'BAN') {
@@ -824,6 +972,69 @@ export async function getRecommendations(
         .filter(Boolean)
         .sort((a, b) => b!.score - a!.score) as Recommendation[]
 
+    // --- NEW: Phase-specific ban recommendations ---
+    // Filter bans that are specifically strong for Phase 1 (based on scrim P1 data and MVP)
+    const smartBanPhase1 = Object.entries(smartBanScores)
+        .map(([id, s]) => {
+            const h = heroes?.find(x => x.id === id)
+            if (!h) return null
+            // Boost score for Phase 1 specific indicators
+            let phase1Score = s.score
+            if (scrimPhase1Bans[id]) phase1Score += 20
+            if (enemyMVPHeroes[id]) phase1Score += 30
+            return {
+                hero: h,
+                score: phase1Score,
+                reason: s.reasons.filter(r => r.includes('P1') || r.includes('MVP') || r.includes('Scrim') || r.includes('Pool') || r.includes('Tier')).join(' • ') || s.reasons.slice(0, 2).join(' • '),
+                type: 'ban' as const,
+                phase: 'PHASE_1' as const
+            }
+        })
+        .filter(Boolean)
+        .sort((a, b) => b!.score - a!.score)
+        .slice(0, 12) as any[]
+
+    // Filter bans that are specifically strong for Phase 2 (based on counter analysis and P2 scrim data)
+    const smartBanPhase2 = Object.entries(smartBanScores)
+        .map(([id, s]) => {
+            const h = heroes?.find(x => x.id === id)
+            if (!h) return null
+            // Boost score for Phase 2 specific indicators
+            let phase2Score = s.score
+            if (scrimPhase2Bans[id]) phase2Score += 30
+            if (s.reasons.some(r => r.includes('Counter'))) phase2Score += 25
+            return {
+                hero: h,
+                score: phase2Score,
+                reason: s.reasons.filter(r => r.includes('P2') || r.includes('Counter') || r.includes('Comfort') || r.includes('Deny')).join(' • ') || s.reasons.slice(0, 2).join(' • '),
+                type: 'ban' as const,
+                phase: 'PHASE_2' as const
+            }
+        })
+        .filter(Boolean)
+        .sort((a, b) => b!.score - a!.score)
+        .slice(0, 12) as any[]
+
+    // --- NEW: Enemy Key Heroes (MVP Heroes remaining) ---
+    const enemyKeyHeroesFormatted = Object.entries(enemyMVPHeroes)
+        .map(([id, data]) => {
+            const h = heroes?.find(x => x.id === id)
+            if (!h) return null
+            const isBanned = bannedHeroIds.includes(id)
+            const isPicked = enemyHeroIds.includes(id)
+            return {
+                hero: h,
+                mvpCount: data.mvpCount,
+                wins: data.wins,
+                games: data.games,
+                winRate: data.games > 0 ? (data.wins / data.games) * 100 : 0,
+                status: isBanned ? 'BANNED' : isPicked ? 'PICKED' : 'AVAILABLE'
+            }
+        })
+        .filter(Boolean)
+        .sort((a, b) => b!.mvpCount - a!.mvpCount || b!.winRate - a!.winRate)
+        .slice(0, 6) as any[]
+
     // FALLBACK: If smartBan is empty (no stats), use Top Picks (Meta) as Ban Suggestions
     if (smartBanRecs.length === 0) {
         console.log("Avoid empty Ban list: Fallback to Meta Picks")
@@ -834,11 +1045,17 @@ export async function getRecommendations(
         }))
     }
 
+    console.log('[DEBUG] Return Phase1:', smartBanPhase1.length, 'Phase2:', smartBanPhase2.length, 'SmartBan:', smartBanRecs.length)
+
     return {
         analyst: sortedRecs,
         history: sortedRecs,
         hybrid: sortedRecs,
         smartBan: smartBanRecs,
+        // NEW: Phase-specific recommendations
+        smartBanPhase1,
+        smartBanPhase2,
+        enemyKeyHeroes: enemyKeyHeroesFormatted,
         warning: warningMessage,
         heroPools: {
             ally: formatPool(teamStats),

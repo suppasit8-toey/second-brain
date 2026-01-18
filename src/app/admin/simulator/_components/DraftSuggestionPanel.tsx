@@ -42,11 +42,17 @@ export default function DraftSuggestionPanel({
     const [isCollapsed, setIsCollapsed] = useState(false);
 
     // Auto-generate when active phase starts
+    // For BAN phase, suggestions are set by DraftInterface from Strategic Bans
+    // For PICK phase, auto-generate hybrid suggestions
     useEffect(() => {
         if (isActive && suggestions.length === 0 && !isLoading) {
-            onGenerate('hybrid');
+            const isBanPhase = upcomingSlots[0]?.type === 'BAN';
+            // Only auto-generate for PICK phase, BAN phase is handled by DraftInterface
+            if (!isBanPhase) {
+                onGenerate('hybrid');
+            }
         }
-    }, [isActive, suggestions.length, isLoading, onGenerate]);
+    }, [isActive, suggestions.length, isLoading, onGenerate, upcomingSlots]);
 
     const borderColor = side === 'BLUE' ? 'border-blue-500/30' : 'border-red-500/30';
     const bgColor = side === 'BLUE' ? 'bg-blue-950/20' : 'bg-red-950/20';
@@ -129,7 +135,12 @@ export default function DraftSuggestionPanel({
 
                     {/* Results Grid */}
                     <div className="grid grid-cols-4 gap-2 min-h-[60px]">
-                        {suggestions.length > 0 ? (
+                        {isLoading ? (
+                            <div className="col-span-4 flex items-center justify-center py-6">
+                                <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
+                                <span className="ml-2 text-xs text-slate-400">Loading recommendations...</span>
+                            </div>
+                        ) : suggestions.length > 0 ? (
                             suggestions.map((s) => (
                                 <button
                                     key={s.hero.id}
@@ -155,11 +166,9 @@ export default function DraftSuggestionPanel({
                                 </button>
                             ))
                         ) : (
-                            !isLoading && (
-                                <div className="col-span-4 text-center text-xs text-slate-500 py-4 italic">
-                                    Ready to assist. Select mode and generate.
-                                </div>
-                            )
+                            <div className="col-span-4 text-center text-xs text-slate-500 py-4 italic">
+                                Ready to assist. Select mode and generate.
+                            </div>
                         )}
                     </div>
                 </CardContent>

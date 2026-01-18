@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react'
+import { useState, useEffect, forwardRef, useImperativeHandle, useMemo, useRef } from 'react'
 import { DraftGame, DraftMatch, Hero } from '@/utils/types'
 import { useDraftEngine } from './useDraftEngine'
 import { DRAFT_SEQUENCE } from '../constants'
@@ -73,7 +73,9 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         onLockIn: lockIn,
         isPaused: state.isPaused,
         initialHeroes,
-        analysisConfig: currentMode
+        analysisConfig: currentMode,
+        blueSuggestions,
+        redSuggestions
     })
 
     const [selectedHero, setSelectedHero] = useState<Hero | null>(null)
@@ -92,6 +94,17 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     const [opponentPoolRoleFilter, setOpponentPoolRoleFilter] = useState('ALL')
     const [recRoleFilter, setRecRoleFilter] = useState('ALL')
     const [recTypeFilter, setRecTypeFilter] = useState<'PICKS' | 'BANS'>('PICKS')
+    const [banPhase, setBanPhase] = useState<'PHASE_1' | 'PHASE_2'>('PHASE_1')
+    const [banSide, setBanSide] = useState<'BLUE' | 'RED' | 'ALL'>('ALL')
+
+    // Auto-switch to Strategic Bans when in BAN slot, Strategic Picks when in PICK slot
+    useEffect(() => {
+        if (currentStep?.type === 'BAN') {
+            setRecTypeFilter('BANS')
+        } else if (currentStep?.type === 'PICK') {
+            setRecTypeFilter('PICKS')
+        }
+    }, [currentStep?.type])
 
     useEffect(() => {
         const fetchTeamStats = async () => {
@@ -665,6 +678,294 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         ? [...bannedIds, ...pickedIds, ...opponentGlobalBans] // Can ban global bans, but NOT opponent's global bans (waste)
         : [...bannedIds, ...pickedIds, ...currentGlobalBans] // Cannot pick global bans
 
+    // === STRATEGIC BANS JOINT LOGIC (Shared between Advisor & Right Panel) ===
+    // Calculate Strategic Bans for the ACTIVE team
+    const calculatedStrategicBans = useMemo(() => {
+        if (!currentStep?.side || !match.team_a_name || !match.team_b_name) return []
+
+        // Determine names
+        const currentTeamName = currentStep.side === 'BLUE'
+            ? game.red_team_name?.replace(/\s*\(Bot\)\s*$/i, '')
+            : game.blue_team_name?.replace(/\s*\(Bot\)\s*$/i, '')
+        const opponentTeamName = currentStep.side === 'BLUE'
+            ? game.blue_team_name?.replace(/\s*\(Bot\)\s*$/i, '')
+            : game.red_team_name?.replace(/\s*\(Bot\)\s*$/i, '')
+
+        // Get Opponent Stats
+        const opponentStats = teamStats[opponentTeamName || '']
+        const autoDetectedSide = currentStep.side
+        const opponentPlaysSide = autoDetectedSide === 'BLUE' ? 'BLUE' : 'RED'
+
+        // Helper: Get top heroes
+        const getTopHeroesForSlots = (slots: number[]) => {
+            const aggregated: Record<string, number> = {}
+            const getBanSource = () => {
+                if (opponentStats?.sideStats?.[opponentPlaysSide]?.banOrderStats) {
+                    return opponentStats.sideStats[opponentPlaysSide].banOrderStats
+                }
+                return opponentStats?.banOrderStats
+            }
+
+            const banSource = getBanSource()
+            if (!banSource) return []
+
+            slots.forEach(slot => {
+                const slotData = banSource?.[slot] || {}
+                Object.entries(slotData).forEach(([heroId, count]: [string, any]) => {
+                    aggregated[heroId] = (aggregated[heroId] || 0) + count
+                })
+            })
+
+            return Object.entries(aggregated)
+                .map(([heroId, count]) => {
+                    // Inline hero lookup - use String() to ensure type consistency
+                    const heroFromInitial = initialHeroes?.find(h => String(h.id) === String(heroId))
+                    const heroFromMap = heroMap?.[heroId]
+                    const heroFromStats = opponentStats?.heroStats?.[heroId]
+
+                    const hero = heroFromInitial || {
+                        id: heroId,
+                        name: heroFromMap?.name || heroFromStats?.name || 'Unknown',
+                        icon_url: heroFromMap?.icon_url || heroFromMap?.icon || heroFromStats?.icon || '',
+                        main_position: []
+                    }
+
+                    return {
+                        heroId,
+                        count,
+                        hero,
+                        hasIcon: Boolean(hero.icon_url)
+                    }
+                })
+                .filter(item => item.hero && item.hero.name !== 'Unknown')
+                .sort((a, b) => b.count - a.count)
+        }
+
+        const rawPhase1Bans = getTopHeroesForSlots([1, 2, 3, 4])
+        const rawPhase2Bans = getTopHeroesForSlots([11, 12, 13, 14])
+
+        // Phase 1: Simple historical ban scoring (reduced weight)
+        const transformPhase1Bans = (bans: any[]) => bans.map(b => ({
+            hero: b.hero,
+            score: b.count * 5, // Reduced from ×10 to ×5
+            reason: `${b.count} bans`,
+            type: 'ban'
+        }))
+
+        // Phase 2: Enhanced with matchup analysis
+        const transformPhase2Bans = (bans: any[]) => {
+            // Get our current picks
+            const ourPicks = currentStep?.side === 'BLUE'
+                ? Object.values(state.bluePicks).filter(Boolean) as string[]
+                : Object.values(state.redPicks).filter(Boolean) as string[]
+
+            // Get opponent's current picks to determine remaining positions
+            const opponentPicks = currentStep?.side === 'BLUE'
+                ? Object.values(state.redPicks).filter(Boolean) as string[]
+                : Object.values(state.bluePicks).filter(Boolean) as string[]
+
+            // Determine positions opponent has already taken
+            const takenPositions = new Set<string>()
+            opponentPicks.forEach(pickId => {
+                const pickHero = initialHeroes?.find(h => String(h.id) === String(pickId))
+                pickHero?.main_position?.forEach((pos: string) => takenPositions.add(pos))
+            })
+
+            // All possible positions
+            const allPositions = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
+            const remainingPositions = allPositions.filter(p => !takenPositions.has(p))
+
+            // Get OPPONENT team's stats for matchup scoring
+            // We want to find heroes that opponent plays that BEAT our heroes
+            const opponentTeamName = currentStep?.side === 'BLUE'
+                ? game.red_team_name?.replace(/\s*\(Bot\)\s*$/i, '')
+                : game.blue_team_name?.replace(/\s*\(Bot\)\s*$/i, '')
+            const opponentStats = teamStats[opponentTeamName || '']
+            const opponentLaneMatchups = opponentStats?.laneMatchups || {}
+
+            // Also get opponent's hero pool for predicting Pick 4-5
+            const opponentHeroStats = opponentStats?.heroStats || {}
+
+            return bans.map(b => {
+                const banHeroId = String(b.heroId)
+                const banHero = b.hero
+                let matchupBonus = 0
+                const matchupReasons: string[] = []
+
+                // === MATCHUP SCORING: Check opponent's hero vs our picks ===
+                // Structure: opponentLaneMatchups[role][enemyId][opponentHeroId] = { games, wins }
+                // We need to check: when opponent played banHeroId, how did they do vs our heroes?
+
+                Object.entries(opponentLaneMatchups).forEach(([role, roleMatchups]: [string, any]) => {
+                    // For each of our picked heroes, check if opponent's banHero beat them
+                    ourPicks.forEach(ourHeroId => {
+                        const matchupData = roleMatchups?.[String(ourHeroId)]?.[banHeroId]
+                        if (matchupData && matchupData.games > 0) {
+                            // This is opponent's win rate when playing banHeroId vs ourHeroId
+                            const opponentWinRate = (matchupData.wins / matchupData.games) * 100
+                            // If opponent wins often with this hero vs ours, prioritize banning
+                            if (opponentWinRate > 50) {
+                                const bonus = Math.round(opponentWinRate - 50)
+                                matchupBonus += bonus
+                                const ourHeroName = initialHeroes?.find(h => String(h.id) === String(ourHeroId))?.name || 'Hero'
+                                matchupReasons.push(`Beat ${ourHeroName} ${opponentWinRate.toFixed(0)}%`)
+                            }
+                        }
+                    })
+                })
+
+                // === PREDICT PICK 4-5: Check if banHero is likely to be picked for remaining positions ===
+                if (remainingPositions.length > 0 && banHero.main_position) {
+                    const heroPositions = banHero.main_position || []
+                    const matchesNeededPosition = heroPositions.some((pos: string) => remainingPositions.includes(pos))
+
+                    if (matchesNeededPosition) {
+                        // Check opponent's pick frequency for this hero
+                        const heroStats = opponentHeroStats[banHeroId]
+                        if (heroStats && heroStats.picks >= 3) {
+                            // Bonus based on how often opponent picks this hero
+                            const pickBonus = Math.min(heroStats.picks * 2, 20) // Max 20 bonus
+                            matchupBonus += pickBonus
+
+                            const position = heroPositions.find((pos: string) => remainingPositions.includes(pos))
+                            matchupReasons.push(`Likely ${position} (${heroStats.picks}x picks)`)
+                        }
+                    }
+                }
+
+                // Build reason string
+                const baseReason = `${b.count} bans`
+                const fullReason = matchupReasons.length > 0
+                    ? `${baseReason} • ${matchupReasons.slice(0, 2).join(', ')}`
+                    : baseReason
+
+                return {
+                    hero: b.hero,
+                    score: (b.count * 5) + matchupBonus, // Reduced Ban weight + Matchup bonus
+                    reason: fullReason,
+                    type: 'ban',
+                    matchupBonus,
+                    remainingPositions // For filtering
+                }
+            })
+                // Filter by opponent's remaining positions (only in Phase 2)
+                .filter(b => {
+                    if (remainingPositions.length === 0 || remainingPositions.length === 5) return true
+                    const heroPositions = b.hero.main_position || []
+                    // Keep if hero has at least one position in opponent's remaining slots
+                    return heroPositions.some((pos: string) => remainingPositions.includes(pos))
+                })
+                // Re-sort by new score (matchup bonus included)
+                .sort((a, b) => b.score - a.score)
+        }
+
+        const phase1Bans = transformPhase1Bans(rawPhase1Bans)
+        const phase2Bans = transformPhase2Bans(rawPhase2Bans)
+        const autoDetectedPhase = state.stepIndex < 4 ? 'PHASE_1' : 'PHASE_2'
+        const currentPhaseBans = autoDetectedPhase === 'PHASE_1' ? phase1Bans : phase2Bans
+
+        // Filter unavailable
+        const unavailableIdsSet = new Set(unavailableIds.map(String))
+        return currentPhaseBans.filter((r: any) => !unavailableIdsSet.has(String(r.hero.id)))
+    }, [currentStep?.side, teamStats, game.blue_team_name, game.red_team_name, initialHeroes, heroMap, state.stepIndex, unavailableIds, state.bluePicks, state.redPicks])
+
+    // Calculate Strategic Bans for BLUE team (uses Blue team's own ban history)
+    const blueStrategicBans = useMemo(() => {
+        if (!match.team_a_name || !match.team_b_name) return []
+
+        // Blue team - use Blue team's ban history (what Blue typically bans when playing Blue side)
+        const blueTeamName = game.blue_team_name?.replace(/\s*\(Bot\)\s*$/i, '')
+        const blueStats = teamStats[blueTeamName || '']
+
+        if (!blueStats?.banOrderStats) return []
+
+        // Get bans for Phase 1 or Phase 2
+        const autoDetectedPhase = state.stepIndex < 4 ? 'PHASE_1' : 'PHASE_2'
+        const slots = autoDetectedPhase === 'PHASE_1' ? [1, 2, 3, 4] : [11, 12, 13, 14]
+
+        const aggregated: Record<string, number> = {}
+        const banSource = blueStats.sideStats?.['BLUE']?.banOrderStats || blueStats.banOrderStats
+
+        slots.forEach(slot => {
+            const slotData = banSource?.[slot] || {}
+            Object.entries(slotData).forEach(([heroId, count]: [string, any]) => {
+                aggregated[heroId] = (aggregated[heroId] || 0) + count
+            })
+        })
+
+        const result = Object.entries(aggregated)
+            .map(([heroId, count]) => {
+                const heroFromInitial = initialHeroes?.find(h => String(h.id) === String(heroId))
+                const heroFromMap = heroMap?.[heroId]
+                const hero = heroFromInitial || {
+                    id: heroId,
+                    name: heroFromMap?.name || 'Unknown',
+                    icon_url: heroFromMap?.icon_url || '',
+                    main_position: []
+                }
+                return { hero, score: count * 5, reason: `${count} bans`, type: 'ban', heroId, count }
+            })
+            .filter(item => item.hero.name !== 'Unknown')
+            .sort((a, b) => b.score - a.score)
+
+        // Filter unavailable
+        const unavailableIdsSet = new Set(unavailableIds.map(String))
+        return result.filter((r: any) => !unavailableIdsSet.has(String(r.hero.id)))
+    }, [teamStats, game.blue_team_name, initialHeroes, heroMap, state.stepIndex, unavailableIds, match.team_a_name, match.team_b_name])
+
+    // Calculate Strategic Bans for RED team (uses Red team's own ban history)
+    const redStrategicBans = useMemo(() => {
+        if (!match.team_a_name || !match.team_b_name) return []
+
+        // Red team - use Red team's ban history (what Red typically bans when playing Red side)
+        const redTeamName = game.red_team_name?.replace(/\s*\(Bot\)\s*$/i, '')
+        const redStats = teamStats[redTeamName || '']
+
+        if (!redStats?.banOrderStats) return []
+
+        // Get bans for Phase 1 or Phase 2
+        const autoDetectedPhase = state.stepIndex < 4 ? 'PHASE_1' : 'PHASE_2'
+        const slots = autoDetectedPhase === 'PHASE_1' ? [1, 2, 3, 4] : [11, 12, 13, 14]
+
+        const aggregated: Record<string, number> = {}
+        const banSource = redStats.sideStats?.['RED']?.banOrderStats || redStats.banOrderStats
+
+        slots.forEach(slot => {
+            const slotData = banSource?.[slot] || {}
+            Object.entries(slotData).forEach(([heroId, count]: [string, any]) => {
+                aggregated[heroId] = (aggregated[heroId] || 0) + count
+            })
+        })
+
+        const result = Object.entries(aggregated)
+            .map(([heroId, count]) => {
+                const heroFromInitial = initialHeroes?.find(h => String(h.id) === String(heroId))
+                const heroFromMap = heroMap?.[heroId]
+                const hero = heroFromInitial || {
+                    id: heroId,
+                    name: heroFromMap?.name || 'Unknown',
+                    icon_url: heroFromMap?.icon_url || '',
+                    main_position: []
+                }
+                return { hero, score: count * 5, reason: `${count} bans`, type: 'ban', heroId, count }
+            })
+            .filter(item => item.hero.name !== 'Unknown')
+            .sort((a, b) => b.score - a.score)
+
+        // Filter unavailable
+        const unavailableIdsSet = new Set(unavailableIds.map(String))
+        return result.filter((r: any) => !unavailableIdsSet.has(String(r.hero.id)))
+    }, [teamStats, game.red_team_name, initialHeroes, heroMap, state.stepIndex, unavailableIds, match.team_a_name, match.team_b_name])
+
+    // Refs to track latest strategic bans for async callbacks
+    const blueStrategicBansRef = useRef(blueStrategicBans)
+    const redStrategicBansRef = useRef(redStrategicBans)
+
+    useEffect(() => {
+        blueStrategicBansRef.current = blueStrategicBans
+        redStrategicBansRef.current = redStrategicBans
+    }, [blueStrategicBans, redStrategicBans])
+
     // Fetch Recommendations for BOTH teams when step changes
     useEffect(() => {
         if (!currentStep || state.isFinished) return;
@@ -723,70 +1024,55 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             getRecommendations(match.version_id, currentBluePicks, currentRedPicks, bannedIds, [], blueCtx),
             getRecommendations(match.version_id, currentRedPicks, currentBluePicks, bannedIds, [], redCtx)
         ]).then(([blueData, redData]) => {
-            // Main recommendations (for center panel) - use current side's data
-            if (currentStep.side === 'BLUE') {
-                setRecommendations(blueData)
+            if (currentStep.side === 'BLUE') setRecommendations(blueData)
+            else setRecommendations(redData)
+
+            // Include global bans (heroes already played in previous games) for PICK phase
+            const allUnavailable = new Set([
+                ...bannedIds,
+                ...Object.values(state.bluePicks),
+                ...Object.values(state.redPicks),
+                ...currentGlobalBans,
+                ...opponentGlobalBans
+            ].map(String))
+
+            // BLUE SUGGESTIONS - Use Blue's Strategic Bans for BAN phase
+            let blueFinal: any[] = []
+            if (currentPhase === 'BAN') {
+                if (blueStrategicBansRef.current.length > 0) {
+                    // Use Blue's Strategic Bans (targets Red team)
+                    blueFinal = blueStrategicBansRef.current.slice(0, 8)
+                } else {
+                    // Fallback to smartBan only if no strategic data
+                    blueFinal = (blueData?.smartBan || []).map((r: any) => ({ ...r, phase: 'BAN', type: 'ban' }))
+                        .filter((r: any) => !allUnavailable.has(String(r.hero?.id)))
+                        .slice(0, 8)
+                }
             } else {
-                setRecommendations(redData)
+                // PICK phase
+                blueFinal = (blueData?.hybrid || []).map((r: any) => ({ ...r, phase: 'PICK', type: 'hybrid' }))
+                    .filter((r: any) => !allUnavailable.has(String(r.hero?.id)))
+                    .slice(0, 8)
             }
+            setBlueSuggestions(blueFinal)
 
-            // All unavailable heroes (picked + banned + global bans from BOTH teams)
-            // Global bans = heroes played in previous games of this match
-
-            // Calculate from Blue/Red perspective (not current acting side)
-            // Blue team's global bans = what Blue played before (Blue can't pick again)
-            // Red team's global bans = what Red played before (Red can't pick again)
-            const blueIsTeamA = game.blue_team_name === match.team_a_name
-            const blueGlobalBans = Array.from(blueIsTeamA ? playedHeroesTeamA : playedHeroesTeamB)
-            const redGlobalBans = Array.from(blueIsTeamA ? playedHeroesTeamB : playedHeroesTeamA)
-
-            // All unavailable = picked + banned + ALL global bans
-            const allUnavailable = new Set([...bannedIds, ...currentBluePicks, ...currentRedPicks, ...blueGlobalBans, ...redGlobalBans])
-
-            // For BAN phase: exclude opponent's picks AND opponent's global bans (banning them wastes a slot)
-            // From Blue's POV: Red's picks + Red's global bans = don't suggest banning these
-            // From Red's POV: Blue's picks + Blue's global bans = don't suggest banning these
-            const blueOpponentUnavailable = new Set([...currentRedPicks, ...redGlobalBans])
-            const redOpponentUnavailable = new Set([...currentBluePicks, ...blueGlobalBans])
-
-            // Format Blue suggestions with phase - filter out unavailable heroes
-            // If BAN phase, also filter out Red's picks (Blue shouldn't recommend banning what Red already picked)
-            // Format Blue suggestions
-            const blueBans = (blueData?.smartBan || []).map((r: any) => ({ ...r, phase: 'BAN', type: 'ban' }))
-            const blueRecPicks = (blueData?.hybrid || []).map((r: any) => ({ ...r, phase: 'PICK', type: 'hybrid' }))
-
-            // If BAN phase, show Bans first, then Picks. If PICK phase, show Picks.
-            let blueCombined = currentPhase === 'BAN' ? [...blueBans, ...blueRecPicks] : blueRecPicks
-
-            // Filter unavailable
-            const blueFormatted = blueCombined
-                .filter((r: any) => {
-                    if (!r.hero?.id) return false
-                    if (allUnavailable.has(r.hero.id)) return false
-                    if (currentPhase === 'BAN' && blueOpponentUnavailable.has(r.hero.id)) return false
-                    return true
-                })
-                .slice(0, 8) // Top 8 mixed
-
-            setBlueSuggestions(blueFormatted)
-
-            // Format Red suggestions with phase - filter out unavailable heroes
-            // Format Red suggestions
-            const redBans = (redData?.smartBan || []).map((r: any) => ({ ...r, phase: 'BAN', type: 'ban' }))
-            const redRecPicks = (redData?.hybrid || []).map((r: any) => ({ ...r, phase: 'PICK', type: 'hybrid' }))
-
-            let redCombined = currentPhase === 'BAN' ? [...redBans, ...redRecPicks] : redRecPicks
-
-            const redFormatted = redCombined
-                .filter((r: any) => {
-                    if (!r.hero?.id) return false
-                    if (allUnavailable.has(r.hero.id)) return false
-                    if (currentPhase === 'BAN' && redOpponentUnavailable.has(r.hero.id)) return false
-                    return true
-                })
-                .slice(0, 8)
-
-            setRedSuggestions(redFormatted)
+            // RED SUGGESTIONS - Use Red's Strategic Bans for BAN phase
+            let redFinal: any[] = []
+            if (currentPhase === 'BAN') {
+                if (redStrategicBansRef.current.length > 0) {
+                    // Use Red's Strategic Bans (targets Blue team)
+                    redFinal = redStrategicBansRef.current.slice(0, 8)
+                } else {
+                    redFinal = (redData?.smartBan || []).map((r: any) => ({ ...r, phase: 'BAN', type: 'ban' }))
+                        .filter((r: any) => !allUnavailable.has(String(r.hero?.id)))
+                        .slice(0, 8)
+                }
+            } else {
+                redFinal = (redData?.hybrid || []).map((r: any) => ({ ...r, phase: 'PICK', type: 'hybrid' }))
+                    .filter((r: any) => !allUnavailable.has(String(r.hero?.id)))
+                    .slice(0, 8)
+            }
+            setRedSuggestions(redFinal)
 
             setIsLoadingRecommendations(false)
             setIsBlueSuggestLoading(false)
@@ -803,16 +1089,73 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
     }, [state.stepIndex, state.bluePicks, state.redPicks])
 
+    // Immediately set Advisor suggestions from Strategic Bans when available (BAN phase)
+    // Shows loading until Strategic Bans data is ready
+    useEffect(() => {
+        if (!currentStep) return
+        const isBanPhase = currentStep.type === 'BAN'
+
+        if (isBanPhase) {
+            // Set loading if no data yet
+            if (blueStrategicBans.length === 0 && blueSuggestions.length === 0) {
+                setIsBlueSuggestLoading(true)
+            }
+            if (redStrategicBans.length === 0 && redSuggestions.length === 0) {
+                setIsRedSuggestLoading(true)
+            }
+
+            // Blue Advisor - set data when Strategic Bans is ready
+            if (blueStrategicBans.length > 0 && blueSuggestions.length === 0) {
+                const formatted = blueStrategicBans.slice(0, 8).map((r: any) => ({
+                    hero: r.hero,
+                    score: r.score,
+                    reason: r.reason,
+                    type: 'ban'
+                }))
+                setBlueSuggestions(formatted)
+                setIsBlueSuggestLoading(false)
+            }
+
+            // Red Advisor - set data when Strategic Bans is ready
+            if (redStrategicBans.length > 0 && redSuggestions.length === 0) {
+                const formatted = redStrategicBans.slice(0, 8).map((r: any) => ({
+                    hero: r.hero,
+                    score: r.score,
+                    reason: r.reason,
+                    type: 'ban'
+                }))
+                setRedSuggestions(formatted)
+                setIsRedSuggestLoading(false)
+            }
+        }
+    }, [currentStep?.type, blueStrategicBans.length, redStrategicBans.length, blueSuggestions.length, redSuggestions.length])
+
     const handleGenerateSuggestion = async (side: 'BLUE' | 'RED', mode: string) => {
         const isBlue = side === 'BLUE'
         const setLoading = isBlue ? setIsBlueSuggestLoading : setIsRedSuggestLoading
         const setRecs = isBlue ? setBlueSuggestions : setRedSuggestions
+        const currentPhase = (currentStep?.type === 'BAN' ? 'BAN' : 'PICK') as 'BAN' | 'PICK'
+        const isBanMode = mode === 'ban' || currentPhase === 'BAN'
 
         setLoading(true)
         try {
+            // For BAN phase or ban mode, use team-specific Strategic Bans
+            const teamStrategicBans = isBlue ? blueStrategicBans : redStrategicBans
+            if (isBanMode && teamStrategicBans.length > 0) {
+                const formatted = teamStrategicBans.slice(0, 8).map((r: any) => ({
+                    hero: r.hero,
+                    score: r.score,
+                    reason: r.reason,
+                    type: 'ban'
+                }))
+                setRecs(formatted)
+                setLoading(false)
+                return
+            }
+
+            // For PICK phase or when no strategic data, use getRecommendations
             const allyPicks = isBlue ? Object.values(state.bluePicks) : Object.values(state.redPicks)
             const enemyPicks = isBlue ? Object.values(state.redPicks) : Object.values(state.bluePicks)
-            const currentPhase = (currentStep?.type === 'BAN' ? 'BAN' : 'PICK') as 'BAN' | 'PICK'
 
             // Calculate Pick Order for this side
             const pCount = isBlue ? Object.values(state.bluePicks).filter(Boolean).length : Object.values(state.redPicks).filter(Boolean).length
@@ -840,11 +1183,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             let results: any[] = data.hybrid || []
             if (mode === 'analyst') results = data.analyst
             else if (mode === 'history') results = data.history
-            else if (mode === 'counter') results = data.hybrid // Counter logic often mixed in hybrid, or need specific return
+            else if (mode === 'counter') results = data.hybrid
             else if (mode === 'smartBan') results = data.smartBan
 
             // Map to Suggestion Format
-            // Expected data structure from getRecommendations: { hero, score, reason }[]
             const formatted = results.map((r: any) => ({
                 hero: r.hero,
                 score: r.score,
@@ -863,7 +1205,9 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
     const handleHeroClick = (hero: Hero) => {
         if (unavailableIds.includes(hero.id)) return
-        setSelectedHero(hero)
+        // Look up full hero from initialHeroes using String comparison for type consistency
+        const fullHero = initialHeroes.find(h => String(h.id) === String(hero.id)) || hero
+        setSelectedHero(fullHero)
     }
 
     const handleLockIn = () => {
@@ -873,8 +1217,24 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         }
     }
 
-    // Helper to get hero object
-    const getHero = (id: string) => initialHeroes.find(h => h.id === id)
+    // Helper to get hero object - checks initialHeroes first, then heroMap as fallback
+    const getHero = (id: string) => {
+        const fromInitial = initialHeroes.find(h => h.id === id)
+        if (fromInitial) return fromInitial
+
+        // Fallback to heroMap if not found in initialHeroes
+        const fromMap = heroMap?.[id]
+        if (fromMap) {
+            return {
+                id,
+                name: fromMap.name || 'Unknown',
+                icon_url: fromMap.icon_url || fromMap.icon || '',
+                main_position: []
+            }
+        }
+
+        return undefined
+    }
 
     // Filtering Logic
     const filteredHeroes = initialHeroes.filter(hero => {
@@ -1626,6 +1986,24 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         STRATEGIC BANS
                                     </button>
                                 </div>
+
+                                {/* Auto-detect Phase and Side Info - Only show when BANS mode is active */}
+                                {recTypeFilter === 'BANS' && (
+                                    <div className="mb-2 px-1 shrink-0">
+                                        <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-2 text-center">
+                                            <div className="flex items-center justify-center gap-2 text-xs">
+                                                <span className={`px-2 py-0.5 rounded ${state.stepIndex < 4 ? 'bg-orange-900/50 text-orange-300' : 'bg-red-900/50 text-red-300'}`}>
+                                                    {state.stepIndex < 4 ? '🎯 Phase 1 (Opening)' : '⚔️ Phase 2 (Closing)'}
+                                                </span>
+                                                <span className="text-slate-500">•</span>
+                                                <span className={`px-2 py-0.5 rounded ${currentStep?.side === 'BLUE' ? 'bg-blue-900/50 text-blue-300' : 'bg-red-900/50 text-red-300'}`}>
+                                                    {currentStep?.side === 'BLUE' ? '🔵 Blue Side' : '🔴 Red Side'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <ScrollArea className="flex-1 -mr-2 pr-2">
                                     {(() => {
                                         if (isLoadingRecommendations) {
@@ -1636,6 +2014,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                                 </div>
                                             )
                                         }
+
+
+
+                                        // ... (rest of component) ...
 
                                         const filterByRole = (recs: any[]) => {
                                             if (recRoleFilter === 'ALL') return recs
@@ -1650,9 +2032,25 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                             return recs.filter(r => r.hero.main_position?.includes(targetRole) || r.hero.main_position?.includes(targetRole === 'Abyssal Dragon' ? 'Abyssal' : targetRole))
                                         }
 
-                                        const limit = recRoleFilter === 'ALL' ? 20 : 8
-                                        const banRecs = filterByRole(recommendations.smartBan || []).slice(0, limit)
+                                        const limit = recRoleFilter === 'ALL' ? 12 : 6
+
+                                        // Use calculatedStrategicBans for the Right Panel
+                                        const banRecs = (calculatedStrategicBans.length > 0
+                                            ? filterByRole(calculatedStrategicBans)
+                                            : filterByRole(recommendations.smartBan || [])).slice(0, limit)
+
                                         const pickRecs = filterByRole(recommendations.hybrid || []).slice(0, limit)
+
+                                        // Debug info for variables we removed from scope but might want to log
+                                        const currentTeamName = currentStep?.side === 'BLUE' ? game.red_team_name : game.blue_team_name
+                                        const opponentTeamName = currentStep?.side === 'BLUE' ? game.blue_team_name : game.red_team_name
+                                        const autoDetectedSide = currentStep?.side
+                                        const autoDetectedPhase = state.stepIndex < 4 ? 'PHASE_1' : 'PHASE_2'
+
+                                        console.log('[DEBUG] Ban Recs:', {
+                                            count: banRecs.length,
+                                            source: calculatedStrategicBans.length > 0 ? 'Strategic' : 'Fallback'
+                                        })
 
                                         if ((!banRecs || banRecs.length === 0) && (!pickRecs || pickRecs.length === 0)) {
                                             return (
@@ -1660,7 +2058,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                                     <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center">
                                                         <Brain className="w-6 h-6 text-slate-600" />
                                                     </div>
-                                                    <span className="text-xs">No strategic recommendations found for this context.</span>
+                                                    <span className="text-xs">ไม่พบข้อมูล Scrim สำหรับ {opponentTeamName}</span>
+                                                    <span className="text-[10px] text-slate-600">ต้องมี Full Draft Simulator logs ของ {opponentTeamName}</span>
                                                 </div>
                                             )
                                         }
@@ -1684,8 +2083,14 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                                                     #{idx + 1}
                                                                 </div>
 
-                                                                <div className="relative w-10 h-10 rounded overflow-hidden border border-slate-600 group-hover:border-indigo-400 transition-colors shrink-0">
-                                                                    <Image src={rec.hero.icon_url} alt={rec.hero.name} fill className="object-cover" />
+                                                                <div className="relative w-10 h-10 rounded overflow-hidden border border-slate-600 group-hover:border-indigo-400 transition-colors shrink-0 bg-slate-800">
+                                                                    {rec.hero.icon_url ? (
+                                                                        <Image src={rec.hero.icon_url} alt={rec.hero.name || 'Hero'} fill className="object-cover" />
+                                                                    ) : (
+                                                                        <div className="w-full h-full flex items-center justify-center text-slate-500 text-xs font-bold">
+                                                                            {(rec.hero.name || '?').charAt(0)}
+                                                                        </div>
+                                                                    )}
                                                                 </div>
 
                                                                 <div className="flex-1 min-w-0">
@@ -1727,7 +2132,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         return (
                                             <div className="pb-4">
                                                 <div className="pb-4">
-                                                    {recTypeFilter === 'BANS' && renderList(banRecs, "Strategic Bans", ShieldBan, "text-red-400")}
+                                                    {recTypeFilter === 'BANS' && renderList(banRecs, autoDetectedPhase === 'PHASE_1' ? "Phase 1 Bans (Opening)" : "Phase 2 Bans (Closing)", ShieldBan, "text-red-400")}
                                                     {recTypeFilter === 'PICKS' && renderList(pickRecs, "Strategic Picks", Brain, "text-indigo-400")}
                                                 </div>
                                             </div>
