@@ -320,7 +320,7 @@ export default function DraftCompositionBoard({ stats, teamName, side, setSide, 
                                     </div>
                                     <div className="mt-2 space-y-3">
                                         {slotData.topRoles.length > 0 ? (
-                                            slotData.topRoles.map((r, idx) => (
+                                            slotData.topRoles.map((r: { role: string; pct: number }, idx: number) => (
                                                 <div key={r.role} className="flex items-center justify-between">
                                                     <Badge variant="outline" className={`
                                                         ${idx === 0 ? 'bg-pink-500/10 text-pink-200 border-pink-500/30' : 'text-slate-400 border-slate-700'}
