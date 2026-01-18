@@ -807,16 +807,11 @@ export async function getRecommendations(
         .sort((a, b) => b.score - a.score)
         .slice(0, 20)
 
-    return {
-        analyst: sortedRecs,
-        history: sortedRecs,
-        hybrid: sortedRecs,
-        smartBan: [], // Placeholder, will fill below
-    }
+
 
     let smartBanRecs = Object.entries(smartBanScores)
         .map(([id, s]) => {
-            const h = heroes.find(x => x.id === id)
+            const h = heroes?.find(x => x.id === id)
             if (!h) return null
             return {
                 hero: h,
