@@ -20,12 +20,20 @@ export async function getRecommendations(
         matchId?: string;
         side?: 'BLUE' | 'RED';
         phase?: 'BAN' | 'PICK'; // 'BAN_1' (1-2), 'BAN_2' (3-4), 'PICK_1', 'PICK_2' could be inferred
-        pickOrder?: number; // 0-19?
+        pickOrder?: number; // Team pick order (1-5)
+        draftSlot?: number; // NEW: Actual draft sequence position (5, 8, 9, 16, 17 for Blue picks)
         tournamentId?: string; // New: Filter data by tournament
         targetTeamName?: string; // New: Specific team to emulate
         enemyTeamName?: string; // New: Enemy team for context
     },
-    analysisConfig?: { layers: { id: string, weight: number, isActive: boolean }[] } // NEW: Mode Configuration
+    analysisConfig?: { layers: { id: string, weight: number, isActive: boolean }[] }, // Mode Configuration
+    draftStrategyStats?: {
+        pickOrderStats?: Record<number, Record<string, number>>;
+        sideStats?: {
+            BLUE?: { pickOrderStats?: Record<number, Record<string, number>> };
+            RED?: { pickOrderStats?: Record<number, Record<string, number>> };
+        };
+    } // Draft Strategy Analysis data from CEREBRO
 ) {
     const supabase = await createClient()
 
@@ -899,6 +907,73 @@ export async function getRecommendations(
             }
         }
 
+        // 3.7b [CEREBRO AI] Draft Strategy Analysis - Role Priority per Slot
+        // Use draftSlot (actual draft sequence position like 5, 8, 9, 16, 17) not pickOrder (1-5)
+        if (context?.draftSlot && context?.phase === 'PICK' && draftStrategyStats) {
+            // Get side-specific stats or fall back to general
+            let targetPickOrderStats = draftStrategyStats.pickOrderStats
+            if (context.side === 'BLUE' && draftStrategyStats.sideStats?.BLUE?.pickOrderStats) {
+                targetPickOrderStats = draftStrategyStats.sideStats.BLUE.pickOrderStats
+            } else if (context.side === 'RED' && draftStrategyStats.sideStats?.RED?.pickOrderStats) {
+                targetPickOrderStats = draftStrategyStats.sideStats.RED.pickOrderStats
+            }
+
+            if (targetPickOrderStats && targetPickOrderStats[context.draftSlot]) {
+                const slotRoleStats = targetPickOrderStats[context.draftSlot]
+                const totalPicks = Object.values(slotRoleStats).reduce((a, b) => a + b, 0)
+
+                if (totalPicks > 0 && h.main_position && h.main_position.length > 0) {
+                    // Get sorted roles for this slot
+                    const sortedRoles = Object.entries(slotRoleStats)
+                        .map(([role, count]) => ({ role, count: count as number, pct: ((count as number) / totalPicks) * 100 }))
+                        .sort((a, b) => b.count - a.count)
+
+                    // Check if hero matches any of the top roles
+                    let matchesTopRole = false
+                    for (let roleIdx = 0; roleIdx < sortedRoles.length && roleIdx < 2; roleIdx++) {
+                        const roleData = sortedRoles[roleIdx]
+                        const heroMatchesRole = h.main_position.some((pos: string) =>
+                            pos.toLowerCase().includes(roleData.role.toLowerCase()) ||
+                            roleData.role.toLowerCase().includes(pos.toLowerCase())
+                        )
+
+                        if (heroMatchesRole && roleData.pct >= 20) { // Only count if role appears >= 20% of the time
+                            // Scale bonus by percentage and rank
+                            const baseBonus = roleIdx === 0 ? 40 : 20 // Top role = 40, Second = 20
+                            const scaledBonus = Math.round(baseBonus * (roleData.pct / 100))
+                            const finalBonus = Math.max(scaledBonus, roleIdx === 0 ? 15 : 8) // Minimum bonus
+
+                            score += finalBonus
+                            reasons.push(`Draft Order (Slot #${context.draftSlot}: ${roleData.role} ${Math.round(roleData.pct)}%) +${finalBonus}`)
+                            matchesTopRole = true
+                            break // Only apply highest matching bonus
+                        }
+                    }
+
+                    // 3.7c [Draft Order] Penalty for Wrong Role (if Team strongly prioritizes a role)
+                    // If the top role for this slot is very dominant (>50%) and this hero DOES NOT belong to it, apply penalty
+                    if (!matchesTopRole && sortedRoles.length > 0) {
+                        const topRole = sortedRoles[0]
+                        if (topRole.pct > 50) {
+                            // Check if hero is completely outside the top role
+                            const isSameRole = h.main_position.some((pos: string) =>
+                                pos.toLowerCase().includes(topRole.role.toLowerCase()) ||
+                                topRole.role.toLowerCase().includes(pos.toLowerCase())
+                            )
+
+                            if (!isSameRole) {
+                                // Penalty scale: -20 (at 50%) to -40 (at 100%)
+                                const penaltyBase = 20 + ((topRole.pct - 50) * 0.4)
+                                const penalty = Math.round(penaltyBase) * -1
+                                score += penalty
+                                reasons.push(`Draft Order (Needs ${topRole.role}) ${penalty}`)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 3.8. [First Pick Specific Logic] (NEW)
         if (context?.pickOrder === 1 && !firstPickStats[h.id]) { // Only if we don't already have specific first pick stats (handled below)
             // Generic First Pick Logic if no historical data
@@ -1193,7 +1268,7 @@ export async function getRecommendations(
         .map(h => ({
             hero: h,
             score: analystScores[h.id]?.score || 0,
-            reason: analystScores[h.id]?.reasons.slice(0, 3).join(' • ') || 'Solid Pick',
+            reason: analystScores[h.id]?.reasons.join(' • ') || 'Solid Pick',
             type: 'hybrid' as const
         }))
         .sort((a, b) => b.score - a.score)
@@ -1229,7 +1304,7 @@ export async function getRecommendations(
             return {
                 hero: h,
                 score: phase1Score,
-                reason: s.reasons.filter(r => r.includes('P1') || r.includes('MVP') || r.includes('Scrim') || r.includes('Pool') || r.includes('Tier')).join(' • ') || s.reasons.slice(0, 2).join(' • '),
+                reason: s.reasons.join(' • ') || 'Strategic Ban',
                 type: 'ban' as const,
                 phase: 'PHASE_1' as const
             }
@@ -1250,7 +1325,7 @@ export async function getRecommendations(
             return {
                 hero: h,
                 score: phase2Score,
-                reason: s.reasons.filter(r => r.includes('P2') || r.includes('Counter') || r.includes('Comfort') || r.includes('Deny')).join(' • ') || s.reasons.slice(0, 2).join(' • '),
+                reason: s.reasons.join(' • ') || 'Strategic Ban',
                 type: 'ban' as const,
                 phase: 'PHASE_2' as const
             }

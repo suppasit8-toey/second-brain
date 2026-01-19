@@ -88,14 +88,20 @@ export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initi
                             : Object.values(draftState.redPicks)
                         ).filter(Boolean).map(id => String(id))
 
-                        // Filter suggestions to exclude ALREADY PICKED heroes by ANYONE
+                        // Filter suggestions to exclude ALREADY PICKED heroes and BANNED heroes
+                        const bannedIds = [...draftState.blueBans, ...draftState.redBans].map(String)
                         const availableSuggestions = suggestions.filter((s: any) => {
                             const heroIdStr = String(s.hero.id)
                             const isAlreadyPicked = allPickedIds.includes(heroIdStr)
+                            const isBanned = bannedIds.includes(heroIdStr)
+
                             if (isAlreadyPicked) {
                                 console.log(`🤖 Filtering out ${s.hero.name} - already picked`)
                             }
-                            return !isAlreadyPicked
+                            if (isBanned) {
+                                console.log(`🤖 Filtering out ${s.hero.name} - banned`)
+                            }
+                            return !isAlreadyPicked && !isBanned
                         })
 
                         // 1. Identify Needed Roles

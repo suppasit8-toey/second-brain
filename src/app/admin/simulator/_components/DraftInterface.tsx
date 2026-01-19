@@ -13,7 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown, RefreshCw, Users, Globe, Swords, Link as LinkIcon, User, Target, Settings2, Home, Eye, Zap, Share2 } from 'lucide-react'
+import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown, RefreshCw, Users, Globe, Swords, Link as LinkIcon, User, Target, Settings2, Home, Eye, Zap, Share2, Shield, Ban } from 'lucide-react'
 import Image from 'next/image'
 import PostDraftResult from '@/components/draft/PostDraftResult'
 import { Input } from '@/components/ui/input'
@@ -1219,6 +1219,9 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             const teamPickOrder = currentPhase === 'BAN' ? bCount + 1 : pCount + 1
 
             // Fetch recommendations for THIS side specifically
+            const targetTeamName = (isBlue ? game.blue_team_name : game.red_team_name)?.replace(/\s*\(Bot\)\s*$/i, '') || ''
+            const targetTeamStats = teamStats[targetTeamName] || null
+
             const data = await getRecommendations(
                 match.version_id,
                 allyPicks as string[],
@@ -1230,9 +1233,12 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     phase: currentPhase,
                     side: side,
                     pickOrder: teamPickOrder,
+                    draftSlot: currentStep ? currentStep.orderIndex + 1 : undefined, // Actual draft sequence position (1-18)
                     tournamentId: match.ai_metadata?.settings?.tournamentId,
                     targetTeamName: isBlue ? game.blue_team_name : game.red_team_name
-                }
+                },
+                currentMode ? { layers: currentMode.layers.map((w: any) => ({ id: w.id, weight: w.weight, isActive: w.weight > 0 })) } : undefined,
+                targetTeamStats // Pass CEREBRO Draft Strategy data
             )
 
             // Select array based on mode
@@ -2187,15 +2193,25 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                                                     <div className="flex flex-wrap gap-1 mt-1">
                                                                         {rec.reason.split(' • ').map((r: string, i: number) => {
                                                                             let Icon = Brain
-                                                                            let colorClass = "text-slate-400 bg-slate-800"
+                                                                            let colorClass = "text-slate-400 bg-slate-800 border-slate-700"
 
-                                                                            if (r.includes('Team Pool') || r.includes('Comfort')) { Icon = Users; colorClass = "text-blue-400 bg-blue-900/30 border-blue-800" }
+                                                                            // Positive bonuses
+                                                                            if (r.includes('Base Score')) { Icon = Globe; colorClass = "text-indigo-400 bg-indigo-900/30 border-indigo-800" }
+                                                                            else if (r.includes('Team Pool') || r.includes('Comfort')) { Icon = Users; colorClass = "text-blue-400 bg-blue-900/30 border-blue-800" }
                                                                             else if (r.includes('Meta')) { Icon = Globe; colorClass = "text-purple-400 bg-purple-900/30 border-purple-800" }
-                                                                            else if (r.includes('Counter')) { Icon = Swords; colorClass = "text-red-400 bg-red-900/30 border-red-800" }
+                                                                            else if (r.includes('Hard Counter') || r.includes('Counters ')) { Icon = Swords; colorClass = "text-red-400 bg-red-900/30 border-red-800" }
                                                                             else if (r.includes('Synergy')) { Icon = LinkIcon; colorClass = "text-emerald-400 bg-emerald-900/30 border-emerald-800" }
-                                                                            else if (r.includes('Pool') && !r.includes('Team')) { Icon = User; colorClass = "text-cyan-400 bg-cyan-900/30 border-cyan-800" } // Player Pool
+                                                                            else if (r.includes('Fills ')) { Icon = Target; colorClass = "text-green-400 bg-green-900/30 border-green-800" }
+                                                                            else if (r.includes('Main') && !r.includes('Deny')) { Icon = User; colorClass = "text-cyan-400 bg-cyan-900/30 border-cyan-800" }
+                                                                            else if (r.includes('First Pick')) { Icon = Zap; colorClass = "text-amber-400 bg-amber-900/30 border-amber-800" }
+                                                                            else if (r.includes('Draft Order')) { Icon = Brain; colorClass = "text-pink-400 bg-pink-900/30 border-pink-800" }
+                                                                            else if (r.includes('Slot') || r.includes('Pattern')) { Icon = Target; colorClass = "text-yellow-400 bg-yellow-900/30 border-yellow-800" }
                                                                             else if (r.includes('Deny') || r.includes('Ban')) { Icon = ShieldBan; colorClass = "text-orange-400 bg-orange-900/30 border-orange-800" }
-                                                                            else if (r.includes('Slot')) { Icon = Target; colorClass = "text-yellow-400 bg-yellow-900/30 border-yellow-800" }
+                                                                            else if (r.includes('Protect')) { Icon = Shield; colorClass = "text-teal-400 bg-teal-900/30 border-teal-800" }
+                                                                            else if (r.includes('Pool')) { Icon = User; colorClass = "text-cyan-400 bg-cyan-900/30 border-cyan-800" }
+                                                                            // Negative penalties
+                                                                            else if (r.includes('Countered by') || r.includes('Weak vs')) { Icon = Swords; colorClass = "text-rose-400 bg-rose-900/30 border-rose-800" }
+                                                                            else if (r.includes('Role Filled') || r.includes('Needs ')) { Icon = Ban; colorClass = "text-rose-400 bg-rose-900/30 border-rose-800" }
 
                                                                             return (
                                                                                 <div key={i} className={`text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${colorClass}`}>
