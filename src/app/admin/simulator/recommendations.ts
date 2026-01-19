@@ -138,13 +138,21 @@ export async function getRecommendations(
     }
 
     // --- 2. MATCHUPS & COMBOS (Global & Contextual) ---
-    // Fetch relevant matchups (Advantage vs Enemy)
+    // Fetch relevant matchups (Advantage vs Enemy - we counter them)
     const { data: relativeMatchups } = await supabase
         .from('matchups')
         .select('*')
         .eq('version_id', versionId)
         .in('enemy_hero_id', enemyHeroIds) // We usually look for "Us vs Them" where Them is Enemy
-        .gt('win_rate', 50) // Only good matchups
+        .gt('win_rate', 50) // Only good matchups (we counter them)
+
+    // Fetch matchups where enemy counters us (we lose to them)
+    const { data: counteredByMatchups } = await supabase
+        .from('matchups')
+        .select('*')
+        .eq('version_id', versionId)
+        .in('enemy_hero_id', enemyHeroIds) // Looking for matchups vs enemy heroes
+        .lt('win_rate', 50) // Bad matchups (enemy counters us)
 
     // Fetch relevant combos (Synergy with Ally)
     const { data: relativeCombos } = await supabase
@@ -152,6 +160,19 @@ export async function getRecommendations(
         .select('*')
         .eq('version_id', versionId)
         .in('hero_a_id', allyHeroIds) // Synergy with existing allies
+
+    // NEW: Fetch threats to OUR Team (Candidate Ban counters Our Pick)
+    let threatMatchups: any[] = []
+    if (allyHeroIds.length > 0) {
+        const { data } = await supabase
+            .from('matchups')
+            .select('*')
+            .eq('version_id', versionId)
+            .in('enemy_hero_id', allyHeroIds) // Look for matchups against OUR picks
+            .gt('win_rate', 51) // Candidate Ban wins against Our Pick (>51% - Lowered threshold)
+        threatMatchups = data || []
+        console.log(`[DEBUG] Found ${threatMatchups.length} threat matchups for allies:`, allyHeroIds)
+    }
 
     // --- 1. PREPARE ROSTER & TEAM DATA (Enhanced) ---
     let teamRoster: any[] = []
@@ -253,6 +274,11 @@ export async function getRecommendations(
     const scrimPhase2Bans: Record<string, { count: number, slots: number[] }> = {} // BAN slots 11-14
     const enemyMVPHeroes: Record<string, { mvpCount: number, wins: number, games: number }> = {} // Enemy's Key Players (MVP heroes)
 
+    // NEW: Track opponent hero pool and winning game patterns
+    const opponentHeroPool: Record<string, { picks: number, wins: number }> = {} // Heroes opponent plays
+    const winningGameBans: Record<string, number> = {} // Bans in games we won
+    const firstPickStats: Record<string, { picks: number, wins: number, roles: Set<string> }> = {} // First pick hero stats
+
     if (context?.targetTeamName && context.targetTeamName !== 'Cerebro AI') {
         const searchName = context.targetTeamName.replace(/\(Bot\)/i, '').trim()
         console.log("[DEBUG] Fetching Scrim Bans for:", searchName)
@@ -314,10 +340,46 @@ export async function getRecommendations(
                     enemyMVPHeroes[enemyMVPId].games++
                     if (!myWon) enemyMVPHeroes[enemyMVPId].wins++ // Enemy won with this MVP
                 }
+
+                // NEW: Track opponent hero pool (heroes they play)
+                g.picks?.forEach((p: any) => {
+                    if (p.side === enemySide && p.type === 'PICK') {
+                        if (!opponentHeroPool[p.hero_id]) opponentHeroPool[p.hero_id] = { picks: 0, wins: 0 }
+                        opponentHeroPool[p.hero_id].picks++
+                        if (!myWon) opponentHeroPool[p.hero_id].wins++ // Opponent won with this hero
+                    }
+                })
+
+                // NEW: Track bans in games we WON (good ban pattern)
+                if (myWon) {
+                    g.picks?.forEach((p: any) => {
+                        if (p.side === mySide && p.type === 'BAN') {
+                            winningGameBans[p.hero_id] = (winningGameBans[p.hero_id] || 0) + 1
+                        }
+                    })
+                }
+
+                // NEW: Track first pick stats (slot 5 or 6)
+                g.picks?.forEach((p: any) => {
+                    if (p.side === mySide && p.type === 'PICK' && (p.pick_order === 5 || p.pick_order === 6)) {
+                        const heroId = p.hero_id
+                        if (!firstPickStats[heroId]) firstPickStats[heroId] = { picks: 0, wins: 0, roles: new Set() }
+                        firstPickStats[heroId].picks++
+                        if (myWon) firstPickStats[heroId].wins++
+
+                        // Track role
+                        const hero = heroes.find(h => h.id === heroId)
+                        if (hero?.main_position?.[0]) {
+                            firstPickStats[heroId].roles.add(hero.main_position[0])
+                        }
+                    }
+                })
             })
             console.log("[DEBUG] Scrim Phase1 Bans:", Object.keys(scrimPhase1Bans).length)
             console.log("[DEBUG] Scrim Phase2 Bans:", Object.keys(scrimPhase2Bans).length)
             console.log("[DEBUG] Enemy MVP Heroes:", Object.keys(enemyMVPHeroes).length)
+            console.log("[DEBUG] Opponent Hero Pool:", Object.keys(opponentHeroPool).length)
+            console.log("[DEBUG] First Pick Stats:", Object.keys(firstPickStats).length)
         }
     }
 
@@ -603,15 +665,16 @@ export async function getRecommendations(
         // Or keep Base = 50, then add weighted bonuses.
         // Let's stick to additive model but weighted.
 
+        const reasons: string[] = []
+
         // BASE SCORE (Meta/Global)
         // If meta weight is 0, we shouldn't rely on global winrate? 
         // Let's assume Base is 50.
         let base = h.hero_stats?.[0]?.win_rate || 50
         if (wMeta > 0) {
             score += base
+            reasons.push(`Base Score (${Math.round(base)}% Win Rate) +${Math.round(base)}`)
         }
-
-        const reasons: string[] = []
 
         // 3.1 [Hero Pool] Team Comfort & Win Rate
         if (wComfort > 0) {
@@ -633,16 +696,60 @@ export async function getRecommendations(
             reasons.push(`Meta Pick +${Math.round(metaBonus)}`)
         }
 
-        // 3.3 [Draft Logic] Comparison with Enemy (High Priority)
+        // 3.3 [Draft Logic] Comparison with Enemy - Calculate against ALL enemy heroes
         if (wCounter > 0) {
-            const counterMatch = relativeMatchups?.find(m => m.hero_id === h.id)
-            if (counterMatch) {
-                const enemyName = queryHeroName(counterMatch.enemy_hero_id, heroes)
-                const winAdvantage = counterMatch.win_rate - 50
-                const bonus = Math.max(winAdvantage * 3, 5)
-                const weightedBonus = bonus * wCounter
+            // Find ALL matchups where this hero (h.id) counters any enemy hero
+            const counterMatches = relativeMatchups?.filter(m => m.hero_id === h.id) || []
+
+            if (counterMatches.length > 0) {
+                let totalCounterBonus = 0
+                const counterDetails: string[] = []
+
+                counterMatches.forEach(counterMatch => {
+                    const enemyName = queryHeroName(counterMatch.enemy_hero_id, heroes)
+                    const winAdvantage = counterMatch.win_rate - 50
+                    const bonus = Math.max(winAdvantage * 3, 5)
+                    totalCounterBonus += bonus
+                    counterDetails.push(`${enemyName}`)
+                })
+
+                const weightedBonus = totalCounterBonus * wCounter
                 score += weightedBonus
-                reasons.push(`Hard Counter to ${enemyName} +${Math.round(weightedBonus)}`)
+
+                // Show all countered enemies in reason (Unique names only)
+                const uniqueCounterNames = Array.from(new Set(counterDetails))
+                if (uniqueCounterNames.length === 1) {
+                    reasons.push(`Hard Counter to ${uniqueCounterNames[0]} +${Math.round(weightedBonus)}`)
+                } else {
+                    reasons.push(`Counters ${uniqueCounterNames.join(', ')} +${Math.round(weightedBonus)}`)
+                }
+            }
+
+            // 3.3b [Draft Logic] Penalty for being countered by enemy
+            const counteredMatches = counteredByMatchups?.filter(m => m.hero_id === h.id) || []
+
+            if (counteredMatches.length > 0) {
+                let totalPenalty = 0
+                const counteredByDetails: string[] = []
+
+                counteredMatches.forEach(match => {
+                    const enemyName = queryHeroName(match.enemy_hero_id, heroes)
+                    const winDisadvantage = 50 - match.win_rate // How much below 50%
+                    const penalty = Math.max(winDisadvantage * 2, 5) // Smaller multiplier than counter bonus
+                    totalPenalty += penalty
+                    counteredByDetails.push(`${enemyName}`)
+                })
+
+                const weightedPenalty = totalPenalty * wCounter
+                score -= weightedPenalty
+
+                // Show all enemies that counter us (Unique names only)
+                const uniqueCounteredByNames = Array.from(new Set(counteredByDetails))
+                if (uniqueCounteredByNames.length === 1) {
+                    reasons.push(`Countered by ${uniqueCounteredByNames[0]} -${Math.round(weightedPenalty)}`)
+                } else {
+                    reasons.push(`Weak vs ${uniqueCounteredByNames.join(', ')} -${Math.round(weightedPenalty)}`)
+                }
             }
         }
 
@@ -651,7 +758,11 @@ export async function getRecommendations(
             const synergyCombo = relativeCombos?.find(c => c.hero_b_id === h.id)
             if (synergyCombo) {
                 const partnerName = queryHeroName(synergyCombo.hero_a_id, heroes)
-                const synergyBonus = (synergyCombo.synergy_score / 4) * wSynergy
+                // const synergyBonus = (synergyCombo.synergy_score / 4) * wSynergy // OLD
+
+                // NEW: Fixed +100 as requested
+                const synergyBonus = 100 * wSynergy
+
                 score += synergyBonus
                 reasons.push(`Synergy with ${partnerName} +${Math.round(synergyBonus)}`)
             }
@@ -667,35 +778,113 @@ export async function getRecommendations(
             const allRoles = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
             const neededRoles = allRoles.filter(r => !allyRolesFilled.has(r))
 
-            const fitsRole = h.main_position?.some((p: string) => neededRoles.includes(p))
+            // Find which needed role this hero fits
+            const fittingRole = h.main_position?.find((p: string) => neededRoles.includes(p))
+            const fitsRole = !!fittingRole
 
             if (fitsRole) {
+                // Give bonus for filling a needed role
+                const roleBonus = 30 * wRoster // Bonus for fitting needed role
+                score += roleBonus
+                reasons.push(`Fills ${fittingRole} +${Math.round(roleBonus)}`)
                 const rosterPlayer = teamRoster.find((p: any) => h.main_position?.some((pos: string) => p.roster_role === pos || (p.positions && p.positions.includes(pos))))
 
                 if (rosterPlayer) {
-                    const signatureBonus = 15 * wRoster
+                    let signatureBonus = 15 * wRoster
+                    let bonusReason = `${rosterPlayer.name} Main`
+
+                    // Check player's hero performance (wins/picks from teamStats.heroStats)
+                    const heroStats = teamStats.heroStats[h.id]
+
+                    if (heroStats && heroStats.picks >= 1) {
+                        const winRate = heroStats.wins / heroStats.picks
+                        const winPct = Math.round(winRate * 100)
+
+                        // Add game count to display
+                        bonusReason += ` (${heroStats.wins}W/${heroStats.picks - heroStats.wins}L)`
+
+                        if (heroStats.picks >= 2) {
+                            if (winRate >= 0.7) {
+                                // 70%+ win rate - high bonus
+                                const winBonus = 15 * wRoster
+                                signatureBonus += winBonus
+                            } else if (winRate >= 0.5) {
+                                // 50-69% win rate - moderate bonus
+                                const winBonus = 8 * wRoster
+                                signatureBonus += winBonus
+                            } else if (winRate < 0.4 && heroStats.picks >= 3) {
+                                // Below 40% with 3+ games - penalty
+                                const penalty = 10 * wRoster
+                                signatureBonus -= penalty
+                            }
+                        }
+                    }
+
                     score += signatureBonus
-                    reasons.push(`${rosterPlayer.name} Main +${Math.round(signatureBonus)}`)
+                    reasons.push(`${bonusReason} +${Math.round(signatureBonus)}`)
                 } else {
                     const roleBonus = 10
-                    score += roleBonus // Base role fit isn't multiplied by roster weight?? Maybe it should.
+                    score += roleBonus
+                    reasons.push(`Basic Role Fit +${roleBonus}`)
+                    // Base role fit isn't multiplied by roster weight?? Maybe it should.
                     // Actually, Role Fit is fundamental logic, not just "Roster Dominance". 
                     // But if we are in "Free Style" mode (Roster=0), maybe we don't care about roles? No, Role Fit is constraints.
                     // Keep Role Fit unweighted or weighted by Meta? Let's leave Role Fit as Base Logic (unweighted or weight 1).
                     // BUT penalize missing role heavily.
                 }
-            } else if (allyHeroIds.length >= 3) {
-                score -= 50 // Penalty for bad role fit stays heavy
+            } else {
+                // Hero doesn't fit any needed role - apply heavy penalty
+                // Penalty increases as team gets more complete
+                if (allyHeroIds.length >= 2) {
+                    // Scale penalty: more picks = heavier penalty
+                    // 2 picks = -100, 3 picks = -150, 4 picks = -200
+                    const basePenalty = 100
+                    const scaleFactor = allyHeroIds.length - 1 // 1x at 2 picks, 2x at 3, 3x at 4
+                    const penalty = basePenalty * scaleFactor
+                    score -= penalty
+                    reasons.push(`Role Filled (${h.main_position?.[0] || 'Unknown'}) -${penalty}`)
+                }
             }
         }
 
         // 3.6 [Ban Priority]
-        if (wBan > 0 && enemyKeyPlayerIds.has(h.id)) {
-            const banBonus = 20 * wBan
-            score += banBonus
-            reasons.push(`Deny Enemy Main +${Math.round(banBonus)}`)
+        // 3.6 [Ban Priority]
+        if (context?.phase === 'BAN' || h.is_ban_suggestion) { // Explicitly check if we are in Ban Suggestion Mode
+
+            // 3.6a Deny Enemy Main (Original)
+            if (wBan > 0 && enemyKeyPlayerIds.has(h.id)) {
+                const banBonus = 20 * wBan
+                score += banBonus
+                reasons.push(`Deny Enemy Main +${Math.round(banBonus)}`)
+            }
+
+            // 3.6b [NEW] Protect Comp: Ban heroes that counter US
+            const threats = threatMatchups?.filter(m => m.hero_id === h.id) || []
+            if (threats.length > 0) {
+                let totalThreatBonus = 0
+                const threatNames: string[] = []
+
+                threats.forEach(threat => {
+                    const myHeroName = queryHeroName(threat.enemy_hero_id, heroes)
+                    const winAdvantage = threat.win_rate - 50 // How much Candidate Ban wins against Us
+                    const bonus = Math.max(winAdvantage * 4, 10) // High multiplier for protection
+                    totalThreatBonus += bonus
+                    threatNames.push(myHeroName)
+                })
+
+                const weightedThreat = totalThreatBonus * wBan
+                score += weightedThreat
+
+                const uniqueThreatNames = Array.from(new Set(threatNames))
+                if (uniqueThreatNames.length === 1) {
+                    reasons.push(`Protect ${uniqueThreatNames[0]} (High Threat) +${Math.round(weightedThreat)}`)
+                } else {
+                    reasons.push(`Protect Team (Threatens ${uniqueThreatNames.join(', ')}) +${Math.round(weightedThreat)}`)
+                }
+            }
         }
 
+        // 3.7 [Draft Strategy] Role Priority per Slot
         // 3.7 [Draft Strategy] Role Priority per Slot
         if (context?.pickOrder && teamStats.pickOrderStats) {
             const slotStats = teamStats.pickOrderStats[context.pickOrder]
@@ -707,6 +896,61 @@ export async function getRecommendations(
                     score += bonus
                     reasons.push(`Team Pattern (Slot ${context.pickOrder}) +${bonus}`)
                 }
+            }
+        }
+
+        // 3.8. [First Pick Specific Logic] (NEW)
+        if (context?.pickOrder === 1 && !firstPickStats[h.id]) { // Only if we don't already have specific first pick stats (handled below)
+            // Generic First Pick Logic if no historical data
+        }
+
+        // 3.8a [First Pick] Historical First Pick Pattern
+        if (context?.pickOrder && (context.pickOrder === 1 || context.pickOrder === 2)) { // Slot 1 or 2 (First Pick Phase)
+            if (firstPickStats[h.id]) {
+                const fps = firstPickStats[h.id]
+                const pickRate = fps.picks / teamStats.games
+                const winRate = fps.wins / fps.picks
+
+                const bonus = (pickRate * 20) + (winRate * 30)
+                score += bonus
+                reasons.push(`Team First Pick Preference (${Math.round(winRate * 100)}% WR) +${Math.round(bonus)}`)
+            }
+        }
+
+        // 3.8b [First Pick] Deny Opponent Best Heroes
+        if (context?.pickOrder === 1) {
+            const oppStats = opponentHeroPool[h.id]
+            if (oppStats && oppStats.picks >= 2) {
+                const oppWinRate = oppStats.wins / oppStats.picks
+                if (oppWinRate > 0.6) {
+                    const denyBonus = 40 // High priority to deny
+                    score += denyBonus
+                    reasons.push(`Deny Opponent Main (${Math.round(oppWinRate * 100)}% WR) +${denyBonus}`)
+                }
+            }
+        }
+
+        // 3.8c [First Pick] Counter Opponent Pool (General)
+        // Check if this hero counters many of opponent's frequently played heroes
+        if (context?.pickOrder === 1) {
+            let poolCounterBonus = 0
+            let counteredCount = 0
+
+            Object.entries(opponentHeroPool).forEach(([oppHeroId, stats]) => {
+                if (stats.picks >= 2) { // Only consider heroes they actually play
+                    // Check if h counters oppHeroId
+                    const match = relativeMatchups?.find(m => m.hero_id === h.id && m.enemy_hero_id === oppHeroId)
+                    if (match && match.win_rate > 53) {
+                        poolCounterBonus += 15
+                        counteredCount++
+                    }
+                }
+            })
+
+            if (counteredCount > 0) {
+                const finalBonus = Math.min(poolCounterBonus, 60) // Cap at 60
+                score += finalBonus
+                reasons.push(`Counters Opponent Pool (${counteredCount} heroes) +${finalBonus}`)
             }
         }
 

@@ -3,8 +3,8 @@
 import { useState, useEffect, useTransition } from 'react'
 import { Version, Hero, POSITIONS } from '@/utils/types'
 import { getHeroesByVersion } from '@/app/admin/heroes/actions'
-import { saveMatchups, getMatchups } from '@/app/admin/matchups/actions'
-import { Plus, Search, Save, X, Filter, AlertCircle, Pencil, ChevronDown, Check, Minus, Sparkles } from 'lucide-react'
+import { saveMatchups, getMatchups, checkMatchupConsistency, fixMatchupConsistency } from '@/app/admin/matchups/actions'
+import { Plus, Search, Save, X, Filter, AlertCircle, Pencil, ChevronDown, Check, Minus, Sparkles, Wrench } from 'lucide-react'
 import Image from 'next/image'
 import MatchupSuggestions from '@/app/admin/matchups/_components/MatchupSuggestions'
 
@@ -64,8 +64,41 @@ export default function MatchupManager({ initialVersions, hideAddButton = false 
     // 4. Stats
     const [suggestionCount, setSuggestionCount] = useState(0);
 
+    // 5. Consistency Check
+    const [consistencyCheck, setConsistencyCheck] = useState<{ total: number, inconsistentCount: number, inconsistencies: any[] } | null>(null)
+    const [isFixing, setIsFixing] = useState(false)
+
     // Constants
     const WIN_RATES = Array.from({ length: 19 }, (_, i) => (i + 1) * 5); // [5, 10, ... 95]
+
+    // Handler: Check Matchup Consistency
+    const handleCheckConsistency = async () => {
+        if (!selectedVersionId) return
+        const result = await checkMatchupConsistency(selectedVersionId)
+        setConsistencyCheck(result)
+        if (result.inconsistentCount > 0) {
+            console.log(`Found ${result.inconsistentCount} inconsistent matchups:`, result.inconsistencies.slice(0, 5))
+        }
+    }
+
+    // Handler: Fix Matchup Consistency
+    const handleFixConsistency = async () => {
+        if (!selectedVersionId) return
+        setIsFixing(true)
+        try {
+            const result = await fixMatchupConsistency(selectedVersionId)
+            if (result.success) {
+                alert(`✅ ${result.message}`)
+                setConsistencyCheck(null) // Reset
+            } else {
+                alert(`❌ Error: ${result.message}`)
+            }
+        } catch (err) {
+            console.error(err)
+        } finally {
+            setIsFixing(false)
+        }
+    }
 
     // --- EFFECTS ---
 
@@ -381,6 +414,15 @@ export default function MatchupManager({ initialVersions, hideAddButton = false 
 
                     <div className="flex-1"></div>
 
+                    {/* Fix Data Button */}
+                    <button
+                        onClick={handleCheckConsistency}
+                        className="h-[42px] px-4 rounded-lg flex items-center justify-center gap-2 whitespace-nowrap transition-all font-bold bg-amber-600/20 text-amber-400 border border-amber-500/30 hover:bg-amber-600/30"
+                        title="Check and fix matchup data consistency"
+                    >
+                        <Wrench size={16} /> Fix Data
+                    </button>
+
                     {/* Add Button */}
                     {!hideAddButton && (
                         <button
@@ -396,6 +438,35 @@ export default function MatchupManager({ initialVersions, hideAddButton = false 
                         </button>
                     )}
                 </div>
+
+                {/* Consistency Check Result */}
+                {consistencyCheck && consistencyCheck.inconsistentCount > 0 && (
+                    <div className="mx-4 md:mx-6 mb-4 p-4 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2 text-amber-400">
+                                <AlertCircle size={18} />
+                                <span className="font-bold">Found {consistencyCheck.inconsistentCount} inconsistent matchups</span>
+                            </div>
+                            <button
+                                onClick={handleFixConsistency}
+                                disabled={isFixing}
+                                className="px-4 py-1.5 rounded-lg bg-amber-500 text-black font-bold text-sm hover:bg-amber-400 disabled:opacity-50"
+                            >
+                                {isFixing ? 'Fixing...' : 'Fix All'}
+                            </button>
+                        </div>
+                        <div className="text-xs text-amber-300/70 space-y-1 max-h-32 overflow-y-auto">
+                            {consistencyCheck.inconsistencies.slice(0, 5).map((inc: any, i: number) => (
+                                <div key={i}>
+                                    {inc.heroName} vs {inc.enemyName}: Current reverse={inc.reverseWinRate ?? 'missing'}, Expected={inc.expectedReverseWinRate}%
+                                </div>
+                            ))}
+                            {consistencyCheck.inconsistentCount > 5 && (
+                                <div className="italic">...and {consistencyCheck.inconsistentCount - 5} more</div>
+                            )}
+                        </div>
+                    </div>
+                )}
 
                 {/* 2. BOTTOM ROW: FILTERS & STATS */}
                 {selectedHeroId && (

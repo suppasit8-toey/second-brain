@@ -28,6 +28,16 @@ interface DraftSuggestionPanelProps {
     upcomingSlots?: { type: 'BAN' | 'PICK', slotNum: number }[];
 }
 
+// Position filter icons - using abbreviated text
+const POSITION_ICONS: Record<string, { label: string, color: string }> = {
+    'All': { label: 'ALL', color: 'text-slate-400' },
+    'Dark Slayer': { label: 'DS', color: 'text-red-400' },
+    'Jungle': { label: 'JG', color: 'text-green-400' },
+    'Mid': { label: 'MID', color: 'text-purple-400' },
+    'Abyssal': { label: 'AB', color: 'text-yellow-400' },
+    'Roam': { label: 'SP', color: 'text-cyan-400' }
+}
+
 export default function DraftSuggestionPanel({
     side,
     teamName,
@@ -40,6 +50,25 @@ export default function DraftSuggestionPanel({
     upcomingSlots = []
 }: DraftSuggestionPanelProps) {
     const [isCollapsed, setIsCollapsed] = useState(false);
+    const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
+
+    // Toggle position filter
+    const togglePositionFilter = (pos: string) => {
+        if (pos === 'All') {
+            // Clear all filters
+            setPositionFilters(new Set());
+        } else {
+            setPositionFilters(prev => {
+                const newSet = new Set(prev);
+                if (newSet.has(pos)) {
+                    newSet.delete(pos);
+                } else {
+                    newSet.add(pos);
+                }
+                return newSet;
+            });
+        }
+    };
 
     // Auto-generate when active phase starts
     // For BAN phase, suggestions are set by DraftInterface from Strategic Bans
@@ -57,18 +86,19 @@ export default function DraftSuggestionPanel({
     const borderColor = side === 'BLUE' ? 'border-blue-500/30' : 'border-red-500/30';
     const bgColor = side === 'BLUE' ? 'bg-blue-950/20' : 'bg-red-950/20';
 
-    const getLayerIcon = (id: string) => {
-        switch (id) {
-            case 'meta': return { icon: Globe, color: 'text-purple-400' }
-            case 'counter': return { icon: Swords, color: 'text-red-400' }
-            case 'comfort': return { icon: Users, color: 'text-blue-400' }
-            case 'synergy': return { icon: LinkIcon, color: 'text-emerald-400' }
-            case 'roster': return { icon: Target, color: 'text-cyan-400' }
-            case 'ban': return { icon: ShieldBan, color: 'text-orange-400' }
-            case 'composition': return { icon: Brain, color: 'text-pink-400' }
-            default: return { icon: Brain, color: 'text-slate-400' }
-        }
-    }
+    // Filter suggestions by position (multiple selection)
+    const filteredSuggestions = positionFilters.size === 0
+        ? suggestions
+        : suggestions.filter(s => {
+            const heroPositions = s.hero.main_position || [];
+            // Check if hero matches ANY of the selected filters
+            return Array.from(positionFilters).some(filter => {
+                const normalizedFilter = filter === 'Abyssal' ? ['Abyssal', 'Abyssal Dragon'] : [filter];
+                return heroPositions.some(pos =>
+                    normalizedFilter.some(f => pos.toLowerCase().includes(f.toLowerCase()))
+                );
+            });
+        });
 
     return (
         <Card className={`border ${borderColor} ${bgColor} backdrop-blur-sm transition-all duration-300 ${isCollapsed ? 'h-auto' : ''}`}>
@@ -102,35 +132,27 @@ export default function DraftSuggestionPanel({
             </CardHeader>
             {!isCollapsed && (
                 <CardContent className="p-3 space-y-3 animate-in slide-in-from-top-2 duration-200">
-                    {/* Active Protocols Icons + Phase Badge */}
+                    {/* Position Filter Icons */}
                     <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-hide">
-                        {activeLayers.map(layer => {
-                            const { icon: Icon, color } = getLayerIcon(layer.id);
-                            // Get Path from Metadata if available
-                            const metadata = ANALYSIS_LAYER_METADATA[layer.id];
-                            const path = metadata?.path;
-
-                            const IconContent = (
-                                <div className="p-1.5 rounded bg-slate-900/50 border border-slate-700/50 hover:bg-slate-800 transition-colors cursor-pointer" title={metadata?.name || layer.name}>
-                                    <Icon className={`w-3 h-3 ${color}`} />
-                                </div>
-                            )
-
-                            if (path) {
-                                return (
-                                    <Link key={layer.id} href={path} target="_blank" rel="noopener noreferrer">
-                                        {IconContent}
-                                    </Link>
-                                )
-                            }
-
+                        {Object.entries(POSITION_ICONS).map(([pos, { label, color }]) => {
+                            const isSelected = pos === 'All' ? positionFilters.size === 0 : positionFilters.has(pos);
                             return (
-                                <div key={layer.id}>
-                                    {IconContent}
-                                </div>
-                            )
+                                <button
+                                    key={pos}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        togglePositionFilter(pos);
+                                    }}
+                                    className={`px-2 py-1 rounded border transition-colors cursor-pointer text-[10px] font-bold ${isSelected
+                                        ? `bg-white/10 border-white/30 ${color}`
+                                        : 'bg-slate-900/50 border-slate-700/50 hover:bg-slate-800 text-slate-400'
+                                        }`}
+                                    title={pos}
+                                >
+                                    {label}
+                                </button>
+                            );
                         })}
-                        {activeLayers.length === 0 && <span className="text-[10px] text-slate-500">No active protocols</span>}
                     </div>
 
                     {/* Results Grid */}
@@ -140,8 +162,8 @@ export default function DraftSuggestionPanel({
                                 <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
                                 <span className="ml-2 text-xs text-slate-400">Loading recommendations...</span>
                             </div>
-                        ) : suggestions.length > 0 ? (
-                            suggestions.map((s) => (
+                        ) : filteredSuggestions.length > 0 ? (
+                            filteredSuggestions.map((s) => (
                                 <button
                                     key={s.hero.id}
                                     onClick={(e) => {
@@ -156,15 +178,28 @@ export default function DraftSuggestionPanel({
                                     <div className="text-[9px] font-bold text-slate-300 text-center w-full truncate px-0.5">
                                         {s.hero.name}
                                     </div>
+                                    {/* Score Badge */}
                                     <div className="absolute top-0 right-0 transform translate-x-1/2 -translate-y-1/2 z-10">
                                         <Badge className="px-1 py-0 h-4 text-[8px] min-w-4 justify-center bg-indigo-600 text-white border-0">
                                             {s.score.toFixed(0)}
                                         </Badge>
                                     </div>
+                                    {/* Source Indicator: Strategic Picks (P) or Strategic Bans (B) */}
+                                    <div className={`absolute bottom-6 left-0 text-[7px] font-bold px-1 rounded-tr ${s.phase === 'BAN' || s.type === 'ban'
+                                            ? 'bg-red-600/90 text-white'
+                                            : 'bg-green-600/90 text-white'
+                                        }`}>
+                                        {s.phase === 'BAN' || s.type === 'ban' ? 'B' : 'P'}
+                                    </div>
+                                    {/* Type indicators */}
                                     {s.type === 'counter' && <div className="absolute top-0 left-0 text-[8px] bg-red-900/80 text-red-200 px-1 rounded-br">VS</div>}
                                     {s.type === 'comfort' && <div className="absolute top-0 left-0 text-[8px] bg-blue-900/80 text-blue-200 px-1 rounded-br">★</div>}
                                 </button>
                             ))
+                        ) : suggestions.length > 0 && filteredSuggestions.length === 0 ? (
+                            <div className="col-span-4 text-center text-xs text-slate-500 py-4 italic">
+                                No heroes found for selected positions
+                            </div>
                         ) : (
                             <div className="col-span-4 text-center text-xs text-slate-500 py-4 italic">
                                 Ready to assist. Select mode and generate.

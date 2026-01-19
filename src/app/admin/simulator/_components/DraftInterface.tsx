@@ -13,7 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown, RefreshCw, Users, Globe, Swords, Link as LinkIcon, User, Target, Settings2, Home, Eye, Zap } from 'lucide-react'
+import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown, RefreshCw, Users, Globe, Swords, Link as LinkIcon, User, Target, Settings2, Home, Eye, Zap, Share2 } from 'lucide-react'
 import Image from 'next/image'
 import PostDraftResult from '@/components/draft/PostDraftResult'
 import { Input } from '@/components/ui/input'
@@ -66,6 +66,25 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     // Analysis Mode State
     const [currentMode, setCurrentMode] = useState(DEFAULT_MODES[0])
 
+    // Calculate global bans for bot (heroes played in previous games by opponent Team A)
+    const botOpponentGlobalBans = useMemo(() => {
+        const previousGames = match.games?.filter(g => g.winner) || []
+        const playedHeroesTeamA = new Set<string>()
+
+        previousGames.forEach(prevGame => {
+            const pGame = match.games?.find(g => g.id === prevGame.id)
+            if (!pGame?.picks) return
+            const sideOfA = pGame.blue_team_name === match.team_a_name ? 'BLUE' : 'RED'
+            pGame.picks.forEach(p => {
+                if (p.type === 'PICK' && p.side === sideOfA) {
+                    playedHeroesTeamA.add(p.hero_id)
+                }
+            })
+        })
+
+        return Array.from(playedHeroesTeamA)
+    }, [match.games, match.team_a_name])
+
     useDraftBot({
         game,
         match,
@@ -75,7 +94,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         initialHeroes,
         analysisConfig: currentMode,
         blueSuggestions,
-        redSuggestions
+        redSuggestions,
+        opponentGlobalBans: botOpponentGlobalBans
     })
 
     const [selectedHero, setSelectedHero] = useState<Hero | null>(null)
@@ -893,6 +913,16 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             })
         })
 
+        // Calculate positions already filled by opponent (Red team)
+        const opponentPicks = Object.values(state.redPicks).filter(Boolean) as string[]
+        const opponentFilledPositions = new Set<string>()
+        opponentPicks.forEach(pickId => {
+            const pickHero = initialHeroes?.find(h => String(h.id) === String(pickId))
+            pickHero?.main_position?.forEach((pos: string) => opponentFilledPositions.add(pos))
+        })
+        const ALL_POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
+        const opponentRemainingPositions = ALL_POSITIONS.filter(p => !opponentFilledPositions.has(p))
+
         const result = Object.entries(aggregated)
             .map(([heroId, count]) => {
                 const heroFromInitial = initialHeroes?.find(h => String(h.id) === String(heroId))
@@ -906,12 +936,20 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 return { hero, score: count * 5, reason: `${count} bans`, type: 'ban', heroId, count }
             })
             .filter(item => item.hero.name !== 'Unknown')
+            // Filter: Only keep heroes that can fill opponent's remaining positions (don't ban positions they already have)
+            .filter(item => {
+                // If opponent has 0 or 5 picks, don't filter by position (Phase 1 or all positions filled)
+                if (opponentRemainingPositions.length === 0 || opponentRemainingPositions.length === 5) return true
+                const heroPositions = item.hero.main_position || []
+                // Keep if hero has at least one position that opponent still needs
+                return heroPositions.some((pos: string) => opponentRemainingPositions.includes(pos))
+            })
             .sort((a, b) => b.score - a.score)
 
         // Filter unavailable
         const unavailableIdsSet = new Set(unavailableIds.map(String))
         return result.filter((r: any) => !unavailableIdsSet.has(String(r.hero.id)))
-    }, [teamStats, game.blue_team_name, initialHeroes, heroMap, state.stepIndex, unavailableIds, match.team_a_name, match.team_b_name])
+    }, [teamStats, game.blue_team_name, initialHeroes, heroMap, state.stepIndex, unavailableIds, match.team_a_name, match.team_b_name, state.redPicks])
 
     // Calculate Strategic Bans for RED team (uses Red team's own ban history)
     const redStrategicBans = useMemo(() => {
@@ -937,6 +975,16 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             })
         })
 
+        // Calculate positions already filled by opponent (Blue team)
+        const opponentPicks = Object.values(state.bluePicks).filter(Boolean) as string[]
+        const opponentFilledPositions = new Set<string>()
+        opponentPicks.forEach(pickId => {
+            const pickHero = initialHeroes?.find(h => String(h.id) === String(pickId))
+            pickHero?.main_position?.forEach((pos: string) => opponentFilledPositions.add(pos))
+        })
+        const ALL_POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
+        const opponentRemainingPositions = ALL_POSITIONS.filter(p => !opponentFilledPositions.has(p))
+
         const result = Object.entries(aggregated)
             .map(([heroId, count]) => {
                 const heroFromInitial = initialHeroes?.find(h => String(h.id) === String(heroId))
@@ -950,12 +998,20 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 return { hero, score: count * 5, reason: `${count} bans`, type: 'ban', heroId, count }
             })
             .filter(item => item.hero.name !== 'Unknown')
+            // Filter: Only keep heroes that can fill opponent's remaining positions (don't ban positions they already have)
+            .filter(item => {
+                // If opponent has 0 or 5 picks, don't filter by position (Phase 1 or all positions filled)
+                if (opponentRemainingPositions.length === 0 || opponentRemainingPositions.length === 5) return true
+                const heroPositions = item.hero.main_position || []
+                // Keep if hero has at least one position that opponent still needs
+                return heroPositions.some((pos: string) => opponentRemainingPositions.includes(pos))
+            })
             .sort((a, b) => b.score - a.score)
 
         // Filter unavailable
         const unavailableIdsSet = new Set(unavailableIds.map(String))
         return result.filter((r: any) => !unavailableIdsSet.has(String(r.hero.id)))
-    }, [teamStats, game.red_team_name, initialHeroes, heroMap, state.stepIndex, unavailableIds, match.team_a_name, match.team_b_name])
+    }, [teamStats, game.red_team_name, initialHeroes, heroMap, state.stepIndex, unavailableIds, match.team_a_name, match.team_b_name, state.bluePicks])
 
     // Refs to track latest strategic bans for async callbacks
     const blueStrategicBansRef = useRef(blueStrategicBans)
@@ -1657,10 +1713,15 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                             <h2 className="text-3xl lg:text-4xl font-black text-green-400">DRAFT COMPLETE</h2>
                         ) : (
                             <>
+                                <div className="flex items-center gap-2 mb-[-2px]">
+                                    <span className="text-[10px] text-slate-400 font-medium">
+                                        {match.team_a_name} vs {match.team_b_name}
+                                    </span>
+                                </div>
                                 <span className={`text-[10px] lg:text-xs font-bold tracking-wider uppercase mb-[-4px] ${currentStep?.side === 'BLUE' ? 'text-blue-400' : 'text-red-400'}`}>
                                     {currentStep?.side} SIDE {currentStep?.type}
                                 </span>
-                                <div className="text-5xl lg:text-6xl font-mono font-black tracking-tighter shadow-black drop-shadow-lg">{state.timer}</div>
+                                <div className="text-4xl lg:text-5xl font-mono font-black tracking-tighter shadow-black drop-shadow-lg">{state.timer}</div>
                             </>
                         )}
                     </div>
@@ -1672,14 +1733,35 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                         />
                     </div>
 
-                    {currentGlobalBans.length > 0 && (
-                        <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20 hidden md:flex">
-                            <Badge variant="outline" className="text-[10px] border-slate-600 text-slate-400 flex items-center gap-1 bg-slate-950/80">
-                                <ShieldBan className="w-3 h-3" />
-                                Global Bans Active: {currentGlobalBans.length}
-                            </Badge>
-                        </div>
-                    )}
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20 flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                                const url = `${window.location.origin}/share/draft/${match.id}/${game.id}`
+                                navigator.clipboard.writeText(url)
+                                // Simple visual feedback
+                                const btn = document.getElementById('share-btn-text')
+                                if (btn) btn.innerText = 'Copied!'
+                                setTimeout(() => {
+                                    if (btn) btn.innerText = 'Share'
+                                }, 2000)
+                            }}
+                            className="bg-slate-900/80 border-slate-700 hover:bg-slate-800 text-slate-400 hover:text-cyan-400 transition-colors h-8 text-xs font-bold"
+                        >
+                            <Share2 className="w-3 h-3 mr-2" />
+                            <span id="share-btn-text">Share</span>
+                        </Button>
+
+                        {currentGlobalBans.length > 0 && (
+                            <div className="hidden md:flex">
+                                <Badge variant="outline" className="text-[10px] border-slate-600 text-slate-400 flex items-center gap-1 bg-slate-950/80">
+                                    <ShieldBan className="w-3 h-3" />
+                                    Global Bans Active: {currentGlobalBans.length}
+                                </Badge>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Lock In Button (Moved to Top) */}
@@ -1688,14 +1770,16 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                         size="sm"
                         className={`w-full h-8 font-bold ${state.isFinished
                             ? 'bg-green-600 hover:bg-green-700 animate-pulse text-white'
-                            : (state.isPaused || !selectedHero ? 'opacity-50' : 'animate-pulse')
+                            : state.isPaused
+                                ? 'bg-indigo-600 hover:bg-indigo-700 text-white animate-pulse'
+                                : (!selectedHero ? 'opacity-50' : 'animate-pulse')
                             }`}
-                        disabled={!state.isFinished && (state.isPaused || !selectedHero)}
-                        onClick={state.isFinished ? () => setShowSummary(true) : handleLockIn}
+                        disabled={!state.isFinished && !state.isPaused && !selectedHero}
+                        onClick={state.isFinished ? () => setShowSummary(true) : state.isPaused ? togglePause : handleLockIn}
                     >
                         {state.isFinished
                             ? 'GO TO SUMMARY'
-                            : (state.isPaused ? 'Draft Paused' : selectedHero ? 'LOCK IN' : 'Select Hero')
+                            : (state.isPaused ? (state.timer === 0 ? 'START DRAFT' : 'RESUME DRAFT') : selectedHero ? 'LOCK IN' : 'Select Hero')
                         }
                     </Button>
                 </div>

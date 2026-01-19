@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { Lock, Trophy, ArrowLeft, RefreshCw, Maximize2, Minimize2, Play, Pause } from 'lucide-react'
+import { Lock, Trophy, ArrowLeft, RefreshCw, Maximize2, Minimize2, Play, Pause, Share2, Check } from 'lucide-react'
 import { resetGame, finishMatch } from '../actions'
 import { useUI } from '@/context/UIContext'
 
@@ -34,6 +34,7 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
     const { isFullscreen, toggleFullscreen } = useUI()
     const draftRef = useRef<DraftControls>(null)
     const [isDraftPaused, setIsDraftPaused] = useState(false)
+    const [isMatchCopied, setIsMatchCopied] = useState(false)
 
     // 1. Determine Max Games based on Mode
     const getMaxGames = (mode: string) => {
@@ -186,6 +187,26 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                                 Back to Lobby
                             </Button>
                         </Link>
+
+                        <div className="w-px h-4 bg-slate-800 mx-2" />
+
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 border-indigo-500/30 bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20 hover:text-indigo-200"
+                            onClick={() => {
+                                const url = `${window.location.origin}/share/match/${match.slug || match.id}`
+                                navigator.clipboard.writeText(url)
+                                // We can rely on a toast or button text change here. 
+                                // Since MatchRoom is a bigger component, let's use a simple alert or just changing text for a second?
+                                // Actually, let's add a local state for 'isCopied' to this component to give feedback.
+                                setIsMatchCopied(true)
+                                setTimeout(() => setIsMatchCopied(false), 2000)
+                            }}
+                        >
+                            {isMatchCopied ? <Check className="w-3.5 h-3.5 mr-2" /> : <Share2 className="w-3.5 h-3.5 mr-2" />}
+                            {isMatchCopied ? 'Link Copied!' : 'Share Match'}
+                        </Button>
 
                         <Badge variant="outline" className="h-8 px-3 border-indigo-500/30 text-indigo-300 bg-indigo-500/10">
                             Patch {match.version?.name}

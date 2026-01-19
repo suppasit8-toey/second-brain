@@ -131,16 +131,16 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
         <div className="space-y-6">
             {/* Controls */}
             <div className="flex flex-col md:flex-row gap-4 justify-between items-center bg-white/5 p-4 rounded-xl border border-white/10 backdrop-blur-md">
-                <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2 text-cyan-400">
+                <div className="flex flex-col md:flex-row items-stretch md:items-center gap-4 w-full md:w-auto">
+                    <div className="flex items-center gap-2 text-cyan-400 justify-center md:justify-start">
                         <Brain size={24} />
                         <h2 className="text-xl font-bold tracking-wider">ANALYSIS PROTOCOL</h2>
                     </div>
-                    <div className="h-8 w-[1px] bg-white/10"></div>
+                    <div className="h-px w-full md:h-8 md:w-[1px] bg-white/10"></div>
 
                     {/* Version Selector */}
                     <Select value={versionId} onValueChange={setVersionId}>
-                        <SelectTrigger className="w-[180px] bg-slate-900 border-slate-700 text-white">
+                        <SelectTrigger className="w-full md:w-[180px] bg-slate-900 border-slate-700 text-white">
                             <span className="truncate">
                                 {initialVersions.find(v => String(v.id) === versionId)?.name || "Select Version"}
                             </span>
@@ -156,7 +156,7 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
 
                     {/* Tournament Selector */}
                     <Select value={tournamentId} onValueChange={setTournamentId}>
-                        <SelectTrigger className="w-[180px] bg-slate-900 border-slate-700 text-white">
+                        <SelectTrigger className="w-full md:w-[180px] bg-slate-900 border-slate-700 text-white">
                             <span className="truncate">
                                 {tournaments.find(t => t.id === tournamentId)?.name || "All Tournaments"}
                             </span>
@@ -172,9 +172,9 @@ export default function CerebroDashboard({ initialVersions, defaultVersionId, te
                     </Select>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2 w-full md:w-auto">
                     <Select value={roleFilter} onValueChange={setRoleFilter}>
-                        <SelectTrigger className="w-[140px] bg-slate-900 border-slate-700 text-white">
+                        <SelectTrigger className="w-full md:w-[140px] bg-slate-900 border-slate-700 text-white">
                             <div className="flex items-center gap-2">
                                 <ListFilter size={16} className="text-slate-400" />
                                 <SelectValue placeholder="All Roles" />

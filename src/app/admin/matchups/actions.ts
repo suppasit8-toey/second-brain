@@ -332,3 +332,166 @@ export async function getSuggestedMatchups(versionId: number) {
         winRate: (s.wins / s.games) * 100
     })).sort((a, b) => b.games - a.games) // Prioritize most frequent matchups
 }
+
+// === NEW: Check and Fix Matchup Data Consistency ===
+
+export async function checkMatchupConsistency(versionId: number) {
+    const supabase = await createClient()
+
+    // Fetch all matchups for this version
+    let allMatchups: any[] = []
+    let page = 0
+    const pageSize = 1000
+    while (true) {
+        const { data, error } = await supabase
+            .from('matchups')
+            .select('id, hero_id, position, enemy_hero_id, enemy_position, win_rate')
+            .eq('version_id', versionId)
+            .range(page * pageSize, (page + 1) * pageSize - 1)
+
+        if (error) {
+            console.error('Error fetching matchups:', error)
+            break
+        }
+        if (data && data.length > 0) {
+            allMatchups = allMatchups.concat(data)
+            if (data.length < pageSize) break
+            page++
+        } else {
+            break
+        }
+    }
+
+    // Create lookup map: key = "heroId|position|enemyId|enemyPosition" -> win_rate
+    const matchupMap = new Map<string, { id: string, win_rate: number }>()
+    allMatchups.forEach(m => {
+        const key = `${m.hero_id}|${m.position}|${m.enemy_hero_id}|${m.enemy_position}`
+        matchupMap.set(key, { id: m.id, win_rate: m.win_rate })
+    })
+
+    // Find inconsistencies
+    const inconsistencies: {
+        heroId: string,
+        position: string,
+        enemyId: string,
+        enemyPosition: string,
+        currentWinRate: number,
+        reverseWinRate: number | null,
+        expectedReverseWinRate: number,
+        issue: 'missing_reverse' | 'wrong_reverse'
+    }[] = []
+
+    const checkedPairs = new Set<string>()
+
+    allMatchups.forEach(m => {
+        // Create canonical key to avoid double-checking
+        const pairKey = [m.hero_id, m.enemy_hero_id].sort().join('|')
+        if (checkedPairs.has(pairKey)) return
+        checkedPairs.add(pairKey)
+
+        const forwardKey = `${m.hero_id}|${m.position}|${m.enemy_hero_id}|${m.enemy_position}`
+        const reverseKey = `${m.enemy_hero_id}|${m.enemy_position}|${m.hero_id}|${m.position}`
+
+        const forward = matchupMap.get(forwardKey)
+        const reverse = matchupMap.get(reverseKey)
+
+        if (!forward) return
+
+        const expectedReverseWinRate = 100 - forward.win_rate
+
+        if (!reverse) {
+            // Missing reverse record
+            inconsistencies.push({
+                heroId: m.hero_id,
+                position: m.position,
+                enemyId: m.enemy_hero_id,
+                enemyPosition: m.enemy_position,
+                currentWinRate: forward.win_rate,
+                reverseWinRate: null,
+                expectedReverseWinRate,
+                issue: 'missing_reverse'
+            })
+        } else if (Math.abs(reverse.win_rate - expectedReverseWinRate) > 0.5) {
+            // Wrong reverse value (allowing 0.5% tolerance for rounding)
+            inconsistencies.push({
+                heroId: m.hero_id,
+                position: m.position,
+                enemyId: m.enemy_hero_id,
+                enemyPosition: m.enemy_position,
+                currentWinRate: forward.win_rate,
+                reverseWinRate: reverse.win_rate,
+                expectedReverseWinRate,
+                issue: 'wrong_reverse'
+            })
+        }
+    })
+
+    // Fetch hero names for display
+    const heroIds = new Set<string>()
+    inconsistencies.forEach(i => {
+        heroIds.add(i.heroId)
+        heroIds.add(i.enemyId)
+    })
+
+    const { data: heroes } = await supabase
+        .from('heroes')
+        .select('id, name')
+        .in('id', Array.from(heroIds))
+
+    const heroMap = new Map<string, string>()
+    heroes?.forEach(h => heroMap.set(h.id, h.name))
+
+    return {
+        total: allMatchups.length,
+        inconsistentCount: inconsistencies.length,
+        inconsistencies: inconsistencies.map(i => ({
+            ...i,
+            heroName: heroMap.get(i.heroId) || 'Unknown',
+            enemyName: heroMap.get(i.enemyId) || 'Unknown'
+        }))
+    }
+}
+
+export async function fixMatchupConsistency(versionId: number) {
+    const supabase = await createClient()
+
+    // Get inconsistencies
+    const check = await checkMatchupConsistency(versionId)
+    if (check.inconsistentCount === 0) {
+        return { success: true, message: 'No inconsistencies found', fixed: 0 }
+    }
+
+    const recordsToUpsert: any[] = []
+
+    check.inconsistencies.forEach(inc => {
+        // Create/Update reverse record
+        recordsToUpsert.push({
+            version_id: versionId,
+            hero_id: inc.enemyId,
+            position: inc.enemyPosition,
+            enemy_hero_id: inc.heroId,
+            enemy_position: inc.position,
+            win_rate: inc.expectedReverseWinRate
+        })
+    })
+
+    const { error } = await supabase
+        .from('matchups')
+        .upsert(recordsToUpsert, {
+            onConflict: 'version_id, hero_id, position, enemy_hero_id, enemy_position',
+            ignoreDuplicates: false
+        })
+
+    if (error) {
+        console.error('Error fixing matchups:', error)
+        return { success: false, message: error.message, fixed: 0 }
+    }
+
+    revalidatePath('/admin/matchups')
+    return {
+        success: true,
+        message: `Fixed ${recordsToUpsert.length} matchup records`,
+        fixed: recordsToUpsert.length,
+        details: check.inconsistencies.slice(0, 10) // Return first 10 for review
+    }
+}

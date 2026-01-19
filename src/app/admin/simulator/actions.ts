@@ -20,13 +20,22 @@ export async function createMatch(prevState: any, formData: FormData) {
     }
 
     // Generate DRAFT Slug
-    // We count existing DRAFT matches to determine next number
-    const { count } = await supabase
+    // We fetch the latest DRAFT match to determine next number (to avoid collisions on delete)
+    const { data: latestMatch } = await supabase
         .from('draft_matches')
-        .select('*', { count: 'exact', head: true })
+        .select('slug')
         .like('slug', 'DRAFT%')
+        .order('slug', { ascending: false })
+        .limit(1)
+        .single()
 
-    const nextNum = (count || 0) + 1
+    let nextNum = 1
+    if (latestMatch && latestMatch.slug) {
+        const match = latestMatch.slug.match(/DRAFT(\d+)/)
+        if (match) {
+            nextNum = parseInt(match[1]) + 1
+        }
+    }
     const slug = `DRAFT${nextNum.toString().padStart(6, '0')}`
 
     let settings = {}
@@ -92,7 +101,8 @@ export async function getMatches() {
         .from('draft_matches')
         .select(`
             *,
-            version:versions(id, name)
+            version:versions(id, name),
+            games:draft_games(id, created_at, game_number)
         `)
         // Show only 'simulation' or NULL (for backward compatibility)
         .or('match_type.eq.simulation,match_type.is.null')

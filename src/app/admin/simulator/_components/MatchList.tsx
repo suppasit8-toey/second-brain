@@ -7,7 +7,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { RotateCcw, Trash2 } from 'lucide-react'
+import { RotateCcw, Trash2, Copy, Check } from 'lucide-react'
 import { deleteMatch } from '../actions'
 import {
     Dialog,
@@ -28,6 +28,7 @@ export default function MatchList({ matches }: MatchListProps) {
     const [mode, setMode] = useState<string>('all')
 
     const [deleteId, setDeleteId] = useState<string | null>(null)
+    const [copiedId, setCopiedId] = useState<string | null>(null)
 
     // Extract unique options
     const years = Array.from(new Set(matches.map(m => new Date(m.created_at).getFullYear()))).sort((a, b) => b - a)
@@ -188,6 +189,23 @@ export default function MatchList({ matches }: MatchListProps) {
                                             {match.status === 'ongoing' ? 'Enter Room' : 'View Summary'}
                                         </Button>
                                     </Link>
+
+                                    {match.status === 'ongoing' && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="border-slate-700 hover:bg-slate-800"
+                                            onClick={() => {
+                                                const url = `${window.location.origin}/share/match/${match.slug || match.id}`
+                                                navigator.clipboard.writeText(url)
+                                                setCopiedId(match.id)
+                                                setTimeout(() => setCopiedId(null), 2000)
+                                            }}
+                                            title="Copy Match Link"
+                                        >
+                                            {copiedId === match.id ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4 text-slate-400" />}
+                                        </Button>
+                                    )}
 
                                     <Button
                                         size="sm"
