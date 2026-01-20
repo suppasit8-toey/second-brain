@@ -8,8 +8,8 @@ export async function login(prevState: any, formData: FormData) {
     const adminPassword = process.env.ADMIN_PASSWORD
 
     if (!adminPassword) {
-        console.error('ADMIN_PASSWORD is not set in environment variables.')
-        return { success: false, message: 'System configuration error. Please contact admin.' }
+        console.error('ERROR: ADMIN_PASSWORD environment variable is missing or empty.')
+        return { success: false, message: 'Server Error: ADMIN_PASSWORD is not configured. Please redeploy.' }
     }
 
     if (password === adminPassword) {
