@@ -31,7 +31,7 @@ export default function AdminLayout({
             {/* Backdrop Overlay (Mobile) */}
             {isSidebarOpen && !isFullscreen && (
                 <div
-                    className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden animate-in fade-in duration-200"
+                    className="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 md:hidden animate-in fade-in duration-200"
                     onClick={() => setIsSidebarOpen(false)}
                 />
             )}

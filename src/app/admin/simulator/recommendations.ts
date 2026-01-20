@@ -650,6 +650,33 @@ export async function getRecommendations(
     // --- 3. SCORING LOOP ---
     const analystScores: Record<string, { score: number, reasons: string[] }> = {}
 
+    // [NEW] 3.0 Pre-calculate Missing Roles for PICK Phase
+    const missingRoles: string[] = []
+    if (context?.phase === 'PICK') {
+        const STANDARD_ROLES = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam']
+        const allyHeroes = heroes.filter(h => allyHeroIds.includes(h.id))
+
+        // Simple Greedy Role Assignment (Prioritize specialists)
+        const tempRoles = new Set<string>()
+        const sortedAllies = [...allyHeroes].sort((a, b) => (a.main_position?.length || 0) - (b.main_position?.length || 0))
+
+        sortedAllies.forEach(h => {
+            const role = h.main_position?.find((r: string) => {
+                const normalized = r === 'Abyssal' ? 'Abyssal Dragon' : (r === 'Support' ? 'Roam' : r)
+                return STANDARD_ROLES.includes(normalized) && !tempRoles.has(normalized)
+            })
+            if (role) {
+                const normalized = role === 'Abyssal' ? 'Abyssal Dragon' : (role === 'Support' ? 'Roam' : role)
+                tempRoles.add(normalized)
+            }
+        })
+
+        STANDARD_ROLES.forEach(r => {
+            if (!tempRoles.has(r)) missingRoles.push(r)
+        })
+        // console.log(`[DEBUG] Missing Roles: ${missingRoles.join(', ')}`)
+    }
+
     // Helper to get weight
     const getWeight = (layerId: string) => {
         if (!analysisConfig) return 1.0
@@ -682,6 +709,21 @@ export async function getRecommendations(
         if (wMeta > 0) {
             score += base
             reasons.push(`Base Score (${Math.round(base)}% Win Rate) +${Math.round(base)}`)
+        }
+
+        // --- [NEW] ROLE PENALTY ---
+        if (context?.phase === 'PICK' && missingRoles.length > 0) {
+            // Check if hero can fill ANY of the missing roles
+            const canFillMissing = h.main_position?.some((pos: string) => {
+                const normalized = pos === 'Abyssal' ? 'Abyssal Dragon' : (pos === 'Support' ? 'Roam' : pos)
+                return missingRoles.includes(normalized)
+            })
+
+            if (!canFillMissing) {
+                const penalty = 150
+                score -= penalty
+                reasons.push(`Role Filled (Need ${missingRoles.join('/')}) -${penalty}`)
+            }
         }
 
         // 3.1 [Hero Pool] Team Comfort & Win Rate

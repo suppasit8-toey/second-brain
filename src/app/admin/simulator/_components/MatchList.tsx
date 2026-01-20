@@ -153,15 +153,17 @@ export default function MatchList({ matches }: MatchListProps) {
                             <div className="p-4 flex flex-col md:flex-row items-center justify-between gap-4">
 
                                 {/* Status & Meta */}
-                                <div className="flex items-center gap-4 min-w-[150px]">
-                                    {match.status === 'ongoing' ? (
-                                        <Badge className="bg-green-500/10 text-green-400 border-green-500/20 whitespace-nowrap">
-                                            LIVE
-                                        </Badge>
-                                    ) : (
-                                        <Badge variant="secondary" className="whitespace-nowrap">Finished</Badge>
-                                    )}
-                                    <div className="flex flex-col">
+                                <div className="flex items-center gap-4 min-w-[150px] w-full md:w-auto justify-between md:justify-start">
+                                    <div className="flex items-center gap-2">
+                                        {match.status === 'ongoing' ? (
+                                            <Badge className="bg-green-500/10 text-green-400 border-green-500/20 whitespace-nowrap">
+                                                LIVE
+                                            </Badge>
+                                        ) : (
+                                            <Badge variant="secondary" className="whitespace-nowrap">Finished</Badge>
+                                        )}
+                                    </div>
+                                    <div className="flex flex-col items-end md:items-start">
                                         <span className="text-xs text-slate-500">Patch {match.version?.name}</span>
                                         <span className="text-xs font-mono text-slate-400">{match.mode}</span>
                                     </div>
@@ -175,47 +177,49 @@ export default function MatchList({ matches }: MatchListProps) {
                                 </div>
 
                                 {/* Date & Action */}
-                                <div className="flex items-center gap-6 min-w-[200px] justify-end">
-                                    <span className="text-sm text-slate-500 hidden md:block">
+                                <div className="flex items-center gap-3 md:gap-6 min-w-full md:min-w-[200px] justify-between md:justify-end mt-2 md:mt-0 border-t md:border-0 border-slate-800/50 pt-2 md:pt-0">
+                                    <span className="text-sm text-slate-500 block md:hidden lg:block text-xs">
                                         {new Date(match.created_at).toLocaleDateString(undefined, {
-                                            year: 'numeric',
+                                            year: '2-digit',
                                             month: 'short',
                                             day: 'numeric'
                                         })}
                                     </span>
 
-                                    <Link href={`/admin/simulator/${match.slug || match.id}`}>
-                                        <Button size="sm" variant={match.status === 'ongoing' ? "default" : "outline"} className={match.status === 'ongoing' ? "bg-indigo-600 hover:bg-indigo-700" : "border-slate-700 hover:bg-slate-800"}>
-                                            {match.status === 'ongoing' ? 'Enter Room' : 'View Summary'}
-                                        </Button>
-                                    </Link>
+                                    <div className="flex items-center gap-2 ml-auto">
+                                        <Link href={`/admin/simulator/${match.slug || match.id}`}>
+                                            <Button size="sm" variant={match.status === 'ongoing' ? "default" : "outline"} className={match.status === 'ongoing' ? "bg-indigo-600 hover:bg-indigo-700 h-8 text-xs" : "border-slate-700 hover:bg-slate-800 h-8 text-xs"}>
+                                                {match.status === 'ongoing' ? 'Enter Room' : 'View Summary'}
+                                            </Button>
+                                        </Link>
 
-                                    {match.status === 'ongoing' && (
+                                        {match.status === 'ongoing' && (
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="border-slate-700 hover:bg-slate-800 h-8 w-8 p-0"
+                                                onClick={() => {
+                                                    const url = `${window.location.origin}/share/match/${match.slug || match.id}`
+                                                    navigator.clipboard.writeText(url)
+                                                    setCopiedId(match.id)
+                                                    setTimeout(() => setCopiedId(null), 2000)
+                                                }}
+                                                title="Copy Match Link"
+                                            >
+                                                {copiedId === match.id ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4 text-slate-400" />}
+                                            </Button>
+                                        )}
+
                                         <Button
                                             size="sm"
-                                            variant="outline"
-                                            className="border-slate-700 hover:bg-slate-800"
-                                            onClick={() => {
-                                                const url = `${window.location.origin}/share/match/${match.slug || match.id}`
-                                                navigator.clipboard.writeText(url)
-                                                setCopiedId(match.id)
-                                                setTimeout(() => setCopiedId(null), 2000)
-                                            }}
-                                            title="Copy Match Link"
+                                            variant="ghost"
+                                            className="text-slate-500 hover:text-red-400 hover:bg-red-500/10 h-8 w-8 p-0"
+                                            onClick={() => handleDeleteClick(match.id)}
+                                            title="Delete Match"
                                         >
-                                            {copiedId === match.id ? <Check className="h-4 w-4 text-green-400" /> : <Copy className="h-4 w-4 text-slate-400" />}
+                                            <Trash2 className="h-4 w-4" />
                                         </Button>
-                                    )}
-
-                                    <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        className="text-slate-500 hover:text-red-400 hover:bg-red-500/10"
-                                        onClick={() => handleDeleteClick(match.id)}
-                                        title="Delete Match"
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
+                                    </div>
                                 </div>
                             </div>
                         </Card>

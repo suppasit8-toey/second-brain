@@ -85,6 +85,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         return Array.from(playedHeroesTeamA)
     }, [match.games, match.team_a_name])
 
+    const isBotBlue = game.blue_team_name === match.team_b_name
+    const botSide = isBotBlue ? 'BLUE' : 'RED'
+    const isBotLoading = botSide === 'BLUE' ? isBlueSuggestLoading : isRedSuggestLoading
+
     useDraftBot({
         game,
         match,
@@ -95,7 +99,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         analysisConfig: currentMode,
         blueSuggestions,
         redSuggestions,
-        opponentGlobalBans: botOpponentGlobalBans
+        opponentGlobalBans: botOpponentGlobalBans,
+        suggestionLoading: isBotLoading
     })
 
     const [selectedHero, setSelectedHero] = useState<Hero | null>(null)
@@ -923,6 +928,13 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         const ALL_POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
         const opponentRemainingPositions = ALL_POSITIONS.filter(p => !opponentFilledPositions.has(p))
 
+        // Identify Core Heroes (Top 10 most picked by this team)
+        const coreHeroes = Object.values(blueStats.heroStats || {})
+            .sort((a: any, b: any) => b.picks - a.picks)
+            .slice(0, 10);
+
+        const laneMatchups = blueStats.laneMatchups || {};
+
         const result = Object.entries(aggregated)
             .map(([heroId, count]) => {
                 const heroFromInitial = initialHeroes?.find(h => String(h.id) === String(heroId))
@@ -933,7 +945,35 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     icon_url: heroFromMap?.icon_url || '',
                     main_position: []
                 }
-                return { hero, score: count * 5, reason: `${count} bans`, type: 'ban', heroId, count }
+
+                // PROTECT SCORE CALCULATION
+                let protectBonus = 0;
+                const protectReasons: string[] = [];
+
+                coreHeroes.forEach((coreHero: any) => {
+                    Object.entries(laneMatchups).forEach(([role, roleData]: [string, any]) => {
+                        const matchup = roleData?.[coreHero.id]?.[heroId];
+                        if (matchup && matchup.games >= 3) {
+                            const ourWinRate = (matchup.wins / matchup.games);
+                            const enemyWinRate = 1 - ourWinRate;
+                            if (enemyWinRate > 0.55) {
+                                const threatLevel = Math.round((enemyWinRate - 0.5) * 100 * 2);
+                                protectBonus += threatLevel;
+                                if (protectReasons.length < 2) {
+                                    protectReasons.push(`Protect ${coreHero.name}`);
+                                }
+                            }
+                        }
+                    });
+                });
+                protectBonus = Math.min(protectBonus, 150);
+
+                const baseReason = `${count} bans`;
+                const reason = protectReasons.length > 0
+                    ? `${baseReason} • ${protectReasons.join(', ')} (+${protectBonus})`
+                    : baseReason;
+
+                return { hero, score: (count * 5) + protectBonus, reason, type: 'ban', heroId, count, protectBonus }
             })
             .filter(item => item.hero.name !== 'Unknown')
             // Filter: Only keep heroes that can fill opponent's remaining positions (don't ban positions they already have)
@@ -985,6 +1025,13 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         const ALL_POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
         const opponentRemainingPositions = ALL_POSITIONS.filter(p => !opponentFilledPositions.has(p))
 
+        // Identify Core Heroes (Top 10 most picked by this team)
+        const coreHeroes = Object.values(redStats.heroStats || {})
+            .sort((a: any, b: any) => b.picks - a.picks)
+            .slice(0, 10);
+
+        const laneMatchups = redStats.laneMatchups || {};
+
         const result = Object.entries(aggregated)
             .map(([heroId, count]) => {
                 const heroFromInitial = initialHeroes?.find(h => String(h.id) === String(heroId))
@@ -995,7 +1042,35 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     icon_url: heroFromMap?.icon_url || '',
                     main_position: []
                 }
-                return { hero, score: count * 5, reason: `${count} bans`, type: 'ban', heroId, count }
+
+                // PROTECT SCORE CALCULATION
+                let protectBonus = 0;
+                const protectReasons: string[] = [];
+
+                coreHeroes.forEach((coreHero: any) => {
+                    Object.entries(laneMatchups).forEach(([role, roleData]: [string, any]) => {
+                        const matchup = roleData?.[coreHero.id]?.[heroId];
+                        if (matchup && matchup.games >= 3) {
+                            const ourWinRate = (matchup.wins / matchup.games);
+                            const enemyWinRate = 1 - ourWinRate;
+                            if (enemyWinRate > 0.55) {
+                                const threatLevel = Math.round((enemyWinRate - 0.5) * 100 * 2);
+                                protectBonus += threatLevel;
+                                if (protectReasons.length < 2) {
+                                    protectReasons.push(`Protect ${coreHero.name}`);
+                                }
+                            }
+                        }
+                    });
+                });
+                protectBonus = Math.min(protectBonus, 150);
+
+                const baseReason = `${count} bans`;
+                const reason = protectReasons.length > 0
+                    ? `${baseReason} • ${protectReasons.join(', ')} (+${protectBonus})`
+                    : baseReason;
+
+                return { hero, score: (count * 5) + protectBonus, reason, type: 'ban', heroId, count, protectBonus }
             })
             .filter(item => item.hero.name !== 'Unknown')
             // Filter: Only keep heroes that can fill opponent's remaining positions (don't ban positions they already have)
@@ -1166,7 +1241,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     hero: r.hero,
                     score: r.score,
                     reason: r.reason,
-                    type: 'ban'
+                    type: 'ban',
+                    stepIndex: state.stepIndex
                 }))
                 setBlueSuggestions(formatted)
                 setIsBlueSuggestLoading(false)
@@ -1178,7 +1254,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     hero: r.hero,
                     score: r.score,
                     reason: r.reason,
-                    type: 'ban'
+                    type: 'ban',
+                    stepIndex: state.stepIndex
                 }))
                 setRedSuggestions(formatted)
                 setIsRedSuggestLoading(false)
@@ -1253,7 +1330,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 hero: r.hero,
                 score: r.score,
                 reason: r.reason,
-                type: mode === 'history' ? 'comfort' : (mode === 'counter' ? 'counter' : 'hybrid')
+                type: mode === 'history' ? 'comfort' : (mode === 'counter' ? 'counter' : 'hybrid'),
+                stepIndex: state.stepIndex
             })).slice(0, 8) // Top 8
 
             setRecs(formatted)
@@ -1591,7 +1669,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     return (
         <div className="flex flex-col lg:flex-row h-screen max-h-screen gap-1 p-1 text-white overflow-y-auto lg:overflow-hidden custom-scrollbar bg-slate-950">
             {/* LEFT: BLUE TEAM (Mobile: Order 2) */}
-            <div className="w-full lg:w-[22%] flex flex-col gap-1 order-2 lg:order-none">
+            <div className="w-full lg:w-[22%] flex flex-col gap-1 order-2 lg:order-none shrink-0">
                 <div className="p-2 bg-blue-900/20 border border-blue-500/30 rounded-lg text-center">
                     <h3 className="text-lg font-bold text-blue-400 truncate">{game.blue_team_name}</h3>
                 </div>
@@ -1711,7 +1789,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             </div>
 
             {/* CENTER: BOARD & CONTROLS (Mobile: Order 1 - Top) */}
-            <div className="w-full lg:flex-1 flex flex-col gap-0.5 order-1 lg:order-none">
+            <div className="w-full lg:flex-1 flex flex-col gap-0.5 order-1 lg:order-none min-h-[500px] lg:min-h-0 shrink-0">
                 {/* Header / Timer */}
                 <div className="h-16 lg:h-20 bg-slate-900 border border-slate-700 rounded-xl flex items-center justify-between px-2 lg:px-4 relative shrink-0 z-30">
                     <div className="z-10 flex flex-col items-center w-full">
@@ -1840,7 +1918,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         No heroes found.
                                     </div>
                                 ) : (
-                                    <div className="grid grid-cols-8 sm:grid-cols-10 lg:grid-cols-[repeat(15,minmax(0,1fr))] gap-1">
+                                    <div className="grid grid-cols-[repeat(auto-fill,minmax(40px,1fr))] md:grid-cols-8 lg:grid-cols-[repeat(15,minmax(0,1fr))] gap-1">
                                         {filteredHeroes.map(hero => {
                                             const isUnavailable = unavailableIds.includes(hero.id)
                                             const isSelected = selectedHero?.id === hero.id
@@ -1961,7 +2039,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                             </span>
                                         </div>
 
-                                        <div className="grid grid-cols-2 gap-8">
+                                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-8">
                                             {/* Left Column: Team A Picks */}
                                             <div className="flex flex-wrap gap-2 justify-center content-start">
                                                 {teamAPicks.map(id => {
@@ -2343,7 +2421,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     )
 
                                     return (
-                                        <div className={`grid gap-2 flex-1 min-h-0 ${teamPoolFilter === 'ALL' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                        <div className={`grid gap-2 flex-1 min-h-0 ${teamPoolFilter === 'ALL' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
                                             {(teamPoolFilter === 'ALL' || teamPoolFilter === 'TEAM_A') && (
                                                 <div className="bg-slate-950/30 rounded-lg border border-slate-800 overflow-hidden flex flex-col">
                                                     {renderPoolTable(teamAPool, match.team_a_name, teamAGames, 'blue')}
@@ -3353,7 +3431,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             </div >
 
             {/* RIGHT: RED TEAM (Mobile: Order 3) */}
-            < div className="w-full lg:w-[22%] flex flex-col gap-1 order-3 lg:order-none" >
+            <div className="w-full lg:w-[22%] flex flex-col gap-1 order-3 lg:order-none shrink-0" >
                 <div className="p-2 bg-red-900/20 border border-red-500/30 rounded-lg text-center">
                     <h3 className="text-lg font-bold text-red-400 truncate">{game.red_team_name}</h3>
                 </div>

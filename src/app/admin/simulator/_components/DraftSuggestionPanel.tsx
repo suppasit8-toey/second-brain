@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Brain, Sparkles, Loader2, Target, History, Shield, ChevronDown, ChevronUp, Globe, Swords, Users, Link as LinkIcon, ShieldBan, Settings2 } from 'lucide-react';
 import Image from 'next/image';
 import { Hero, AnalysisLayerConfig } from '@/utils/types';
@@ -164,37 +165,46 @@ export default function DraftSuggestionPanel({
                             </div>
                         ) : filteredSuggestions.length > 0 ? (
                             filteredSuggestions.map((s) => (
-                                <button
-                                    key={s.hero.id}
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onSelectHero && onSelectHero(s.hero);
-                                    }}
-                                    className="relative group flex flex-col items-center gap-1 p-1 rounded hover:bg-white/5 transition-colors"
-                                >
-                                    <div className="relative w-10 h-10 rounded overflow-hidden border border-slate-700 group-hover:border-indigo-400 transition-colors">
-                                        <Image src={s.hero.icon_url} alt={s.hero.name} fill className="object-cover" />
-                                    </div>
-                                    <div className="text-[9px] font-bold text-slate-300 text-center w-full truncate px-0.5">
-                                        {s.hero.name}
-                                    </div>
-                                    {/* Score Badge */}
-                                    <div className="absolute top-0 right-0 transform translate-x-1/2 -translate-y-1/2 z-10">
-                                        <Badge className="px-1 py-0 h-4 text-[8px] min-w-4 justify-center bg-indigo-600 text-white border-0">
-                                            {s.score.toFixed(0)}
-                                        </Badge>
-                                    </div>
-                                    {/* Source Indicator: Strategic Picks (P) or Strategic Bans (B) */}
-                                    <div className={`absolute bottom-6 left-0 text-[7px] font-bold px-1 rounded-tr ${s.phase === 'BAN' || s.type === 'ban'
-                                            ? 'bg-red-600/90 text-white'
-                                            : 'bg-green-600/90 text-white'
-                                        }`}>
-                                        {s.phase === 'BAN' || s.type === 'ban' ? 'B' : 'P'}
-                                    </div>
-                                    {/* Type indicators */}
-                                    {s.type === 'counter' && <div className="absolute top-0 left-0 text-[8px] bg-red-900/80 text-red-200 px-1 rounded-br">VS</div>}
-                                    {s.type === 'comfort' && <div className="absolute top-0 left-0 text-[8px] bg-blue-900/80 text-blue-200 px-1 rounded-br">★</div>}
-                                </button>
+                                <TooltipProvider key={s.hero.id} delayDuration={300}>
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onSelectHero && onSelectHero(s.hero);
+                                                }}
+                                                className="relative group flex flex-col items-center gap-1 p-1 rounded hover:bg-white/5 transition-colors"
+                                            >
+                                                <div className="relative w-10 h-10 rounded overflow-hidden border border-slate-700 group-hover:border-indigo-400 transition-colors">
+                                                    <Image src={s.hero.icon_url} alt={s.hero.name} fill className="object-cover" />
+                                                </div>
+                                                <div className="text-[9px] font-bold text-slate-300 text-center w-full truncate px-0.5">
+                                                    {s.hero.name}
+                                                </div>
+                                                {/* Score Badge */}
+                                                <div className="absolute top-0 right-0 transform translate-x-1/2 -translate-y-1/2 z-10">
+                                                    <Badge className="px-1 py-0 h-4 text-[8px] min-w-4 justify-center bg-indigo-600 text-white border-0">
+                                                        {s.score.toFixed(0)}
+                                                    </Badge>
+                                                </div>
+                                                {/* Source Indicator: Strategic Picks (P) or Strategic Bans (B) */}
+                                                <div className={`absolute bottom-6 left-0 text-[7px] font-bold px-1 rounded-tr ${s.phase === 'BAN' || s.type === 'ban'
+                                                    ? 'bg-red-600/90 text-white'
+                                                    : 'bg-green-600/90 text-white'
+                                                    }`}>
+                                                    {s.phase === 'BAN' || s.type === 'ban' ? 'B' : 'P'}
+                                                </div>
+                                                {/* Type indicators */}
+                                                {s.type === 'counter' && <div className="absolute top-0 left-0 text-[8px] bg-red-900/80 text-red-200 px-1 rounded-br">VS</div>}
+                                                {s.type === 'comfort' && <div className="absolute top-0 left-0 text-[8px] bg-blue-900/80 text-blue-200 px-1 rounded-br">★</div>}
+                                            </button>
+                                        </TooltipTrigger>
+                                        <TooltipContent className="bg-slate-900 border-slate-700 text-xs text-slate-300">
+                                            <div className="font-bold text-slate-200 mb-1">{s.hero.name} ({s.score.toFixed(0)} PTS)</div>
+                                            <div>{s.reason || 'Recommended'}</div>
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </TooltipProvider>
                             ))
                         ) : suggestions.length > 0 && filteredSuggestions.length === 0 ? (
                             <div className="col-span-4 text-center text-xs text-slate-500 py-4 italic">

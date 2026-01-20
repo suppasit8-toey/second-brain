@@ -12,7 +12,7 @@ interface UseDraftBotProps {
     analysisConfig?: { layers: { id: string, weight: number, isActive: boolean, order: number }[] }; // Correct type from AnalysisMode
 }
 
-export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initialHeroes, analysisConfig, blueSuggestions, redSuggestions, opponentGlobalBans = [] }: UseDraftBotProps & { blueSuggestions?: any[], redSuggestions?: any[], opponentGlobalBans?: string[] }) {
+export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initialHeroes, analysisConfig, blueSuggestions, redSuggestions, opponentGlobalBans = [], suggestionLoading = false }: UseDraftBotProps & { blueSuggestions?: any[], redSuggestions?: any[], opponentGlobalBans?: string[], suggestionLoading?: boolean }) {
     const isBotTurn = (
         match.ai_metadata?.mode === 'PVE' &&
         draftState.currentStep &&
@@ -32,6 +32,26 @@ export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initi
 
     useEffect(() => {
         if (!isBotTurn || isPaused || draftState.isFinished || processingRef.current) return
+
+        // 1. Wait for suggestions to load
+        if (suggestionLoading) {
+            console.log("🤖 Bot waiting for suggestions to load...")
+            return
+        }
+
+        // 2. Validate Step Index (prevent using stale suggestions from previous turn)
+        const suggestions = draftState.currentStep.side === 'BLUE' ? blueSuggestions : redSuggestions
+        if (suggestions && suggestions.length > 0) {
+            const currentStepIndex = draftState.stepIndex
+            // Check if the first suggestion has a stepIndex and if it matches current
+            // If suggestions don't have stepIndex (legacy/fallback), we might skip this check, 
+            // but for safety in our new implementation, we want to enforce it if possible.
+            // Let's assume if it exists, it must match.
+            if (suggestions[0].stepIndex !== undefined && suggestions[0].stepIndex !== currentStepIndex) {
+                console.log(`🤖 Bot waiting for FREH suggestions (Current: ${currentStepIndex}, Stale: ${suggestions[0].stepIndex})`)
+                return
+            }
+        }
 
         const currentPhase = draftState.currentStep?.type === 'BAN' ? 'BAN' : 'PICK'
 
@@ -151,6 +171,7 @@ export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initi
                 }
 
                 // --- FALLBACK: If Advisor has no data, use internal logic ---
+                // ... (Existing fallback logic remains same)
                 if (!bestHeroId) {
                     console.log("🤖 Bot fallback to internal analysis (Advisor empty)")
                     const bannedIds = [...draftState.blueBans, ...draftState.redBans].map(String)
@@ -237,8 +258,9 @@ export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initi
         isBotTurn,
         draftState.stepIndex,
         isPaused,
-        blueSuggestions, // Dependency added so bot reacts when suggestions load
+        blueSuggestions,
         redSuggestions,
-        opponentGlobalBans // Added so bot respects global bans from previous games
+        opponentGlobalBans,
+        suggestionLoading // Add to DEPS to re-trigger when loading changes (though mainly we just want to block if loading is true)
     ])
 }

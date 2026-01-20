@@ -12,6 +12,14 @@ interface BanStrategyBoardProps {
 export default function BanStrategyBoard({ stats, teamName }: BanStrategyBoardProps) {
     const [phase, setPhase] = useState<'PHASE_1' | 'PHASE_2'>('PHASE_1');
 
+    // Identify Core Heroes (Top 10 most picked by this team)
+    const coreHeroes = useMemo(() => {
+        if (!stats.heroStats) return [];
+        return Object.values(stats.heroStats as Record<string, any>)
+            .sort((a, b) => b.picks - a.picks)
+            .slice(0, 10);
+    }, [stats]);
+
     // Helper to get top heroes for a set of slots
     const getTopHeroesForSlots = (slots: number[], type: 'PICK' | 'BAN') => {
         const aggregated: Record<string, number> = {};
@@ -21,35 +29,71 @@ export default function BanStrategyBoard({ stats, teamName }: BanStrategyBoardPr
             if (type === 'BAN') {
                 source = stats.banOrderStats;
             } else {
-                // Try strict hero stats first (newly added), fallback to generic pickOrderStats (Role based) will fail for Hero ID lookup.
-                // So we must assume heroPickOrderStats exists, or else we can't find specific heroes by slot.
                 source = stats.heroPickOrderStats || {};
             }
 
             const slotData = source?.[slot] || {};
             Object.entries(slotData).forEach(([heroId, count]: [string, any]) => {
-                // If the source is Role-based (fallback), 'heroId' is actually a role name. 
-                // stats.heroStats[roleName] will be undefined.
-                // We trust that actions.ts now provides heroPickOrderStats.
                 aggregated[heroId] = (aggregated[heroId] || 0) + count;
             });
         });
 
+        const laneMatchups = stats.laneMatchups || {};
+
         return Object.entries(aggregated)
-            .map(([heroId, count]) => ({
-                heroId,
-                count,
-                hero: stats.heroStats[heroId]
-            }))
-            .filter(item => item.hero) // Safety filter: Remove entries where hero lookup failed (e.g. Role data or missing ID)
-            .sort((a, b) => b.count - a.count);
+            .map(([heroId, count]) => {
+                const hero = stats.heroStats[heroId];
+                if (!hero) return null;
+
+                // PROTECT SCORE CALCULATION
+                // Check if this potential BAN target is a high threat to any of our Core Heroes
+                let protectBonus = 0;
+                const protectReasons: string[] = [];
+
+                coreHeroes.forEach(coreHero => {
+                    // Check logic: When CoreHero Vs BanHero -> Does BanHero win?
+                    // Structure: laneMatchups[role][OurHero][EnemyHero]
+                    // We need to iterate roles to find where CoreHero is played
+                    Object.entries(laneMatchups).forEach(([role, roleData]: [string, any]) => {
+                        const matchup = roleData?.[coreHero.id]?.[heroId]; // Outcome when Our Core vs Their Ban Target
+                        if (matchup && matchup.games >= 3) { // Min 3 games sample
+                            // matchup.wins is OUR wins. 
+                            // So Enemy Win Rate = 1 - (Our Wins / Games)
+                            const ourWinRate = (matchup.wins / matchup.games);
+                            const enemyWinRate = 1 - ourWinRate;
+
+                            if (enemyWinRate > 0.55) { // If enemy wins > 55% of the time, they are a threat
+                                const threatLevel = Math.round((enemyWinRate - 0.5) * 100 * 2); // Scale bonus
+                                protectBonus += threatLevel;
+                                if (protectReasons.length < 2) {
+                                    protectReasons.push(`Protect ${coreHero.name} (High Threat)`);
+                                }
+                            }
+                        }
+                    });
+                });
+
+                // Cap protect bonus to avoid runaway scores
+                protectBonus = Math.min(protectBonus, 150);
+
+                return {
+                    heroId,
+                    count,
+                    hero,
+                    score: (count * 5) + protectBonus, // Base + Protect
+                    protectBonus,
+                    protectReasons
+                };
+            })
+            .filter((item): item is NonNullable<typeof item> => item !== null)
+            .sort((a, b) => b.score - a.score);
     };
 
     // Phase 1 Bans: Slots 1, 2, 3, 4
-    const phase1Bans = useMemo(() => getTopHeroesForSlots([1, 2, 3, 4], 'BAN'), [stats]);
+    const phase1Bans = useMemo(() => getTopHeroesForSlots([1, 2, 3, 4], 'BAN'), [stats, coreHeroes]);
 
     // Phase 2 Bans: Slots 11, 12, 13, 14
-    const phase2Bans = useMemo(() => getTopHeroesForSlots([11, 12, 13, 14], 'BAN'), [stats]);
+    const phase2Bans = useMemo(() => getTopHeroesForSlots([11, 12, 13, 14], 'BAN'), [stats, coreHeroes]);
 
     // Strategic Suggestions (Phase 2)
     // Logic: Identify heroes this team PICKS in Phase 2 (Slots 15, 16, 17, 18).
@@ -57,13 +101,34 @@ export default function BanStrategyBoard({ stats, teamName }: BanStrategyBoardPr
     // If we ban them in Phase 2, we disrupt their late draft.
     const phase2PickImpact = useMemo(() => {
         // Get picks in slots 15-18
-        const picks = getTopHeroesForSlots([15, 16, 17, 18], 'PICK');
+        // Note: protect logic doesn't apply here as these are "Pick Suggestions for Enemy" turned into "Ban Targets for Us"
+        // But re-using the function is fine, protect bonus will just be 0 if we consider them 'BAN' type contextually,
+        // Wait, 'getTopHeroesForSlots' logic for Protect calculates if *Hero ID* is a threat to Core.
+        // Even for picking, if we pick a hero that threatens their core, it's good value.
+        // But here we focus on preventing THEIR picks.
 
-        // Enhance with Win Rate (Impact)
-        return picks.map(p => {
-            const winRate = p.hero.picks > 0 ? (p.hero.wins / p.hero.picks) * 100 : 0;
-            return { ...p, winRate };
-        }).sort((a, b) => b.winRate - a.winRate); // Sort by Win Rate (Highest Impact)
+        // Let's use raw aggregation for this specific list to keep it simple and focused on "Disrupting their Picks"
+        const slots = [15, 16, 17, 18];
+        const aggregated: Record<string, number> = {};
+        const source = stats.heroPickOrderStats || {};
+
+        slots.forEach(slot => {
+            const slotData = source?.[slot] || {};
+            Object.entries(slotData).forEach(([heroId, count]: [string, any]) => {
+                aggregated[heroId] = (aggregated[heroId] || 0) + count;
+            });
+        });
+
+        return Object.entries(aggregated)
+            .map(([heroId, count]) => {
+                const hero = stats.heroStats[heroId];
+                if (!hero) return null;
+                const winRate = hero.picks > 0 ? (hero.wins / hero.picks) * 100 : 0;
+                return { heroId, count, hero, winRate };
+            })
+            .filter((item): item is NonNullable<typeof item> => item !== null && !!item.hero)
+            .sort((a, b) => (b.winRate || 0) - (a.winRate || 0)); // Sort by Win Rate (Highest Impact)
+
     }, [stats]);
 
 
@@ -94,18 +159,39 @@ export default function BanStrategyBoard({ stats, teamName }: BanStrategyBoardPr
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             {phase1Bans.slice(0, 8).map((item, idx) => (
-                                <div key={item.heroId} className="bg-white/5 p-3 rounded-lg border border-white/5 flex items-center gap-3">
-                                    <div className="relative">
-                                        <img src={item.hero?.icon} alt={item.hero?.name} className="w-10 h-10 rounded-md" />
-                                        <div className="absolute -top-2 -left-2 bg-slate-900 text-slate-400 text-[10px] w-5 h-5 flex items-center justify-center rounded-full border border-slate-700">
-                                            #{idx + 1}
+                                <div key={item.heroId} className="bg-white/5 p-3 rounded-lg border border-white/5 flex flex-col gap-2 group hover:border-white/10 transition-colors">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="flex items-center gap-3">
+                                            <div className="relative">
+                                                <img src={item.hero?.icon} alt={item.hero?.name} className="w-10 h-10 rounded-md" />
+                                                <div className="absolute -top-2 -left-2 bg-slate-900 text-slate-400 text-[10px] w-5 h-5 flex items-center justify-center rounded-full border border-slate-700">
+                                                    #{idx + 1}
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <div className="font-bold text-sm text-slate-200">{item.hero?.name}</div>
+                                                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                                                    <ShieldBan className="w-3 h-3" />
+                                                    {item.count} bans
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="font-bold text-sm text-indigo-400">{item.score} PTS</div>
                                         </div>
                                     </div>
-                                    <div>
-                                        <div className="font-bold text-sm text-slate-200">{item.hero?.name}</div>
-                                        <div className="text-xs text-slate-500">
-                                            {item.count} games <span className="opacity-50">({item.hero?.bansPhase1} p1)</span>
-                                        </div>
+
+                                    {/* Score Analysis Tooltip / Badges */}
+                                    <div className="space-y-1">
+                                        {item.protectBonus > 0 && (
+                                            <Badge variant="outline" className="w-full justify-start gap-1 py-0.5 px-1.5 bg-teal-500/10 text-teal-400 border-teal-500/20 text-[10px]">
+                                                <div className="h-1.5 w-1.5 rounded-full bg-teal-400 animate-pulse" />
+                                                {item.protectReasons[0]} +{item.protectBonus}
+                                            </Badge>
+                                        )}
+                                        <Badge variant="outline" className="w-full justify-start gap-1 py-0.5 px-1.5 bg-indigo-500/10 text-indigo-300 border-indigo-500/20 text-[10px]">
+                                            Base Freq ({item.count}) +{item.count * 5}
+                                        </Badge>
                                     </div>
                                 </div>
                             ))}
@@ -128,12 +214,26 @@ export default function BanStrategyBoard({ stats, teamName }: BanStrategyBoardPr
                             </div>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                 {phase2Bans.slice(0, 4).map((item, idx) => (
-                                    <div key={item.heroId} className="bg-red-500/10 p-3 rounded-lg border border-red-500/20 flex items-center gap-3">
-                                        <img src={item.hero?.icon} alt={item.hero?.name} className="w-10 h-10 rounded-md grayscale opacity-80" />
-                                        <div>
-                                            <div className="font-bold text-sm text-red-200">{item.hero?.name}</div>
-                                            <div className="text-xs text-red-400/70">{item.count} bans</div>
+                                    <div key={item.heroId} className="bg-red-500/10 p-3 rounded-lg border border-red-500/20 flex flex-col gap-2">
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="flex items-center gap-3">
+                                                <img src={item.hero?.icon} alt={item.hero?.name} className="w-10 h-10 rounded-md grayscale opacity-80" />
+                                                <div>
+                                                    <div className="font-bold text-sm text-red-200">{item.hero?.name}</div>
+                                                    <div className="text-xs text-red-400/70">{item.count} bans</div>
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className="font-bold text-xs text-red-300">{item.score} PTS</div>
+                                            </div>
                                         </div>
+                                        {/* Protect Badge Phase 2 */}
+                                        {item.protectBonus > 0 && (
+                                            <Badge variant="outline" className="w-full justify-start gap-1 py-0.5 px-1.5 bg-teal-500/10 text-teal-400 border-teal-500/20 text-[10px]">
+                                                <div className="h-1.5 w-1.5 rounded-full bg-teal-400 animate-pulse" />
+                                                {item.protectReasons[0]} +{item.protectBonus}
+                                            </Badge>
+                                        )}
                                     </div>
                                 ))}
                             </div>
