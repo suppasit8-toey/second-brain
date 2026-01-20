@@ -19,6 +19,7 @@ import PostDraftResult from '@/components/draft/PostDraftResult'
 import { Input } from '@/components/ui/input'
 import { useDraftBot } from './useDraftBot'
 import DraftSuggestionPanel from './DraftSuggestionPanel'
+import DraftTeamPanel from './DraftTeamPanel'
 import AnalysisModeManager from '../../cerebro/_components/AnalysisModeManager'
 import { DEFAULT_MODES } from '../../cerebro/constants'
 
@@ -1369,8 +1370,9 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 id,
                 name: fromMap.name || 'Unknown',
                 icon_url: fromMap.icon_url || fromMap.icon || '',
-                main_position: []
-            }
+                main_position: [],
+                damage_type: 'Physical'
+            } as Hero
         }
 
         return undefined
@@ -1669,124 +1671,108 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
     return (
         <div className="flex flex-col lg:flex-row h-screen max-h-screen gap-1 p-1 text-white overflow-y-auto lg:overflow-hidden custom-scrollbar bg-slate-950">
-            {/* LEFT: BLUE TEAM (Mobile: Order 2) */}
-            <div className="w-full lg:w-[22%] flex flex-col gap-1 order-2 lg:order-none shrink-0">
-                <div className="p-2 bg-blue-900/20 border border-blue-500/30 rounded-lg text-center">
-                    <h3 className="text-lg font-bold text-blue-400 truncate">{game.blue_team_name}</h3>
-                </div>
-
-                {/* Bans */}
-                <div className="flex gap-2 justify-center">
-                    {[0, 2, 11, 13].map((stepIdx, i) => {
-                        // Check if this is the next ban slot for Blue
-                        const blueBanCount = state.blueBans.filter(Boolean).length
-                        const isNextBlueBanSlot = currentStep?.side === 'BLUE' && currentStep?.type === 'BAN' && i === blueBanCount
-                        const previewBan = isNextBlueBanSlot && selectedHero ? selectedHero : null
-
-                        return (
-                            <div key={i} className={`w-10 h-10 border bg-slate-800 rounded flex items-center justify-center overflow-hidden transition-all ${previewBan ? 'border-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.6)] animate-pulse' : 'border-slate-700'}`}>
-                                {state.blueBans[i] && getHero(state.blueBans[i])?.icon_url ? (
-                                    <Image src={getHero(state.blueBans[i])!.icon_url} alt="ban" width={40} height={40} className="grayscale opacity-60" />
-                                ) : previewBan?.icon_url ? (
-                                    <Image src={previewBan.icon_url} alt="preview" width={40} height={40} className="opacity-70 grayscale-[50%]" />
-                                ) : <span className="text-xs text-slate-600">Ban</span>}
-                            </div>
-                        )
-                    })}
-                </div>
-
-                {/* Picks */}
-                <div className="space-y-1 min-h-[300px] lg:min-h-0">
-                    {[0, 1, 2, 3, 4].map((i) => {
-                        const heroId = state.bluePicks[i]
-                        const hero = getHero(heroId || '')
-
-                        // Check if this is the next pick slot for Blue and we have a selected hero
-                        const bluePickCount = Object.values(state.bluePicks).filter(Boolean).length
-                        const isNextBluePickSlot = currentStep?.side === 'BLUE' && currentStep?.type === 'PICK' && i === bluePickCount
-                        const previewHero = isNextBluePickSlot && selectedHero ? selectedHero : null
-
-                        // Lanes
-                        const lanes = [
-                            { id: 'Dark Slayer', label: 'DS' },
-                            { id: 'Jungle', label: 'JG' },
-                            { id: 'Mid', label: 'MID' },
-                            { id: 'Abyssal', label: 'AB' },
-                            { id: 'Roam', label: 'SP' },
-                        ]
-
-                        return (
-                            <div key={i} className={`relative flex flex-col bg-blue-900/10 border rounded-lg overflow-hidden shrink-0 transition-all ${previewHero ? 'border-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : 'border-blue-500/20'}`}>
-                                {/* Hero Row */}
-                                <div className="h-12 lg:h-14 flex items-center px-3 relative overflow-hidden shrink-0">
-                                    {hero ? (
-                                        <>
-                                            <Image src={hero.icon_url} alt={hero.name} fill className="object-cover opacity-20" />
-                                            <div className="relative z-10 flex items-center gap-3">
-                                                <Image src={hero.icon_url} alt={hero.name} width={40} height={40} className="rounded-full border-2 border-blue-400" />
-                                                <span className="font-bold text-base">{hero.name}</span>
-                                            </div>
-                                        </>
-                                    ) : previewHero ? (
-                                        <>
-                                            <Image src={previewHero.icon_url} alt={previewHero.name} fill className="object-cover opacity-30 animate-pulse" />
-                                            <div className="relative z-10 flex items-center gap-3">
-                                                <Image src={previewHero.icon_url} alt={previewHero.name} width={40} height={40} className="rounded-full border-2 border-blue-400 animate-pulse" />
-                                                <span className="font-bold text-base text-blue-300 animate-pulse">{previewHero.name}</span>
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <span className="text-slate-600 relative z-10 text-sm">Pick {i + 1}</span>
-                                    )}
-                                </div>
-
-                                {/* Manual Lane Selector (Only if hero picked) */}
-                                {/* Manual Lane Selector (Always rendered for height consistency) */}
-                                <div className={`flex bg-slate-900/50 border-t divide-x divide-slate-800 transition-opacity ${hero ? 'opacity-100 border-blue-500/20' : 'opacity-0 border-transparent pointer-events-none'}`}>
-                                    {lanes.map(lane => {
-                                        const isSelected = hero ? manualLanes[hero.id]?.includes(lane.id) : false
-                                        return (
-                                            <button
-                                                key={lane.id}
-                                                onClick={() => hero && handleLaneAssign(hero.id, lane.id)}
-                                                className={`flex-1 h-6 text-[10px] font-bold uppercase transition-colors hover:bg-blue-500/20 ${isSelected ? 'bg-blue-600 text-white' : 'text-slate-500'}`}
-                                            >
-                                                {lane.label}
-                                            </button>
-                                        )
-                                    })}
-                                </div>
-                            </div>
-                        )
-                    })}
-                </div>
-
-                <DraftSuggestionPanel
+            {/* NEW MOBILE LAYOUT: Red (Left) | Blue (Right) */}
+            <div className="grid grid-cols-2 gap-2 lg:hidden mb-4 shrink-0">
+                <DraftTeamPanel
+                    side="RED"
+                    teamName={game.red_team_name}
+                    bans={state.redBans}
+                    picks={state.redPicks}
+                    currentStep={currentStep}
+                    isFinished={state.isFinished}
+                    selectedHero={selectedHero}
+                    getHero={getHero}
+                    manualLanes={manualLanes}
+                    onLaneAssign={handleLaneAssign}
+                    suggestionProps={{
+                        suggestions: redSuggestions,
+                        isLoading: isRedSuggestLoading,
+                        onGenerate: (mode) => handleGenerateSuggestion('RED', mode),
+                        onSelectHero: handleHeroClick,
+                        activeLayers: currentMode.layers.filter(l => l.isActive),
+                        upcomingSlots: (() => {
+                            const slots: { type: 'BAN' | 'PICK', slotNum: number }[] = []
+                            const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === 'RED')
+                            let banCount = past.filter(s => s.type === 'BAN').length
+                            let pickCount = past.filter(s => s.type === 'PICK').length
+                            DRAFT_SEQUENCE.slice(state.stepIndex).forEach(step => {
+                                if (step.side === 'RED') {
+                                    if (step.type === 'BAN') { banCount++; slots.push({ type: 'BAN', slotNum: banCount }) }
+                                    else { pickCount++; slots.push({ type: 'PICK', slotNum: pickCount }) }
+                                }
+                            })
+                            return slots
+                        })()
+                    }}
+                />
+                <DraftTeamPanel
                     side="BLUE"
                     teamName={game.blue_team_name}
-                    isActive={currentStep?.side === 'BLUE' && !state.isFinished}
-                    onGenerate={(mode) => handleGenerateSuggestion('BLUE', mode)}
-                    suggestions={blueSuggestions}
-                    isLoading={isBlueSuggestLoading}
-                    onSelectHero={handleHeroClick}
-                    activeLayers={currentMode.layers.filter(l => l.isActive)}
-                    upcomingSlots={(() => {
-                        const slots: { type: 'BAN' | 'PICK', slotNum: number }[] = []
-                        // Count previous bans/picks for correct numbering
-                        const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === 'BLUE')
-                        let banCount = past.filter(s => s.type === 'BAN').length
-                        let pickCount = past.filter(s => s.type === 'PICK').length
-
-                        DRAFT_SEQUENCE.slice(state.stepIndex).forEach(step => {
-                            if (step.side === 'BLUE') {
-                                if (step.type === 'BAN') { banCount++; slots.push({ type: 'BAN', slotNum: banCount }) }
-                                else { pickCount++; slots.push({ type: 'PICK', slotNum: pickCount }) }
-                            }
-                        })
-                        return slots
-                    })()}
+                    bans={state.blueBans}
+                    picks={state.bluePicks}
+                    currentStep={currentStep}
+                    isFinished={state.isFinished}
+                    selectedHero={selectedHero}
+                    getHero={getHero}
+                    manualLanes={manualLanes}
+                    onLaneAssign={handleLaneAssign}
+                    suggestionProps={{
+                        suggestions: blueSuggestions,
+                        isLoading: isBlueSuggestLoading,
+                        onGenerate: (mode) => handleGenerateSuggestion('BLUE', mode),
+                        onSelectHero: handleHeroClick,
+                        activeLayers: currentMode.layers.filter(l => l.isActive),
+                        upcomingSlots: (() => {
+                            const slots: { type: 'BAN' | 'PICK', slotNum: number }[] = []
+                            const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === 'BLUE')
+                            let banCount = past.filter(s => s.type === 'BAN').length
+                            let pickCount = past.filter(s => s.type === 'PICK').length
+                            DRAFT_SEQUENCE.slice(state.stepIndex).forEach(step => {
+                                if (step.side === 'BLUE') {
+                                    if (step.type === 'BAN') { banCount++; slots.push({ type: 'BAN', slotNum: banCount }) }
+                                    else { pickCount++; slots.push({ type: 'PICK', slotNum: pickCount }) }
+                                }
+                            })
+                            return slots
+                        })()
+                    }}
                 />
+            </div>
 
+            {/* LEFT: BLUE TEAM (Hidden on mobile, shown on desktop) */}
+            <div className="hidden lg:flex w-[22%] flex-col gap-1 shrink-0">
+                <DraftTeamPanel
+                    side="BLUE"
+                    teamName={game.blue_team_name}
+                    bans={state.blueBans}
+                    picks={state.bluePicks}
+                    currentStep={currentStep}
+                    isFinished={state.isFinished}
+                    selectedHero={selectedHero}
+                    getHero={getHero}
+                    manualLanes={manualLanes}
+                    onLaneAssign={handleLaneAssign}
+                    suggestionProps={{
+                        suggestions: blueSuggestions,
+                        isLoading: isBlueSuggestLoading,
+                        onGenerate: (mode) => handleGenerateSuggestion('BLUE', mode),
+                        onSelectHero: handleHeroClick,
+                        activeLayers: currentMode.layers.filter(l => l.isActive),
+                        upcomingSlots: (() => {
+                            const slots: { type: 'BAN' | 'PICK', slotNum: number }[] = []
+                            const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === 'BLUE')
+                            let banCount = past.filter(s => s.type === 'BAN').length
+                            let pickCount = past.filter(s => s.type === 'PICK').length
+                            DRAFT_SEQUENCE.slice(state.stepIndex).forEach(step => {
+                                if (step.side === 'BLUE') {
+                                    if (step.type === 'BAN') { banCount++; slots.push({ type: 'BAN', slotNum: banCount }) }
+                                    else { pickCount++; slots.push({ type: 'PICK', slotNum: pickCount }) }
+                                }
+                            })
+                            return slots
+                        })()
+                    }}
+                />
             </div>
 
             {/* CENTER: BOARD & CONTROLS (Mobile: Order 1 - Top) */}
@@ -3431,127 +3417,49 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
             </div >
 
-            {/* RIGHT: RED TEAM (Mobile: Order 3) */}
-            <div className="w-full lg:w-[22%] flex flex-col gap-1 order-3 lg:order-none shrink-0" >
-                <div className="p-2 bg-red-900/20 border border-red-500/30 rounded-lg text-center">
-                    <h3 className="text-lg font-bold text-red-400 truncate">{game.red_team_name}</h3>
-                </div>
 
-                {/* Bans */}
-                <div className="flex gap-2 justify-center">
-                    {[1, 3, 10, 12].map((stepIdx, i) => {
-                        // Check if this is the next ban slot for Red
-                        const redBanCount = state.redBans.filter(Boolean).length
-                        const isNextRedBanSlot = currentStep?.side === 'RED' && currentStep?.type === 'BAN' && i === redBanCount
-                        const previewBan = isNextRedBanSlot && selectedHero ? selectedHero : null
 
-                        return (
-                            <div key={i} className={`w-10 h-10 border bg-slate-800 rounded flex items-center justify-center overflow-hidden transition-all ${previewBan ? 'border-red-400 shadow-[0_0_12px_rgba(248,113,113,0.6)] animate-pulse' : 'border-slate-700'}`}>
-                                {state.redBans[i] && getHero(state.redBans[i])?.icon_url ? (
-                                    <Image src={getHero(state.redBans[i])!.icon_url} alt="ban" width={40} height={40} className="grayscale opacity-60" />
-                                ) : previewBan?.icon_url ? (
-                                    <Image src={previewBan.icon_url} alt="preview" width={40} height={40} className="opacity-70 grayscale-[50%]" />
-                                ) : <span className="text-xs text-slate-600">Ban</span>}
-                            </div>
-                        )
-                    })}
-                </div>
 
-                {/* Picks */}
-                <div className="space-y-1 min-h-[300px] lg:min-h-0">
-                    {[0, 1, 2, 3, 4].map((i) => {
-                        const heroId = state.redPicks[i]
-                        const hero = getHero(heroId || '')
 
-                        // Check if this is the next pick slot for Red and we have a selected hero
-                        const redPickCount = Object.values(state.redPicks).filter(Boolean).length
-                        const isNextRedPickSlot = currentStep?.side === 'RED' && currentStep?.type === 'PICK' && i === redPickCount
-                        const previewHero = isNextRedPickSlot && selectedHero ? selectedHero : null
-
-                        // Lanes
-                        const lanes = [
-                            { id: 'Dark Slayer', label: 'DS' },
-                            { id: 'Jungle', label: 'JG' },
-                            { id: 'Mid', label: 'MID' },
-                            { id: 'Abyssal', label: 'AB' },
-                            { id: 'Roam', label: 'SP' },
-                        ]
-
-                        return (
-                            <div key={i} className={`relative flex flex-col bg-red-900/10 border rounded-lg overflow-hidden shrink-0 transition-all ${previewHero ? 'border-red-400 shadow-[0_0_15px_rgba(248,113,113,0.6)]' : 'border-red-500/20'}`}>
-                                <div className="h-12 lg:h-14 flex items-center px-3 relative overflow-hidden flex-row-reverse text-right shrink-0">
-                                    {hero ? (
-                                        <>
-                                            <Image src={hero.icon_url} alt={hero.name} fill className="object-cover opacity-20" />
-                                            <div className="relative z-10 flex items-center gap-3 flex-row-reverse">
-                                                <Image src={hero.icon_url} alt={hero.name} width={40} height={40} className="rounded-full border-2 border-red-400" />
-                                                <span className="font-bold text-base">{hero.name}</span>
-                                            </div>
-                                        </>
-                                    ) : previewHero ? (
-                                        <>
-                                            <Image src={previewHero.icon_url} alt={previewHero.name} fill className="object-cover opacity-30 animate-pulse" />
-                                            <div className="relative z-10 flex items-center gap-3 flex-row-reverse">
-                                                <Image src={previewHero.icon_url} alt={previewHero.name} width={40} height={40} className="rounded-full border-2 border-red-400 animate-pulse" />
-                                                <span className="font-bold text-base text-red-300 animate-pulse">{previewHero.name}</span>
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <span className="text-slate-600 relative z-10 text-sm">Pick {i + 1}</span>
-                                    )}
-                                </div>
-
-                                {/* Manual Lane Selector (Only if hero picked) */}
-                                {/* Manual Lane Selector (Always rendered for height consistency) */}
-                                <div className={`flex bg-slate-900/50 border-t divide-x divide-slate-800 transition-opacity ${hero ? 'opacity-100 border-red-500/20' : 'opacity-0 border-transparent pointer-events-none'}`}>
-                                    {lanes.map(lane => {
-                                        const isSelected = hero ? manualLanes[hero.id]?.includes(lane.id) : false
-                                        return (
-                                            <button
-                                                key={lane.id}
-                                                onClick={() => hero && handleLaneAssign(hero.id, lane.id)}
-                                                className={`flex-1 h-6 text-[10px] font-bold uppercase transition-colors hover:bg-red-500/20 ${isSelected ? 'bg-red-600 text-white' : 'text-slate-500'}`}
-                                            >
-                                                {lane.label}
-                                            </button>
-                                        )
-                                    })}
-                                </div>
-                            </div>
-                        )
-                    })}
-                </div>
-
-                <DraftSuggestionPanel
+            {/* RIGHT: RED TEAM (Hidden on mobile, shown on desktop) */}
+            <div className="hidden lg:flex w-[22%] flex-col gap-1 shrink-0">
+                <DraftTeamPanel
                     side="RED"
                     teamName={game.red_team_name}
-                    isActive={currentStep?.side === 'RED' && !state.isFinished}
-                    onGenerate={(mode) => handleGenerateSuggestion('RED', mode)}
-                    suggestions={redSuggestions}
-                    isLoading={isRedSuggestLoading}
-                    onSelectHero={handleHeroClick}
-                    activeLayers={currentMode.layers.filter(l => l.isActive)}
-                    upcomingSlots={(() => {
-                        const slots: { type: 'BAN' | 'PICK', slotNum: number }[] = []
-                        // Count previous bans/picks for correct numbering
-                        const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === 'RED')
-                        let banCount = past.filter(s => s.type === 'BAN').length
-                        let pickCount = past.filter(s => s.type === 'PICK').length
-
-                        DRAFT_SEQUENCE.slice(state.stepIndex).forEach(step => {
-                            if (step.side === 'RED') {
-                                if (step.type === 'BAN') { banCount++; slots.push({ type: 'BAN', slotNum: banCount }) }
-                                else { pickCount++; slots.push({ type: 'PICK', slotNum: pickCount }) }
-                            }
-                        })
-                        return slots
-                    })()}
+                    bans={state.redBans}
+                    picks={state.redPicks}
+                    currentStep={currentStep}
+                    isFinished={state.isFinished}
+                    selectedHero={selectedHero}
+                    getHero={getHero}
+                    manualLanes={manualLanes}
+                    onLaneAssign={handleLaneAssign}
+                    suggestionProps={{
+                        suggestions: redSuggestions,
+                        isLoading: isRedSuggestLoading,
+                        onGenerate: (mode) => handleGenerateSuggestion('RED', mode),
+                        onSelectHero: handleHeroClick,
+                        activeLayers: currentMode.layers.filter(l => l.isActive),
+                        upcomingSlots: (() => {
+                            const slots: { type: 'BAN' | 'PICK', slotNum: number }[] = []
+                            const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === 'RED')
+                            let banCount = past.filter(s => s.type === 'BAN').length
+                            let pickCount = past.filter(s => s.type === 'PICK').length
+                            DRAFT_SEQUENCE.slice(state.stepIndex).forEach(step => {
+                                if (step.side === 'RED') {
+                                    if (step.type === 'BAN') { banCount++; slots.push({ type: 'BAN', slotNum: banCount }) }
+                                    else { pickCount++; slots.push({ type: 'PICK', slotNum: pickCount }) }
+                                }
+                            })
+                            return slots
+                        })()
+                    }}
                 />
+            </div>
+
+        </div>
 
 
-            </div >
-
-        </div >
     )
 })
 

@@ -20,6 +20,8 @@ export default function MetaAnalysisView({ tournaments }: MetaAnalysisViewProps)
     const [loading, setLoading] = useState(false)
     const [activeTab, setActiveTab] = useState<string>('simulator')
 
+    const selectedTournamentName = tournaments.find(t => t.id === selectedTournament)?.name
+
     useEffect(() => {
         if (!selectedTournament) return
 
@@ -130,7 +132,9 @@ export default function MetaAnalysisView({ tournaments }: MetaAnalysisViewProps)
                 <div className="w-[300px]">
                     <Select value={selectedTournament} onValueChange={setSelectedTournament}>
                         <SelectTrigger>
-                            <SelectValue placeholder="Select Tournament" />
+                            <SelectValue placeholder="Select Tournament">
+                                {selectedTournamentName}
+                            </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                             {tournaments.map((t) => (

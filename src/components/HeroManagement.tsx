@@ -4,7 +4,7 @@ import { useState, useEffect, useTransition } from 'react'
 import * as XLSX from 'xlsx'
 import { bulkImportHeroes, createHero, getHeroesByVersion } from '@/app/admin/heroes/actions'
 import { Version, Hero } from '@/utils/types' // Ensure Hero type has hero_stats joined
-import { Plus, X, Upload, Users, Shield, Sword, Zap, Sliders, Download, FileSpreadsheet, MoreVertical } from 'lucide-react'
+import { Plus, X, Upload, Users, Shield, Sword, Zap, Sliders, Download, FileSpreadsheet, MoreVertical, Ghost } from 'lucide-react'
 import { CldUploadButton } from 'next-cloudinary'
 import Image from 'next/image'
 import Link from 'next/link'
@@ -153,46 +153,55 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
     return (
         <div className="space-y-8">
             {/* Header & Controls */}
-            <div className="glass-card p-4 md:p-6 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div>
-                    <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">Hero Roster</h1>
-                    <p className="text-text-muted mt-1">Manage heroes for the selected patch.</p>
+            <div className="bg-[#0B0B15] border border-purple-500/20 shadow-[0_0_20px_rgba(168,85,247,0.15)] rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-20 pointer-events-none">
+                    <div className="w-32 h-32 bg-purple-500 rounded-full blur-[80px]"></div>
                 </div>
 
-                <div className="flex items-center gap-2 w-full md:w-auto">
+                <div className="relative z-10">
+                    <h1 className="text-3xl font-black text-white tracking-tight mb-2 flex items-center gap-3">
+                        <span className="bg-purple-500/20 p-2 rounded-lg border border-purple-500/50">
+                            <Ghost className="w-6 h-6 text-purple-400" />
+                        </span>
+                        Hero Roster
+                    </h1>
+                    <p className="text-slate-400 pl-14">Manage heroes and stats for the selected patch.</p>
+                </div>
+
+                <div className="flex items-center gap-3 w-full md:w-auto relative z-10">
                     {/* Version Selector */}
                     <div className="relative w-full md:w-auto flex-1 md:flex-none">
                         <select
                             value={selectedVersionId}
                             onChange={(e) => setSelectedVersionId(Number(e.target.value))}
-                            className="dark-input pl-10 pr-4 py-2 w-full md:w-48 appearance-none cursor-pointer"
+                            className="bg-[#1A1A2E] border border-white/10 text-white pl-4 pr-10 py-2.5 rounded-xl appearance-none cursor-pointer hover:border-purple-500/50 transition-colors focus:ring-2 focus:ring-purple-500/20 outline-none min-w-[200px]"
                         >
                             {initialVersions.map(v => (
                                 <option key={v.id} value={v.id}>{v.name} {v.is_active ? '(Active)' : ''}</option>
                             ))}
                         </select>
-                        <Sliders size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+                        <Sliders size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                     </div>
 
                     {/* Desktop Actions */}
-                    <div className="hidden md:flex items-center gap-2">
+                    <div className="hidden md:flex items-center gap-3">
                         <button
                             onClick={handleExport}
-                            className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-text-muted transition-colors flex items-center gap-2"
+                            className="px-4 py-2.5 bg-[#1A1A2E] hover:bg-white/5 border border-white/10 hover:border-purple-500/30 rounded-xl text-sm text-slate-300 hover:text-white transition-all flex items-center gap-2 group"
                             title="Export to Excel"
                         >
-                            <Download size={18} /> Export
+                            <Download size={18} className="text-purple-400 group-hover:scale-110 transition-transform" /> Export
                         </button>
                         <button
                             onClick={handleImportClick}
-                            className="px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm text-text-muted transition-colors flex items-center gap-2"
+                            className="px-4 py-2.5 bg-[#1A1A2E] hover:bg-white/5 border border-white/10 hover:border-purple-500/30 rounded-xl text-sm text-slate-300 hover:text-white transition-all flex items-center gap-2 group"
                             title="Import from Excel"
                         >
-                            <FileSpreadsheet size={18} /> Import
+                            <FileSpreadsheet size={18} className="text-cyan-400 group-hover:scale-110 transition-transform" /> Import
                         </button>
                         <button
                             onClick={() => setIsModalOpen(true)}
-                            className="glow-button px-6 py-2 rounded-lg flex items-center gap-2 whitespace-nowrap"
+                            className="bg-purple-600 hover:bg-purple-500 text-white px-6 py-2.5 rounded-xl font-bold custom-shadow hover:shadow-[0_0_20px_rgba(168,85,247,0.6)] transition-all flex items-center gap-2"
                         >
                             <Plus size={20} /> Add Hero
                         </button>
@@ -202,7 +211,7 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
                     <div className="flex md:hidden items-center gap-2">
                         <button
                             onClick={() => setIsModalOpen(true)}
-                            className="glow-button p-2 rounded-lg flex items-center justify-center aspect-square"
+                            className="bg-purple-600 hover:bg-purple-500 text-white p-2.5 rounded-xl"
                             title="Add Hero"
                         >
                             <Plus size={24} />
@@ -215,18 +224,18 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
                                     const menu = e.currentTarget.nextElementSibling;
                                     menu?.classList.toggle('hidden');
                                 }}
-                                className="p-2 bg-white/5 border border-white/10 rounded-lg text-text-muted hover:text-white"
+                                className="p-2.5 bg-[#1A1A2E] border border-white/10 rounded-xl text-slate-400 hover:text-white"
                             >
                                 <MoreVertical size={24} />
                             </button>
-                            <div className="hidden absolute right-0 top-full mt-2 w-48 bg-gray-900 border border-white/10 rounded-lg shadow-xl z-50 py-1">
+                            <div className="hidden absolute right-0 top-full mt-2 w-48 bg-[#0B0B15] border border-white/10 rounded-xl shadow-2xl z-50 py-1">
                                 <button
                                     onClick={() => {
                                         handleExport();
                                         // close menu helper
                                         (document.activeElement as HTMLElement)?.blur();
                                     }}
-                                    className="w-full text-left px-4 py-3 hover:bg-white/5 flex items-center gap-3 text-sm text-gray-300"
+                                    className="w-full text-left px-4 py-3 hover:bg-white/5 flex items-center gap-3 text-sm text-slate-300"
                                 >
                                     <Download size={16} /> Export Excel
                                 </button>
@@ -234,7 +243,7 @@ export default function HeroManagement({ initialVersions }: { initialVersions: V
                                     onClick={() => {
                                         handleImportClick();
                                     }}
-                                    className="w-full text-left px-4 py-3 hover:bg-white/5 flex items-center gap-3 text-sm text-gray-300"
+                                    className="w-full text-left px-4 py-3 hover:bg-white/5 flex items-center gap-3 text-sm text-slate-300"
                                 >
                                     <FileSpreadsheet size={16} /> Import Excel
                                 </button>

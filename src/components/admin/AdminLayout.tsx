@@ -14,7 +14,7 @@ export default function AdminLayout({
     const { isFullscreen } = useUI()
 
     return (
-        <div className="flex min-h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="flex min-h-screen bg-[#050b14]">
             {/* Mobile Header - Hide in Fullscreen */}
             {!isFullscreen && (
                 <header className="md:hidden fixed top-0 left-0 w-full bg-gray-900 border-b border-white/10 p-4 flex items-center z-40 h-16 shadow-lg">
