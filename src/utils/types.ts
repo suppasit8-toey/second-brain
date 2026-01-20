@@ -179,3 +179,14 @@ export interface AnalysisMode {
     layers: AnalysisLayerConfig[];
 }
 
+
+export type DraftActionType = 'BAN' | 'PICK';
+
+export interface DraftStep {
+    orderIndex: number;
+    side: DraftSide;
+    type: DraftActionType;
+    count: number;
+    phase: 'PHASE_1_BAN' | 'PHASE_1_PICK' | 'PHASE_2_BAN' | 'PHASE_2_PICK';
+    isContinuation?: boolean;
+}

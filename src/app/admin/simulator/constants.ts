@@ -1,15 +1,4 @@
-import { DraftSide } from '@/utils/types'
-
-export type DraftActionType = 'BAN' | 'PICK';
-
-export interface DraftStep {
-    orderIndex: number;
-    side: DraftSide;
-    type: DraftActionType;
-    count: number;
-    phase: 'PHASE_1_BAN' | 'PHASE_1_PICK' | 'PHASE_2_BAN' | 'PHASE_2_PICK';
-    isContinuation?: boolean;
-}
+import { DraftSide, DraftStep } from '@/utils/types'
 
 export const DRAFT_SEQUENCE: DraftStep[] = [
     // PHASE 1 BANS (4 Total)

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { DRAFT_SEQUENCE, PHASE_TIMERS, DraftStep } from '../constants'
-import { DraftSide } from '@/utils/types'
+import { DRAFT_SEQUENCE, PHASE_TIMERS } from '../constants'
+import { DraftSide, DraftStep } from '@/utils/types'
 
 export interface DraftState {
     stepIndex: number;
