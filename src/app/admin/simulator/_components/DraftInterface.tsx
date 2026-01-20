@@ -1390,8 +1390,9 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
         // Show everything during BAN phase (disabled/badged) so user sees context
         // PICK phase, hide Picked heroes to clean up the list
-        const isOpponentGlobalBan = opponentGlobalBans.includes(hero.id)
-        const shouldHide = !isBanPhase && (isPicked || isOpponentGlobalBan)
+        // ALSO hide our own Global Bans (heroes we played previously) because we can't pick them again
+        const isCurrentGlobalBan = currentGlobalBans.includes(hero.id)
+        const shouldHide = !isBanPhase && (isPicked || isCurrentGlobalBan)
 
         return matchesSearch && matchesRole && !shouldHide
     })
