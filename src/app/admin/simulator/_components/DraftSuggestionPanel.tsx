@@ -102,12 +102,12 @@ export default function DraftSuggestionPanel({
         });
 
     return (
-        <Card className={`border ${borderColor} ${bgColor} backdrop-blur-sm transition-all duration-300 ${isCollapsed ? 'h-auto' : ''}`}>
+        <Card className={`border ${borderColor} bg-slate-950/90 backdrop-blur-md transition-all duration-300 overflow-hidden ${isCollapsed ? 'h-auto' : ''}`}>
             <CardHeader className="py-2 px-3 flex flex-row items-center justify-between border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors" onClick={() => setIsCollapsed(!isCollapsed)}>
-                <div className="flex items-center gap-2">
-                    <Brain className={`w-4 h-4 ${isActive ? 'text-green-400 animate-pulse' : 'text-slate-500'}`} />
-                    <div>
-                        <CardTitle className="text-sm font-bold uppercase tracking-wider text-slate-300">
+                <div className="flex items-center gap-2 overflow-hidden">
+                    <Brain className={`w-4 h-4 shrink-0 ${isActive ? 'text-green-400 animate-pulse' : 'text-slate-500'}`} />
+                    <div className="min-w-0">
+                        <CardTitle className="text-sm font-bold uppercase tracking-wider text-slate-300 truncate">
                             {teamName} Advisor
                         </CardTitle>
                         {/* Current Slot Badge - Combined with Phase */}

@@ -295,9 +295,9 @@ export default function PostDraftResult({
     }
 
     return (
-        <div className="flex flex-col h-full w-full overflow-hidden bg-slate-950">
+        <div className="flex flex-col h-[100dvh] lg:h-full w-full overflow-hidden bg-slate-950">
             <div className="flex-1 w-full overflow-y-auto p-2 custom-scrollbar">
-                <div className="max-w-full mx-auto space-y-2 pb-10 animate-in fade-in zoom-in-95 duration-500">
+                <div className="max-w-full mx-auto space-y-2 pb-32 animate-in fade-in zoom-in-95 duration-500">
                     <Card className="bg-slate-900 border-slate-800 text-white shadow-xl">
                         <CardHeader className="text-center border-b border-slate-800 bg-slate-950/50 rounded-t-xl py-3">
                             <Trophy className="w-6 h-6 mx-auto text-yellow-500 mb-1" />

@@ -46,6 +46,13 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     const [currentTab, setCurrentTab] = useState('hero')
     const [aiTab, setAiTab] = useState('suggestions')
 
+    // Default to 'board' on mobile
+    useEffect(() => {
+        if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+            setCurrentTab('board')
+        }
+    }, [])
+
     // Suggestion Panels State
     const [blueSuggestions, setBlueSuggestions] = useState<any[]>([])
     const [redSuggestions, setRedSuggestions] = useState<any[]>([])
@@ -122,6 +129,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     const [recTypeFilter, setRecTypeFilter] = useState<'PICKS' | 'BANS'>('PICKS')
     const [banPhase, setBanPhase] = useState<'PHASE_1' | 'PHASE_2'>('PHASE_1')
     const [banSide, setBanSide] = useState<'BLUE' | 'RED' | 'ALL'>('ALL')
+    const [isHeaderExpanded, setIsHeaderExpanded] = useState(false)
 
     // Auto-switch to Strategic Bans when in BAN slot, Strategic Picks when in PICK slot
     useEffect(() => {
@@ -1670,41 +1678,90 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     }
 
     return (
-        <div className="flex flex-col lg:flex-row h-screen max-h-screen gap-1 p-1 text-white overflow-y-auto lg:overflow-hidden custom-scrollbar bg-slate-950">
-            {/* NEW MOBILE LAYOUT: Red (Left) | Blue (Right) */}
-            <div className="grid grid-cols-2 gap-2 lg:hidden mb-4 shrink-0">
-                <DraftTeamPanel
-                    side="RED"
-                    teamName={game.red_team_name}
-                    bans={state.redBans}
-                    picks={state.redPicks}
-                    currentStep={currentStep}
-                    isFinished={state.isFinished}
-                    selectedHero={selectedHero}
-                    getHero={getHero}
-                    manualLanes={manualLanes}
-                    onLaneAssign={handleLaneAssign}
-                    suggestionProps={{
-                        suggestions: redSuggestions,
-                        isLoading: isRedSuggestLoading,
-                        onGenerate: (mode) => handleGenerateSuggestion('RED', mode),
-                        onSelectHero: handleHeroClick,
-                        activeLayers: currentMode.layers.filter(l => l.isActive),
-                        upcomingSlots: (() => {
-                            const slots: { type: 'BAN' | 'PICK', slotNum: number }[] = []
-                            const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === 'RED')
-                            let banCount = past.filter(s => s.type === 'BAN').length
-                            let pickCount = past.filter(s => s.type === 'PICK').length
-                            DRAFT_SEQUENCE.slice(state.stepIndex).forEach(step => {
-                                if (step.side === 'RED') {
-                                    if (step.type === 'BAN') { banCount++; slots.push({ type: 'BAN', slotNum: banCount }) }
-                                    else { pickCount++; slots.push({ type: 'PICK', slotNum: pickCount }) }
-                                }
-                            })
-                            return slots
-                        })()
-                    }}
-                />
+        <div className="flex flex-col lg:flex-row h-[100dvh] overflow-hidden gap-1 p-0 lg:p-1 text-white bg-slate-950">
+            {/* MOBILE SECTION 1: Locked Header (Score & Game Info) */}
+            <div className="lg:hidden shrink-0 bg-gradient-to-b from-slate-900 to-slate-950 border-b border-white/10 relative z-40 shadow-md">
+                {/* Phase Indicator */}
+                <div className="flex items-center justify-center py-1 bg-slate-950/50 border-b border-white/5">
+                    <span className={`text-[10px] font-black tracking-[0.2em] uppercase ${currentStep?.side === 'BLUE' ? 'text-blue-400 drop-shadow-[0_0_5px_rgba(96,165,250,0.5)]' : 'text-red-400 drop-shadow-[0_0_5px_rgba(248,113,113,0.5)]'}`}>
+                        {currentStep?.side} {currentStep?.type}
+                    </span>
+                </div>
+
+                {/* Team Names Row - Always Visible */}
+                <div className="flex items-center justify-between px-3 h-10 relative">
+                    {/* Blue Team (Left) */}
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <div className="w-1 h-6 bg-blue-500 rounded-full shadow-[0_0_10px_rgba(59,130,246,0.5)] shrink-0" />
+                        <span className="text-xs font-bold text-blue-100 truncate w-full drop-shadow-md">
+                            {game.blue_team_name}
+                        </span>
+                    </div>
+
+                    {/* Center VS Badge */}
+                    <div className="shrink-0 px-3 flex flex-col items-center">
+                        <span className="text-[10px] font-black text-slate-500 font-mono italic">VS</span>
+                    </div>
+
+                    {/* Red Team (Right) */}
+                    <div className="flex items-center justify-end gap-2 flex-1 min-w-0 text-right">
+                        <span className="text-xs font-bold text-red-100 truncate w-full drop-shadow-md">
+                            {game.red_team_name}
+                        </span>
+                        <div className="w-1 h-6 bg-red-500 rounded-full shadow-[0_0_10px_rgba(239,68,68,0.5)] shrink-0" />
+                    </div>
+                </div>
+            </div>
+
+            {/* MOBILE SECTION 2: Draft Controls (Timer & Lock In) */}
+            <div className="lg:hidden shrink-0 bg-slate-950 p-2 flex items-center gap-3 border-b border-slate-800 shadow-lg z-30">
+                <div className={`text-4xl font-mono font-black tracking-tighter w-20 text-center ${state.timer <= 10 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                    {state.timer}
+                </div>
+                <Button
+                    size="default"
+                    className={`flex-1 h-12 text-lg font-black tracking-widest bg-slate-100 text-slate-900 hover:bg-white hover:scale-[1.02] active:scale-[0.98] transition-all
+                        ${state.isFinished
+                            ? 'bg-green-500 hover:bg-green-400 text-white shadow-[0_0_15px_rgba(34,197,94,0.5)]'
+                            : state.isPaused
+                                ? 'bg-indigo-500 hover:bg-indigo-400 text-white animate-pulse'
+                                : (!selectedHero ? 'opacity-50 grayscale' : 'shadow-[0_0_15px_rgba(255,255,255,0.3)]')
+                        }`}
+                    disabled={!state.isFinished && !state.isPaused && !selectedHero}
+                    onClick={state.isFinished ? () => setShowSummary(true) : state.isPaused ? togglePause : handleLockIn}
+                >
+                    {state.isFinished
+                        ? 'SUMMARY'
+                        : selectedHero
+                            ? (
+                                <div className="flex items-center gap-3">
+                                    <div className="relative w-8 h-8 rounded-full overflow-hidden border-2 border-slate-900 shrink-0">
+                                        {selectedHero.icon_url ? (
+                                            <Image src={selectedHero.icon_url} alt={selectedHero.name} fill className="object-cover" />
+                                        ) : (
+                                            <div className="w-full h-full bg-slate-800" />
+                                        )}
+                                    </div>
+                                    <div className="flex flex-col items-start leading-none min-w-0">
+                                        <span className="text-[10px] opacity-70 font-medium">
+                                            {state.isPaused ? (state.timer === 0 ? 'READY TO START' : 'PAUSED • TAP TO RESUME') : 'CONFIRM SELECTION'}
+                                        </span>
+                                        <span className="truncate max-w-[150px]">
+                                            {state.isPaused ? 'RESUME' : 'LOCK IN'} {selectedHero.name.toUpperCase()}
+                                        </span>
+                                    </div>
+                                </div>
+                            )
+                            : state.isPaused
+                                ? (state.timer === 0 ? 'START DRAFT' : 'RESUME DRAFT')
+                                : 'PICK HERO'
+                    }
+                </Button>
+            </div>
+
+
+            {/* LEFT: BLUE TEAM (Desktop Only) */}
+            <div className="hidden lg:flex w-[22%] flex-col gap-1 shrink-0 bg-slate-950/50">
                 <DraftTeamPanel
                     side="BLUE"
                     teamName={game.blue_team_name}
@@ -1739,49 +1796,13 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 />
             </div>
 
-            {/* LEFT: BLUE TEAM (Hidden on mobile, shown on desktop) */}
-            <div className="hidden lg:flex w-[22%] flex-col gap-1 shrink-0">
-                <DraftTeamPanel
-                    side="BLUE"
-                    teamName={game.blue_team_name}
-                    bans={state.blueBans}
-                    picks={state.bluePicks}
-                    currentStep={currentStep}
-                    isFinished={state.isFinished}
-                    selectedHero={selectedHero}
-                    getHero={getHero}
-                    manualLanes={manualLanes}
-                    onLaneAssign={handleLaneAssign}
-                    suggestionProps={{
-                        suggestions: blueSuggestions,
-                        isLoading: isBlueSuggestLoading,
-                        onGenerate: (mode) => handleGenerateSuggestion('BLUE', mode),
-                        onSelectHero: handleHeroClick,
-                        activeLayers: currentMode.layers.filter(l => l.isActive),
-                        upcomingSlots: (() => {
-                            const slots: { type: 'BAN' | 'PICK', slotNum: number }[] = []
-                            const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === 'BLUE')
-                            let banCount = past.filter(s => s.type === 'BAN').length
-                            let pickCount = past.filter(s => s.type === 'PICK').length
-                            DRAFT_SEQUENCE.slice(state.stepIndex).forEach(step => {
-                                if (step.side === 'BLUE') {
-                                    if (step.type === 'BAN') { banCount++; slots.push({ type: 'BAN', slotNum: banCount }) }
-                                    else { pickCount++; slots.push({ type: 'PICK', slotNum: pickCount }) }
-                                }
-                            })
-                            return slots
-                        })()
-                    }}
-                />
-            </div>
-
-            {/* CENTER: BOARD & CONTROLS (Mobile: Order 1 - Top) */}
-            <div className="w-full lg:flex-1 flex flex-col gap-0.5 order-1 lg:order-none min-h-[500px] lg:min-h-0 shrink-0">
-                {/* Header / Timer */}
-                <div className="h-16 lg:h-20 bg-slate-900 border border-slate-700 rounded-xl flex items-center justify-between px-2 lg:px-4 relative shrink-0 z-30">
+            {/* CENTER: BOARD & CONTROLS */}
+            <div className="w-full lg:flex-1 flex flex-col gap-0.5 min-h-0 shrink-0">
+                {/* Desktop Header / Timer (Hidden on Mobile) */}
+                <div className="hidden lg:flex h-20 bg-slate-900 border border-slate-700 rounded-xl items-center justify-between px-4 relative shrink-0 z-30">
                     <div className="z-10 flex flex-col items-center w-full">
                         {state.isFinished ? (
-                            <h2 className="text-3xl lg:text-4xl font-black text-green-400">DRAFT COMPLETE</h2>
+                            <h2 className="text-4xl font-black text-green-400">DRAFT COMPLETE</h2>
                         ) : (
                             <>
                                 <div className="flex items-center gap-2 mb-[-2px]">
@@ -1789,15 +1810,15 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         {match.team_a_name} vs {match.team_b_name}
                                     </span>
                                 </div>
-                                <span className={`text-[10px] lg:text-xs font-bold tracking-wider uppercase mb-[-4px] ${currentStep?.side === 'BLUE' ? 'text-blue-400' : 'text-red-400'}`}>
+                                <span className={`text-xs font-bold tracking-wider uppercase mb-[-4px] ${currentStep?.side === 'BLUE' ? 'text-blue-400' : 'text-red-400'}`}>
                                     {currentStep?.side} SIDE {currentStep?.type}
                                 </span>
-                                <div className="text-4xl lg:text-5xl font-mono font-black tracking-tighter shadow-black drop-shadow-lg">{state.timer}</div>
+                                <div className="text-5xl font-mono font-black tracking-tighter shadow-black drop-shadow-lg">{state.timer}</div>
                             </>
                         )}
                     </div>
                     {/* Analysis Mode Selector */}
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 z-20 hidden md:block">
+                    <div className="absolute left-4 top-1/2 -translate-y-1/2 z-20">
                         <AnalysisModeManager
                             currentMode={currentMode}
                             onModeChange={setCurrentMode}
@@ -1811,7 +1832,6 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                             onClick={() => {
                                 const url = `${window.location.origin}/share/draft/${match.id}/${game.id}`
                                 navigator.clipboard.writeText(url)
-                                // Simple visual feedback
                                 const btn = document.getElementById('share-btn-text')
                                 if (btn) btn.innerText = 'Copied!'
                                 setTimeout(() => {
@@ -1825,18 +1845,16 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                         </Button>
 
                         {currentGlobalBans.length > 0 && (
-                            <div className="hidden md:flex">
-                                <Badge variant="outline" className="text-[10px] border-slate-600 text-slate-400 flex items-center gap-1 bg-slate-950/80">
-                                    <ShieldBan className="w-3 h-3" />
-                                    Global Bans Active: {currentGlobalBans.length}
-                                </Badge>
-                            </div>
+                            <Badge variant="outline" className="text-[10px] border-slate-600 text-slate-400 flex items-center gap-1 bg-slate-950/80">
+                                <ShieldBan className="w-3 h-3" />
+                                Global Bans Active: {currentGlobalBans.length}
+                            </Badge>
                         )}
                     </div>
                 </div>
 
-                {/* Lock In Button (Moved to Top) */}
-                <div className="flex justify-center shrink-0 bg-slate-900/50 p-0.5">
+                {/* Desktop Lock In Button (Hidden on Mobile) */}
+                <div className="hidden lg:flex justify-center shrink-0 bg-slate-900/50 p-0.5">
                     <Button
                         size="sm"
                         className={`w-full h-8 font-bold ${state.isFinished
@@ -1857,31 +1875,111 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
                 {/* Tabs for Hero Selection / Global Bans / Cerebro AI */}
                 <Tabs value={currentTab} onValueChange={setCurrentTab} className="flex-1 flex flex-col min-h-0">
-                    <TabsList className="grid w-full grid-cols-3 bg-slate-900 h-7 p-0.5 mb-0">
-                        <TabsTrigger value="hero" className="text-xs font-bold data-[state=active]:bg-slate-800 data-[state=active]:text-white">
+                    <TabsList className="grid w-full grid-cols-4 lg:grid-cols-3 bg-slate-900 h-9 lg:h-7 p-0.5 mb-0 shrink-0 border-b border-slate-800">
+                        {/* Mobile: Board Tab Trigger */}
+                        <TabsTrigger value="board" className="lg:hidden text-[10px] font-bold data-[state=active]:bg-slate-800 data-[state=active]:text-white">
+                            BOARD
+                        </TabsTrigger>
+
+                        <TabsTrigger value="hero" className="text-[10px] lg:text-xs font-bold data-[state=active]:bg-slate-800 data-[state=active]:text-white">
                             HEROES
                         </TabsTrigger>
-                        <TabsTrigger value="global-bans" className="text-xs font-bold data-[state=active]:bg-slate-800 data-[state=active]:text-white flex items-center gap-1">
-                            <ShieldBan className="w-3 h-3" />
-                            GLOBAL BANS
+                        <TabsTrigger value="global-bans" className="text-[10px] lg:text-xs font-bold data-[state=active]:bg-slate-800 data-[state=active]:text-white flex items-center gap-1 justify-center">
+                            <ShieldBan className="w-3 h-3 hidden md:block" />
+                            <span className="md:hidden">BANS</span>
+                            <span className="hidden md:inline">GLOBAL BANS</span>
                         </TabsTrigger>
-                        <TabsTrigger value="cerebro-ai" className="text-xs font-bold data-[state=active]:bg-slate-800 data-[state=active]:text-white flex items-center gap-1">
-                            <Brain className="w-3 h-3 text-indigo-400" />
-                            CEREBRO AI
+                        <TabsTrigger value="cerebro-ai" className="text-[10px] lg:text-xs font-bold data-[state=active]:bg-slate-800 data-[state=active]:text-white flex items-center gap-1 justify-center">
+                            <Brain className="w-3 h-3 text-indigo-400 hidden md:block" />
+                            CEREBRO
                         </TabsTrigger>
                     </TabsList>
 
+                    {/* Tab 0: BOARD (Mobile Only) - Red Left, Blue Right */}
+                    <TabsContent value="board" className="flex-1 flex flex-col min-h-0 m-0 overflow-hidden lg:hidden">
+                        <div className="flex-1 overflow-y-auto min-h-0 p-1">
+                            <div className="grid grid-cols-2 gap-1 pb-16">
+                                {/* BLUE Side (Left) */}
+                                <DraftTeamPanel
+                                    side="BLUE"
+                                    teamName={game.blue_team_name}
+                                    bans={state.blueBans}
+                                    picks={state.bluePicks}
+                                    currentStep={currentStep}
+                                    isFinished={state.isFinished}
+                                    selectedHero={selectedHero}
+                                    getHero={getHero}
+                                    manualLanes={manualLanes}
+                                    onLaneAssign={handleLaneAssign}
+                                    suggestionProps={{
+                                        suggestions: blueSuggestions,
+                                        isLoading: isBlueSuggestLoading,
+                                        onGenerate: (mode) => handleGenerateSuggestion('BLUE', mode),
+                                        onSelectHero: handleHeroClick,
+                                        activeLayers: currentMode.layers.filter(l => l.isActive),
+                                        upcomingSlots: (() => {
+                                            const slots: { type: 'BAN' | 'PICK', slotNum: number }[] = []
+                                            const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === 'BLUE')
+                                            let banCount = past.filter(s => s.type === 'BAN').length
+                                            let pickCount = past.filter(s => s.type === 'PICK').length
+                                            DRAFT_SEQUENCE.slice(state.stepIndex).forEach(step => {
+                                                if (step.side === 'BLUE') {
+                                                    if (step.type === 'BAN') { banCount++; slots.push({ type: 'BAN', slotNum: banCount }) }
+                                                    else { pickCount++; slots.push({ type: 'PICK', slotNum: pickCount }) }
+                                                }
+                                            })
+                                            return slots
+                                        })()
+                                    }}
+                                />
+                                {/* RED Side (Right) */}
+                                <DraftTeamPanel
+                                    side="RED"
+                                    teamName={game.red_team_name}
+                                    bans={state.redBans}
+                                    picks={state.redPicks}
+                                    currentStep={currentStep}
+                                    isFinished={state.isFinished}
+                                    selectedHero={selectedHero}
+                                    getHero={getHero}
+                                    manualLanes={manualLanes}
+                                    onLaneAssign={handleLaneAssign}
+                                    suggestionProps={{
+                                        suggestions: redSuggestions,
+                                        isLoading: isRedSuggestLoading,
+                                        onGenerate: (mode) => handleGenerateSuggestion('RED', mode),
+                                        onSelectHero: handleHeroClick,
+                                        activeLayers: currentMode.layers.filter(l => l.isActive),
+                                        upcomingSlots: (() => {
+                                            const slots: { type: 'BAN' | 'PICK', slotNum: number }[] = []
+                                            const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === 'RED')
+                                            let banCount = past.filter(s => s.type === 'BAN').length
+                                            let pickCount = past.filter(s => s.type === 'PICK').length
+                                            DRAFT_SEQUENCE.slice(state.stepIndex).forEach(step => {
+                                                if (step.side === 'RED') {
+                                                    if (step.type === 'BAN') { banCount++; slots.push({ type: 'BAN', slotNum: banCount }) }
+                                                    else { pickCount++; slots.push({ type: 'PICK', slotNum: pickCount }) }
+                                                }
+                                            })
+                                            return slots
+                                        })()
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    </TabsContent>
+
                     {/* Tab 1: HERO SELECTOR */}
-                    <TabsContent value="hero" className="flex-1 flex flex-col min-h-0 gap-0.5 data-[state=active]:flex m-0">
+                    <TabsContent value="hero" className="flex-1 flex flex-col min-h-0 gap-0.5 data-[state=active]:flex m-0 overflow-hidden">
                         {/* Filters */}
-                        <div className="flex flex-col gap-0.5 flex-1 overflow-hidden min-h-0">
-                            <div className="flex gap-2">
+                        <div className="flex flex-col gap-0.5 flex-1 min-h-0">
+                            <div className="flex gap-2 shrink-0">
                                 <div className="relative flex-1">
                                     <Input
                                         placeholder="Search heroes..."
                                         value={searchQuery}
                                         onChange={(e) => setSearchQuery(e.target.value)}
-                                        className="bg-slate-900 border-slate-800 text-white h-7 text-xs"
+                                        className="bg-slate-900 border-slate-800 text-white placeholder:text-slate-500 h-7 text-xs"
                                     />
                                 </div>
                                 <div className="flex gap-1 flex-wrap justify-center">
@@ -1899,7 +1997,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 </div>
                             </div>
 
-                            <ScrollArea className="flex-1 bg-slate-950/30 rounded-lg p-2">
+                            <div className="flex-1 overflow-y-auto bg-slate-950/30 rounded-lg p-2 h-full">
                                 {filteredHeroes.length === 0 ? (
                                     <div className="flex items-center justify-center h-full text-slate-500">
                                         No heroes found.
@@ -1988,7 +2086,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         })}
                                     </div>
                                 )}
-                            </ScrollArea>
+                            </div>
 
 
                         </div>
@@ -2026,7 +2124,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                             </span>
                                         </div>
 
-                                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:gap-8">
+                                        <div className="grid grid-cols-2 gap-2 md:gap-8 divide-x divide-slate-800/50">
                                             {/* Left Column: Team A Picks */}
                                             <div className="flex flex-wrap gap-2 justify-center content-start">
                                                 {teamAPicks.map(id => {
@@ -2604,10 +2702,11 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 </div>
                             </TabsContent>
 
-                            <TabsContent value="meta" className="flex-1 min-h-0 mt-0 flex flex-col">
+                            <TabsContent value="meta" className="flex-1 min-h-0 mt-0 flex flex-col overflow-hidden h-full">
                                 <div className="flex items-center justify-between mb-2 border-b border-purple-900/30 pb-1 px-1 pt-1 shrink-0">
                                     <div className="flex items-center gap-2">
                                         <h4 className="text-[10px] font-bold text-purple-400 uppercase tracking-widest">Meta Stats</h4>
+                                        {/* ... (Badge logic unchanged) ... */}
                                         {match.ai_metadata?.settings?.tournamentId ? (
                                             <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-amber-500/30 text-amber-400">
                                                 {match.tournament?.name || 'Tournament'}
@@ -2630,8 +2729,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         ))}
                                     </div>
                                 </div>
-                                <ScrollArea className="flex-1 bg-slate-950/30 rounded-lg p-2 border border-slate-800">
-                                    <div className="grid grid-cols-2 gap-2">
+                                <ScrollArea className="flex-1 bg-slate-950/30 rounded-lg border border-slate-800 h-full">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-2">
                                         {recommendations.meta?.filter((item: any) => metaFilter === 'ALL' || item.hero.main_position?.includes(metaFilter)).map((item: any) => (
                                             <div key={item.hero.id} className="bg-purple-950/10 border border-purple-900/20 p-2 rounded flex items-center gap-2 hover:bg-purple-900/20 transition-colors cursor-pointer" onClick={() => handleHeroClick(item.hero)}>
                                                 <Image src={item.hero.icon_url} alt={item.hero.name} width={32} height={32} className="rounded" />
@@ -2644,7 +2743,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                                 </div>
                                             </div>
                                         ))}
-                                        {!recommendations.meta?.length && <div className="col-span-2 text-center text-xs text-slate-500 italic py-4">No Meta data available</div>}
+                                        {!recommendations.meta?.length && <div className="col-span-1 md:col-span-2 text-center text-xs text-slate-500 italic py-4">No Meta data available</div>}
                                     </div>
                                 </ScrollArea>
                             </TabsContent>
@@ -3409,9 +3508,35 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     </TabsContent>
                 </Tabs>
 
-                {/* Footer Bar (Placeholder) */}
-                <div className="h-12 bg-slate-900 border border-slate-700 rounded-xl shrink-0 flex items-center justify-center">
-                    {/* Future controls area */}
+
+                {/* MOBILE ADVISOR (Fixed Bottom Slide-in) */}
+                <div className="fixed bottom-0 left-0 right-0 z-[100] lg:hidden pointer-events-none">
+                    <div className="pointer-events-auto bg-slate-950/95 backdrop-blur-md shadow-[0_-5px_20px_rgba(0,0,0,0.8)] border-t border-slate-800 rounded-t-xl overflow-hidden">
+                        <DraftSuggestionPanel
+                            side={currentStep?.side || 'BLUE'}
+                            teamName={currentStep?.side === 'BLUE' ? game.blue_team_name : (currentStep?.side === 'RED' ? game.red_team_name : 'Draft Advisor')}
+                            isActive={!state.isFinished}
+                            onGenerate={(mode) => handleGenerateSuggestion(currentStep?.side || 'BLUE', mode)}
+                            suggestions={currentStep?.side === 'BLUE' ? blueSuggestions : (currentStep?.side === 'RED' ? redSuggestions : [])}
+                            isLoading={currentStep?.side === 'BLUE' ? isBlueSuggestLoading : isRedSuggestLoading}
+                            onSelectHero={handleHeroClick}
+                            activeLayers={currentMode.layers.filter(l => l.isActive)}
+                            upcomingSlots={(() => {
+                                const side = currentStep?.side || 'BLUE'
+                                const slots: { type: 'BAN' | 'PICK', slotNum: number }[] = []
+                                const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === side)
+                                let banCount = past.filter(s => s.type === 'BAN').length
+                                let pickCount = past.filter(s => s.type === 'PICK').length
+                                DRAFT_SEQUENCE.slice(state.stepIndex).forEach(step => {
+                                    if (step.side === side) {
+                                        if (step.type === 'BAN') { banCount++; slots.push({ type: 'BAN', slotNum: banCount }) }
+                                        else { pickCount++; slots.push({ type: 'PICK', slotNum: pickCount }) }
+                                    }
+                                })
+                                return slots
+                            })()}
+                        />
+                    </div>
                 </div>
 
 

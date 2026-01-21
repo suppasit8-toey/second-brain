@@ -80,23 +80,23 @@ export default function AnalysisModeManager({ currentMode, onModeChange }: Analy
             <Button
                 onClick={() => setIsOpen(!isOpen)}
                 variant="outline"
-                className="bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-200 gap-2 h-10 px-4"
+                className="bg-slate-900 border-slate-700 hover:bg-slate-800 text-slate-200 gap-2 h-10 px-2 md:px-4"
             >
                 <div className="flex items-center gap-2">
                     <div className="p-1.5 bg-indigo-500/10 rounded border border-indigo-500/20">
                         <Brain className="w-4 h-4 text-indigo-400" />
                     </div>
                     <div className="flex flex-col items-start leading-none text-xs">
-                        <span className="text-[10px] text-slate-500 uppercase font-bold">Analysis Mode</span>
-                        <span className="font-bold text-white truncate max-w-[180px]">{currentMode.name.split('(')[0]}</span>
+                        <span className="hidden md:block text-[10px] text-slate-500 uppercase font-bold">Analysis Mode</span>
+                        <span className="font-bold text-white truncate max-w-[120px] md:max-w-[180px]">{currentMode.name.split('(')[0]}</span>
                     </div>
                 </div>
-                <Settings2 className="w-4 h-4 ml-2 text-slate-500" />
+                <Settings2 className="w-4 h-4 ml-1 md:ml-2 text-slate-500" />
             </Button>
 
             {/* Dropdown Panel */}
             {isOpen && (
-                <div className="absolute top-12 left-0 w-[420px] bg-[#0F1218] border border-slate-800 rounded-xl shadow-2xl p-4 animate-in fade-in slide-in-from-top-2">
+                <div className="absolute top-12 left-0 w-[90vw] max-w-[420px] bg-[#0F1218] border border-slate-800 rounded-xl shadow-2xl p-4 animate-in fade-in slide-in-from-top-2">
                     <div className="flex items-center justify-between mb-4">
                         <h3 className="font-bold text-white flex items-center gap-2">
                             <Brain className="w-5 h-5 text-primary" />

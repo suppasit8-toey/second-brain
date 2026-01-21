@@ -11,6 +11,12 @@
 }
 
 @layer base {
+
+  /* Enforce dark mode colors by default */
+  :root {
+    color-scheme: dark;
+  }
+
   body {
     /* Hardcoded background to break the loop, but using CSS variable if available */
     background-color: #090312;
@@ -80,5 +86,14 @@
 
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: rgba(168, 85, 247, 0.6);
+  }
+
+  .active-scrollbar {
+    scrollbar-gutter: stable;
+  }
+
+  .active-scrollbar::-webkit-scrollbar {
+    display: block;
+    height: 6px;
   }
 }

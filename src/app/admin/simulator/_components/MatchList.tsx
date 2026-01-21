@@ -81,58 +81,58 @@ export default function MatchList({ matches }: MatchListProps) {
     return (
         <div className="space-y-6">
             {/* Filter Bar */}
-            <div className="flex flex-wrap items-center gap-4 bg-slate-900/50 p-4 rounded-lg border border-slate-800">
+            <div className="flex flex-wrap items-center gap-4 bg-slate-900 p-4 rounded-lg border border-slate-800">
                 <span className="text-sm font-medium text-slate-400">Filters:</span>
 
                 <Select value={year === 'all' ? undefined : year} onValueChange={setYear}>
-                    <SelectTrigger className="w-[100px] bg-slate-800 border-slate-700">
+                    <SelectTrigger className="w-[100px] bg-slate-800 border-slate-700 text-slate-200">
                         <SelectValue placeholder="Year" />
                     </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
-                        {years.map(y => <SelectItem key={y} value={y.toString()}>{y}</SelectItem>)}
+                    <SelectContent className="bg-slate-900 border-slate-800 text-slate-200">
+                        <SelectItem value="all" className="focus:bg-slate-800 focus:text-white">All</SelectItem>
+                        {years.map(y => <SelectItem key={y} value={y.toString()} className="focus:bg-slate-800 focus:text-white">{y}</SelectItem>)}
                     </SelectContent>
                 </Select>
 
                 <Select value={month === 'all' ? undefined : month} onValueChange={setMonth}>
-                    <SelectTrigger className="w-[120px] bg-slate-800 border-slate-700">
+                    <SelectTrigger className="w-[120px] bg-slate-800 border-slate-700 text-slate-200">
                         <SelectValue placeholder="Month" />
                     </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
-                        {months.map(m => <SelectItem key={m} value={m.toString()}>{new Date(2000, m - 1).toLocaleString('default', { month: 'long' })}</SelectItem>)}
+                    <SelectContent className="bg-slate-900 border-slate-800 text-slate-200">
+                        <SelectItem value="all" className="focus:bg-slate-800 focus:text-white">All</SelectItem>
+                        {months.map(m => <SelectItem key={m} value={m.toString()} className="focus:bg-slate-800 focus:text-white">{new Date(2000, m - 1).toLocaleString('default', { month: 'long' })}</SelectItem>)}
                     </SelectContent>
                 </Select>
 
                 <Select value={day === 'all' ? undefined : day} onValueChange={setDay}>
-                    <SelectTrigger className="w-[100px] bg-slate-800 border-slate-700">
+                    <SelectTrigger className="w-[100px] bg-slate-800 border-slate-700 text-slate-200">
                         <SelectValue placeholder="Day" />
                     </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
-                        {days.map(d => <SelectItem key={d} value={d.toString()}>{d}</SelectItem>)}
+                    <SelectContent className="bg-slate-900 border-slate-800 text-slate-200">
+                        <SelectItem value="all" className="focus:bg-slate-800 focus:text-white">All</SelectItem>
+                        {days.map(d => <SelectItem key={d} value={d.toString()} className="focus:bg-slate-800 focus:text-white">{d}</SelectItem>)}
                     </SelectContent>
                 </Select>
 
                 <div className="w-px h-6 bg-slate-700 mx-2" />
 
                 <Select value={patch === 'all' ? undefined : patch} onValueChange={setPatch}>
-                    <SelectTrigger className="w-[140px] bg-slate-800 border-slate-700">
+                    <SelectTrigger className="w-[140px] bg-slate-800 border-slate-700 text-slate-200">
                         <SelectValue placeholder="Patch" />
                     </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
-                        {patches.map((p: any) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                    <SelectContent className="bg-slate-900 border-slate-800 text-slate-200">
+                        <SelectItem value="all" className="focus:bg-slate-800 focus:text-white">All</SelectItem>
+                        {patches.map((p: any) => <SelectItem key={p} value={p} className="focus:bg-slate-800 focus:text-white">{p}</SelectItem>)}
                     </SelectContent>
                 </Select>
 
                 <Select value={mode === 'all' ? undefined : mode} onValueChange={setMode}>
-                    <SelectTrigger className="w-[100px] bg-slate-800 border-slate-700">
+                    <SelectTrigger className="w-[100px] bg-slate-800 border-slate-700 text-slate-200">
                         <SelectValue placeholder="Mode" />
                     </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">All</SelectItem>
-                        {modes.map((m: any) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                    <SelectContent className="bg-slate-900 border-slate-800 text-slate-200">
+                        <SelectItem value="all" className="focus:bg-slate-800 focus:text-white">All</SelectItem>
+                        {modes.map((m: any) => <SelectItem key={m} value={m} className="focus:bg-slate-800 focus:text-white">{m}</SelectItem>)}
                     </SelectContent>
                 </Select>
 
@@ -149,7 +149,7 @@ export default function MatchList({ matches }: MatchListProps) {
                     </div>
                 ) : (
                     filteredMatches.map((match) => (
-                        <Card key={match.id} className="bg-slate-900 border-slate-800 hover:border-indigo-500/30 transition-all duration-200">
+                        <Card key={match.id} className="bg-slate-900 border-slate-800 text-slate-200 hover:border-indigo-500/30 transition-all duration-200 shadow-none">
                             <div className="p-4 flex flex-col md:flex-row items-center justify-between gap-4">
 
                                 {/* Status & Meta */}
@@ -160,7 +160,7 @@ export default function MatchList({ matches }: MatchListProps) {
                                                 LIVE
                                             </Badge>
                                         ) : (
-                                            <Badge variant="secondary" className="whitespace-nowrap">Finished</Badge>
+                                            <Badge variant="secondary" className="bg-slate-800 text-slate-400 hover:bg-slate-700 whitespace-nowrap">Finished</Badge>
                                         )}
                                     </div>
                                     <div className="flex flex-col items-end md:items-start">
@@ -188,7 +188,7 @@ export default function MatchList({ matches }: MatchListProps) {
 
                                     <div className="flex items-center gap-2 ml-auto">
                                         <Link href={`/admin/simulator/${match.slug || match.id}`}>
-                                            <Button size="sm" variant={match.status === 'ongoing' ? "default" : "outline"} className={match.status === 'ongoing' ? "bg-indigo-600 hover:bg-indigo-700 h-8 text-xs" : "border-slate-700 hover:bg-slate-800 h-8 text-xs"}>
+                                            <Button size="sm" variant={match.status === 'ongoing' ? "default" : "outline"} className={match.status === 'ongoing' ? "bg-indigo-600 hover:bg-indigo-700 h-8 text-xs text-white" : "border-slate-700 bg-slate-800/50 hover:bg-slate-800 h-8 text-xs text-slate-300"}>
                                                 {match.status === 'ongoing' ? 'Enter Room' : 'View Summary'}
                                             </Button>
                                         </Link>
@@ -197,7 +197,7 @@ export default function MatchList({ matches }: MatchListProps) {
                                             <Button
                                                 size="sm"
                                                 variant="outline"
-                                                className="border-slate-700 hover:bg-slate-800 h-8 w-8 p-0"
+                                                className="border-slate-700 bg-slate-800/50 hover:bg-slate-800 h-8 w-8 p-0"
                                                 onClick={() => {
                                                     const url = `${window.location.origin}/share/match/${match.slug || match.id}`
                                                     navigator.clipboard.writeText(url)

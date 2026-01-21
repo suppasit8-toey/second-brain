@@ -58,7 +58,7 @@ export default function DraftTeamPanel({
 
     return (
         <div className="flex flex-col gap-1 w-full">
-            <div className={`p-2 ${isBlue ? 'bg-blue-900/20 border-blue-500/30' : 'bg-red-900/20 border-red-500/30'} border rounded-lg text-center`}>
+            <div className={`hidden lg:block p-2 ${isBlue ? 'bg-blue-900/20 border-blue-500/30' : 'bg-red-900/20 border-red-500/30'} border rounded-lg text-center`}>
                 <h3 className={`text-lg font-bold ${textHeader} truncate`}>{teamName}</h3>
             </div>
 

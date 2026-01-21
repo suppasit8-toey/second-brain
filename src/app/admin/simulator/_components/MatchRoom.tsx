@@ -8,17 +8,15 @@ import NewGameButton from '../../draft/_components/NewGameButton'
 import MatchSummary from './MatchSummary'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { useSearchParams, useRouter, usePathname } from 'next/navigation'
+import { MobileHeaderActions } from '@/components/admin/MobileHeaderContext'
+import { Lock, Trophy, ArrowLeft, RefreshCw, Maximize2, Minimize2, Play, Pause, Share2, Check, RotateCcw, Gamepad2 } from 'lucide-react'
 import Link from 'next/link'
-import { Lock, Trophy, ArrowLeft, RefreshCw, Maximize2, Minimize2, Play, Pause, Share2, Check } from 'lucide-react'
+import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { resetGame, finishMatch } from '../actions'
 import { useUI } from '@/context/UIContext'
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-
-
-
-// Reuse types or ensure they are compatible
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 interface MatchRoomProps {
     match: DraftMatch;
     heroes: Hero[];
@@ -34,7 +32,9 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
     const { isFullscreen, toggleFullscreen } = useUI()
     const draftRef = useRef<DraftControls>(null)
     const [isDraftPaused, setIsDraftPaused] = useState(false)
+
     const [isMatchCopied, setIsMatchCopied] = useState(false)
+    const [isGameMenuOpen, setIsGameMenuOpen] = useState(false)
 
     // 1. Determine Max Games based on Mode
     const getMaxGames = (mode: string) => {
@@ -153,11 +153,158 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
         return usedIds
     }
 
+    // Get active game for header actions
+    const activeGame = games.find(g => g.id === activeTab) // Fallback to null if not found
+
+    const handleHeaderTogglePause = () => {
+        if (draftRef.current) {
+            draftRef.current.togglePause()
+        }
+    }
+
+    const handleHeaderReset = () => {
+        if (activeGame) {
+            setGameToReset(activeGame.id)
+            setResetDialogOpen(true)
+        }
+    }
+
     return (
         <div className={`flex flex-col ${isFullscreen ? 'h-screen' : 'h-[calc(100vh-6rem)]'}`}>
-            {/* Match Header - Hidden in Fullscreen */}
+            {/* Mobile Header Actions Portal */}
             {!isFullscreen && (
-                <div className="shrink-0 bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between">
+                <MobileHeaderActions>
+                    <div className="flex items-center gap-1">
+                        <Link href="/admin/simulator">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-white">
+                                <ArrowLeft className="h-4 w-4" />
+                            </Button>
+                        </Link>
+
+                        {/* Mobile Game Selector Popover */}
+                        <Popover open={isGameMenuOpen} onOpenChange={setIsGameMenuOpen}>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    className="h-8 w-8 text-slate-400 hover:text-white"
+                                >
+                                    <Gamepad2 className="h-5 w-5" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-auto p-2 bg-slate-900 border-slate-800 shadow-xl ml-2 mt-2" align="start" sideOffset={5}>
+                                <TabsList className="flex flex-col h-auto bg-transparent items-stretch gap-1 w-[160px]">
+                                    {seriesArray.map((num) => {
+                                        const game = games.find(g => g.game_number === num)
+                                        const isCreated = !!game
+                                        if (!isCreated && isMatchFinished) return null
+
+                                        const prevGame = games.find(g => g.game_number === num - 1)
+                                        const isLocked = !isCreated && (num > 1 && (!prevGame || !prevGame.winner))
+                                        const value = isCreated ? game.id : `new-${num}`
+
+                                        return (
+                                            <TabsTrigger
+                                                key={num}
+                                                value={value}
+                                                disabled={isLocked}
+                                                onClick={() => setIsGameMenuOpen(false)}
+                                                className="w-full justify-start px-4 py-2 data-[state=active]:bg-slate-800 data-[state=active]:text-white text-slate-400 hover:text-slate-200"
+                                            >
+                                                {isLocked ? <Lock className="w-3 h-3 mr-2 opacity-50" /> : null}
+                                                Game {num}
+                                            </TabsTrigger>
+                                        )
+                                    })}
+                                    {isMatchFinished && (
+                                        <TabsTrigger
+                                            value="summary"
+                                            onClick={() => setIsGameMenuOpen(false)}
+                                            className="w-full justify-start px-4 py-2 text-yellow-500 data-[state=active]:bg-yellow-900/20 data-[state=active]:text-yellow-400"
+                                        >
+                                            <Trophy className="w-3 h-3 mr-2" />
+                                            Summary
+                                        </TabsTrigger>
+                                    )}
+                                </TabsList>
+                            </PopoverContent>
+                        </Popover>
+
+                        {/* Mobile Scoreboard */}
+                        <div className="flex items-center gap-2 mx-2">
+                            <span className="text-[10px] font-bold text-blue-400 truncate max-w-[60px] text-right leading-tight">
+                                {match.team_a_name}
+                            </span>
+                            <div className="flex items-center gap-1 font-mono font-bold text-xs bg-slate-950/80 px-2 py-1 rounded border border-slate-800">
+                                <span className={teamAScore > teamBScore ? 'text-blue-400' : 'text-slate-200'}>{teamAScore}</span>
+                                <span className="text-slate-600 text-[10px]">:</span>
+                                <span className={teamBScore > teamAScore ? 'text-red-400' : 'text-slate-200'}>{teamBScore}</span>
+                            </div>
+                            <span className="text-[10px] font-bold text-slate-300 truncate max-w-[60px] text-left leading-tight">
+                                {match.team_b_name}
+                            </span>
+                        </div>
+
+                        <div className="h-4 w-px bg-slate-800 mx-1" />
+
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-slate-400 hover:text-white"
+                            onClick={() => {
+                                const url = `${window.location.origin}/share/match/${match.slug || match.id}`
+                                navigator.clipboard.writeText(url)
+                                setIsMatchCopied(true)
+                                setTimeout(() => setIsMatchCopied(false), 2000)
+                            }}
+                        >
+                            {isMatchCopied ? <Check className="h-4 w-4 text-green-400" /> : <Share2 className="h-4 w-4" />}
+                        </Button>
+
+                        <div className="hidden sm:flex items-center gap-1">
+                            <Badge variant="outline" className="bg-slate-900/50 border-slate-700 text-slate-400 font-mono text-xs">
+                                Patch {match.version?.name || '1.60.1.10'}
+                            </Badge>
+                        </div>
+
+                        <div className="h-4 w-px bg-slate-800 mx-1" />
+
+                        {/* Controls - Only enable if game is active/created */}
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className={`h-8 w-8 ${!isDraftPaused ? 'text-green-400 hover:text-green-300' : 'text-slate-400 hover:text-white'}`}
+                            onClick={handleHeaderTogglePause}
+                            disabled={!activeGame}
+                        >
+                            {!isDraftPaused ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                        </Button>
+
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-slate-400 hover:text-white"
+                            onClick={handleHeaderReset}
+                            disabled={!activeGame}
+                        >
+                            <RotateCcw className="h-4 w-4" />
+                        </Button>
+
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-slate-400 hover:text-white"
+                            onClick={toggleFullscreen}
+                        >
+                            <Maximize2 className="h-4 w-4" />
+                        </Button>
+                    </div>
+                </MobileHeaderActions>
+            )}
+
+            {/* Match Header - Hidden on Mobile (Default), Visible on Desktop */}
+            {!isFullscreen && (
+                <div className="hidden lg:flex shrink-0 bg-slate-900 border-b border-slate-800 p-4 items-center justify-between">
                     <div className="flex items-center gap-8">
                         <div className="text-right w-48">
                             <h2 className="text-2xl font-black text-white truncate">{match.team_a_name}</h2>
@@ -197,7 +344,7 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                             onClick={() => {
                                 const url = `${window.location.origin}/share/match/${match.slug || match.id}`
                                 navigator.clipboard.writeText(url)
-                                // We can rely on a toast or button text change here. 
+                                // We can rely on a toast or button text change here.
                                 // Since MatchRoom is a bigger component, let's use a simple alert or just changing text for a second?
                                 // Actually, let's add a local state for 'isCopied' to this component to give feedback.
                                 setIsMatchCopied(true)
@@ -256,8 +403,11 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
 
             <div className="flex-1 overflow-hidden flex flex-col relative min-h-0">
                 <Tabs value={activeTab} onValueChange={onTabChange} className="flex-1 flex flex-col">
-                    <div className={`shrink-0 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between gap-4 overflow-x-auto ${isFullscreen ? 'px-4 py-1' : 'px-6 py-2'}`}>
-                        <TabsList className="bg-slate-800 text-slate-400 h-10 p-1 shrink-0">
+                    <div className={`hidden md:flex shrink-0 border-b border-slate-800 bg-slate-900/50 items-center justify-between gap-4 overflow-x-auto custom-scrollbar active-scrollbar ${isFullscreen ? 'px-4 py-1' : 'px-6 py-2'}`}>
+                        {/* Mobile Dropdown (Popover) - Moved to Header per user request */}
+
+                        {/* Desktop Tabs List */}
+                        <TabsList className="hidden md:flex bg-slate-800 text-slate-400 h-10 p-1 shrink-0">
                             {seriesArray.map((num) => {
                                 // If match is already finished, do we show future unplayed games?
                                 // e.g. BO5 finished 3-0. Should we show Game 4/5?
@@ -295,6 +445,25 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                                 </TabsTrigger>
                             )}
                         </TabsList>
+
+                        {/* Mobile/Default Score Display - Moved to Header */}
+                        {!isFullscreen && (
+                            <div className="lg:mr-0 hidden lg:flex items-center gap-3 shrink-0 ml-auto mr-2">
+                                <span className="text-xs font-bold text-blue-400 truncate max-w-[80px] sm:max-w-[120px] md:max-w-none text-right">
+                                    {match.team_a_name}
+                                </span>
+
+                                <div className="flex items-center gap-2 font-mono font-bold text-sm bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 shadow-sm">
+                                    <span className={teamAScore > teamBScore ? 'text-blue-400' : 'text-slate-200'}>{teamAScore}</span>
+                                    <span className="text-slate-600 text-xs">:</span>
+                                    <span className={teamBScore > teamAScore ? 'text-red-400' : 'text-slate-200'}>{teamBScore}</span>
+                                </div>
+
+                                <span className="text-xs font-bold text-slate-300 truncate max-w-[80px] sm:max-w-[120px] md:max-w-none text-left">
+                                    {match.team_b_name}
+                                </span>
+                            </div>
+                        )}
 
                         {/* Fullscreen Compact Match Info */}
                         {isFullscreen && (
@@ -376,7 +545,7 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                                     {isCreated ? (
                                         <div className="flex-1 flex flex-col relative min-h-0 overflow-hidden">
                                             <DraftInterface
-                                                ref={draftRef}
+                                                ref={activeTab === value ? draftRef : undefined}
                                                 match={match}
                                                 game={game}
                                                 initialHeroes={heroes}
