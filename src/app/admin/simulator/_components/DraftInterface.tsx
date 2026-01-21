@@ -1970,7 +1970,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     </TabsContent>
 
                     {/* Tab 1: HERO SELECTOR */}
-                    <TabsContent value="hero" className="flex-1 flex flex-col min-h-0 gap-0.5 data-[state=active]:flex m-0 overflow-hidden">
+                    <TabsContent value="hero" className="flex-1 flex flex-col min-h-0 gap-0.5 data-[state=active]:flex m-0 overflow-hidden mb-24 lg:mb-0">
                         {/* Filters */}
                         <div className="flex flex-col gap-0.5 flex-1 min-h-0">
                             <div className="flex gap-2 shrink-0">
@@ -2166,34 +2166,35 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     {/* Tab 3: CEREBRO AI */}
                     <TabsContent value="cerebro-ai" className="flex-1 flex flex-col min-h-0 bg-slate-900 border border-slate-800 rounded-xl p-2 data-[state=active]:flex m-0 overflow-hidden">
                         <Tabs value={aiTab} onValueChange={setAiTab} className="flex-1 flex flex-col min-h-0">
-                            <div className="flex items-center justify-between mb-2 shrink-0">
-                                <div className="flex items-center gap-2">
+                            <div className="flex flex-col md:flex-row md:items-center justify-between mb-2 shrink-0 gap-2">
+                                <div className="flex items-center gap-2 overflow-hidden">
                                     <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="h-6 w-6 text-slate-400 hover:text-white hover:bg-slate-800"
+                                        className="h-6 w-6 text-slate-400 hover:text-white hover:bg-slate-800 shrink-0"
                                         onClick={() => setCurrentTab('hero')}
                                         title="Back to Heroes"
                                     >
                                         <ChevronDown className="w-4 h-4 rotate-90" />
                                     </Button>
-                                    <h3 className="font-bold text-indigo-400 flex items-center gap-2">
-                                        <Brain className="w-5 h-5" />
-                                        CEREBRO AI • {currentMode.name.split('(')[0]}
+                                    <h3 className="font-bold text-indigo-400 flex items-center gap-2 text-xs md:text-sm truncate min-w-0">
+                                        <Brain className="w-4 h-4 md:w-5 md:h-5 shrink-0" />
+                                        <span className="shrink-0">CEREBRO AI •</span>
+                                        <span className="truncate">{currentMode.name.split('(')[0]}</span>
                                     </h3>
                                 </div>
 
-                                <TabsList className="bg-slate-950/50 border border-slate-800 p-0.5 h-10">
-                                    <TabsTrigger value="suggestions" title="Suggestion" className="w-10 h-9 px-0 data-[state=active]:bg-indigo-500/20 data-[state=active]:text-indigo-400 data-[state=active]:border-indigo-500/50 border border-transparent text-slate-500 hover:text-indigo-300 transition-all"><Home className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="meta" title="Meta Analysis" className="w-10 h-9 px-0 data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400 data-[state=active]:border-purple-500/50 border border-transparent text-slate-500 hover:text-purple-300 transition-all"><Globe className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="counter" title="Counter Matchups" className="w-10 h-9 px-0 data-[state=active]:bg-red-500/20 data-[state=active]:text-red-400 data-[state=active]:border-red-500/50 border border-transparent text-slate-500 hover:text-red-300 transition-all"><Swords className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="comfort" title="Team Hero Pool" className="w-10 h-9 px-0 data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400 data-[state=active]:border-blue-500/50 border border-transparent text-slate-500 hover:text-blue-300 transition-all"><Users className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="opponent-pool" title="Opponent Pool" className="w-10 h-9 px-0 data-[state=active]:bg-yellow-500/20 data-[state=active]:text-yellow-400 data-[state=active]:border-yellow-500/50 border border-transparent text-slate-500 hover:text-yellow-300 transition-all"><Eye className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="roster" title="Roster Dominance" className="w-10 h-9 px-0 data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400 data-[state=active]:border-cyan-500/50 border border-transparent text-slate-500 hover:text-cyan-300 transition-all"><Target className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="ban" title="Ban Strategy" className="w-10 h-9 px-0 data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400 data-[state=active]:border-orange-500/50 border border-transparent text-slate-500 hover:text-orange-300 transition-all"><ShieldBan className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="composition" title="Draft Composition" className="w-10 h-9 px-0 data-[state=active]:bg-pink-500/20 data-[state=active]:text-pink-400 data-[state=active]:border-pink-500/50 border border-transparent text-slate-500 hover:text-pink-300 transition-all"><Brain className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="synergy" title="Synergies" className="w-10 h-9 px-0 data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400 data-[state=active]:border-emerald-500/50 border border-transparent text-slate-500 hover:text-emerald-300 transition-all"><LinkIcon className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="analysis" title="Analysis Config" className="w-10 h-9 px-0 data-[state=active]:bg-slate-700 data-[state=active]:text-white border border-transparent text-slate-500 hover:text-slate-300 transition-all"><Settings2 className="w-5 h-5" /></TabsTrigger>
+                                <TabsList className="bg-slate-950/50 border border-slate-800 p-0.5 h-auto min-h-[36px] md:h-10 w-full md:w-auto overflow-x-auto justify-start gap-0.5 scrollbar-none">
+                                    <TabsTrigger value="suggestions" title="Suggestion" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-indigo-500/20 data-[state=active]:text-indigo-400 data-[state=active]:border-indigo-500/50 border border-transparent text-slate-500 hover:text-indigo-300 transition-all shrink-0"><Home className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
+                                    <TabsTrigger value="meta" title="Meta Analysis" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400 data-[state=active]:border-purple-500/50 border border-transparent text-slate-500 hover:text-purple-300 transition-all shrink-0"><Globe className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
+                                    <TabsTrigger value="counter" title="Counter Matchups" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-red-500/20 data-[state=active]:text-red-400 data-[state=active]:border-red-500/50 border border-transparent text-slate-500 hover:text-red-300 transition-all shrink-0"><Swords className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
+                                    <TabsTrigger value="comfort" title="Team Hero Pool" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400 data-[state=active]:border-blue-500/50 border border-transparent text-slate-500 hover:text-blue-300 transition-all shrink-0"><Users className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
+                                    <TabsTrigger value="opponent-pool" title="Opponent Pool" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-yellow-500/20 data-[state=active]:text-yellow-400 data-[state=active]:border-yellow-500/50 border border-transparent text-slate-500 hover:text-yellow-300 transition-all shrink-0"><Eye className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
+                                    <TabsTrigger value="roster" title="Roster Dominance" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400 data-[state=active]:border-cyan-500/50 border border-transparent text-slate-500 hover:text-cyan-300 transition-all shrink-0"><Target className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
+                                    <TabsTrigger value="ban" title="Ban Strategy" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400 data-[state=active]:border-orange-500/50 border border-transparent text-slate-500 hover:text-orange-300 transition-all shrink-0"><ShieldBan className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
+                                    <TabsTrigger value="composition" title="Draft Composition" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-pink-500/20 data-[state=active]:text-pink-400 data-[state=active]:border-pink-500/50 border border-transparent text-slate-500 hover:text-pink-300 transition-all shrink-0"><Brain className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
+                                    <TabsTrigger value="synergy" title="Synergies" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400 data-[state=active]:border-emerald-500/50 border border-transparent text-slate-500 hover:text-emerald-300 transition-all shrink-0"><LinkIcon className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
+                                    <TabsTrigger value="analysis" title="Analysis Config" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-slate-700 data-[state=active]:text-white border border-transparent text-slate-500 hover:text-slate-300 transition-all shrink-0"><Settings2 className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
                                 </TabsList>
                             </div>
 
@@ -2257,7 +2258,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     </div>
                                 )}
 
-                                <ScrollArea className="flex-1 -mr-2 pr-2">
+                                <ScrollArea className="flex-1 -mr-2 pr-2 pb-24">
                                     {(() => {
                                         if (isLoadingRecommendations) {
                                             return (
@@ -2506,7 +2507,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     )
 
                                     return (
-                                        <div className={`grid gap-2 flex-1 min-h-0 ${teamPoolFilter === 'ALL' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
+                                        <div className={`grid gap-2 flex-1 min-h-0 pb-24 ${teamPoolFilter === 'ALL' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
                                             {(teamPoolFilter === 'ALL' || teamPoolFilter === 'TEAM_A') && (
                                                 <div className="bg-slate-950/30 rounded-lg border border-slate-800 overflow-hidden flex flex-col">
                                                     {renderPoolTable(teamAPool, match.team_a_name, teamAGames, 'blue')}
@@ -2730,7 +2731,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     </div>
                                 </div>
                                 <ScrollArea className="flex-1 bg-slate-950/30 rounded-lg border border-slate-800 h-full">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-2">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-2 pb-24">
                                         {recommendations.meta?.filter((item: any) => metaFilter === 'ALL' || item.hero.main_position?.includes(metaFilter)).map((item: any) => (
                                             <div key={item.hero.id} className="bg-purple-950/10 border border-purple-900/20 p-2 rounded flex items-center gap-2 hover:bg-purple-900/20 transition-colors cursor-pointer" onClick={() => handleHeroClick(item.hero)}>
                                                 <Image src={item.hero.icon_url} alt={item.hero.name} width={32} height={32} className="rounded" />
@@ -2790,7 +2791,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         ))}
                                     </div>
                                 </div>
-                                <ScrollArea className="flex-1 bg-slate-950/30 rounded-lg p-2 border border-slate-800">
+                                <ScrollArea className="flex-1 bg-slate-950/30 rounded-lg p-2 border border-slate-800 pb-24">
                                     {counterTeamFilter !== 'ALL' ? (
                                         // Team-specific Lane Matchups View
                                         <div className="flex flex-col gap-3">
@@ -3547,7 +3548,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
 
             {/* RIGHT: RED TEAM (Hidden on mobile, shown on desktop) */}
-            <div className="hidden lg:flex w-[22%] flex-col gap-1 shrink-0">
+            < div className="hidden lg:flex w-[22%] flex-col gap-1 shrink-0" >
                 <DraftTeamPanel
                     side="RED"
                     teamName={game.red_team_name}
@@ -3580,9 +3581,9 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                         })()
                     }}
                 />
-            </div>
+            </div >
 
-        </div>
+        </div >
 
 
     )
