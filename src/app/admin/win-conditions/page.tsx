@@ -1,11 +1,42 @@
-'use client'
-
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { getVersions, getHeroesByVersion } from '@/app/admin/heroes/actions'
+import { getTournaments } from '@/app/admin/tournaments/actions'
+import { WinConditionManager } from './_components/WinConditionManager'
 import { Flag } from 'lucide-react'
 
-export default function WinConditionPage() {
+export const dynamic = 'force-dynamic'
+
+export default async function WinConditionPage() {
+    // 1. Fetch Versions & Tournaments
+    const versionsData = await getVersions()
+    const tournamentsData = await getTournaments()
+
+    // 2. Fetch Heroes (Use active version or first one)
+    const activeVersion = versionsData?.find((v: any) => v.is_active) || versionsData?.[0]
+    let heroesData = []
+
+    if (activeVersion) {
+        heroesData = await getHeroesByVersion(activeVersion.id) as any[]
+    }
+
+    // Format for simple consumption
+    const versions = versionsData?.map((v: any) => v.name) || []
+
+    // Format tournaments 
+    const tournaments = tournamentsData?.map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        status: t.status // potentially needed for filtering active ones
+    })) || []
+
+    const heroes = heroesData?.map((h: any) => ({
+        id: h.id,
+        name: h.name,
+        image_url: h.icon_url,
+        roles: h.main_position
+    })) || []
+
     return (
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-6 pb-24">
             <div className="flex items-center gap-4">
                 <div className="p-3 bg-purple-500/10 rounded-xl border border-purple-500/20">
                     <Flag className="w-8 h-8 text-purple-400" />
@@ -18,22 +49,11 @@ export default function WinConditionPage() {
                 </div>
             </div>
 
-            <Card className="bg-slate-900 border-slate-800">
-                <CardHeader>
-                    <CardTitle className="text-slate-200">Win Condition Analysis</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <p className="text-slate-400">
-                        This section is under construction. Future features will include:
-                    </p>
-                    <ul className="list-disc list-inside text-slate-400 space-y-2 ml-4">
-                        <li>Team composition analysis</li>
-                        <li>Power spike timing correlation</li>
-                        <li>Objective control priorities</li>
-                        <li>Lane pressure distribution</li>
-                    </ul>
-                </CardContent>
-            </Card>
+            <WinConditionManager
+                heroes={heroes}
+                versions={versions}
+                tournaments={tournaments}
+            />
         </div>
     )
 }

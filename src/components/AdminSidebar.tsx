@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { usePathname } from 'next/navigation'
-import { History, Users, Trophy, UserRound, ScrollText, Gamepad2, NotebookPen, Brain, BookOpen, ChevronDown, ChevronRight, Swords, Handshake, Flag, Ghost, Shield, LayoutDashboard } from 'lucide-react'
+import { History, Users, Trophy, UserRound, ScrollText, Gamepad2, NotebookPen, Brain, BookOpen, ChevronDown, ChevronRight, Swords, Handshake, Flag, Ghost, Shield, LayoutDashboard, Map as MapIcon } from 'lucide-react'
 
 export default function AdminSidebar() {
     const pathname = usePathname()
@@ -22,6 +22,7 @@ export default function AdminSidebar() {
     }
 
     const links = [
+        { href: '/admin/roadmap', label: 'Roadmap', icon: MapIcon },
         { href: '/admin/versions', label: 'Versions', icon: History },
         { href: '/admin/heroes', label: 'Heroes', icon: Ghost },
         {

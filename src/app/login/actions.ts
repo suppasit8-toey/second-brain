@@ -19,7 +19,7 @@ export async function login(prevState: any, formData: FormData) {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
         })
-        redirect('/admin/heroes')
+        redirect('/admin/roadmap')
     } else {
         return { success: false, message: 'Invalid Password' }
     }

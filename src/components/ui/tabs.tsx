@@ -11,12 +11,28 @@ const TabsContext = React.createContext<{ value: string; onValueChange: (value: 
     onValueChange: () => { },
 });
 
-const Tabs = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement> & { value: string; onValueChange: (val: string) => void }>(
-    ({ className, value, onValueChange, ...props }, ref) => (
-        <TabsContext.Provider value={{ value, onValueChange }}>
-            <div ref={ref} className={cn("", className)} {...props} />
-        </TabsContext.Provider>
-    )
+const Tabs = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement> & { value?: string; defaultValue?: string; onValueChange?: (val: string) => void }>(
+    ({ className, value: controlledValue, defaultValue, onValueChange, ...props }, ref) => {
+        const [internalValue, setInternalValue] = React.useState(defaultValue || "")
+
+        const isControlled = controlledValue !== undefined
+        const value = isControlled ? controlledValue : internalValue
+
+        const handleValueChange = (newValue: string) => {
+            if (onValueChange) {
+                onValueChange(newValue)
+            }
+            if (!isControlled) {
+                setInternalValue(newValue)
+            }
+        }
+
+        return (
+            <TabsContext.Provider value={{ value: value || "", onValueChange: handleValueChange }}>
+                <div ref={ref} className={cn("", className)} {...props} />
+            </TabsContext.Provider>
+        )
+    }
 )
 Tabs.displayName = "Tabs"
 
