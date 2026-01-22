@@ -1797,7 +1797,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             </div>
 
             {/* CENTER: BOARD & CONTROLS */}
-            <div className="w-full lg:flex-1 flex flex-col gap-0.5 min-h-0 shrink-0">
+            <div className="w-full flex-1 flex flex-col gap-0.5 min-h-0 shrink-0">
                 {/* Desktop Header / Timer (Hidden on Mobile) */}
                 <div className="hidden lg:flex h-20 bg-slate-900 border border-slate-700 rounded-xl items-center justify-between px-4 relative shrink-0 z-30">
                     <div className="z-10 flex flex-col items-center w-full">
