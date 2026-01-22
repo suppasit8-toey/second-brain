@@ -1678,7 +1678,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     }
 
     return (
-        <div className="flex flex-col lg:flex-row h-[100dvh] overflow-hidden gap-1 p-0 lg:p-1 text-white bg-slate-950">
+        <div className="flex flex-col lg:flex-row h-full w-full overflow-hidden gap-1 p-0 lg:p-1 text-white bg-slate-950 overscroll-none">
             {/* MOBILE SECTION 1: Locked Header (Score & Game Info) */}
             <div className="lg:hidden shrink-0 bg-gradient-to-b from-slate-900 to-slate-950 border-b border-white/10 relative z-40 shadow-md">
                 {/* Phase Indicator */}
@@ -1896,9 +1896,9 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     </TabsList>
 
                     {/* Tab 0: BOARD (Mobile Only) - Red Left, Blue Right */}
-                    <TabsContent value="board" className="flex-1 flex flex-col min-h-0 m-0 overflow-hidden lg:hidden">
+                    <TabsContent value="board" className="flex-1 flex flex-col min-h-0 m-0 overflow-hidden lg:hidden mb-14 lg:mb-0">
                         <div className="flex-1 overflow-y-auto min-h-0 p-1">
-                            <div className="grid grid-cols-2 gap-1 pb-16">
+                            <div className="grid grid-cols-2 gap-1 pb-0">
                                 {/* BLUE Side (Left) */}
                                 <DraftTeamPanel
                                     side="BLUE"
@@ -1970,7 +1970,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     </TabsContent>
 
                     {/* Tab 1: HERO SELECTOR */}
-                    <TabsContent value="hero" className="flex-1 flex flex-col min-h-0 gap-0.5 data-[state=active]:flex m-0 overflow-hidden mb-24 lg:mb-0">
+                    <TabsContent value="hero" className="flex-1 flex flex-col min-h-0 gap-0.5 data-[state=active]:flex m-0 overflow-hidden mb-14 lg:mb-0">
                         {/* Filters */}
                         <div className="flex flex-col gap-0.5 flex-1 min-h-0">
                             <div className="flex gap-2 shrink-0">
@@ -1997,7 +1997,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 </div>
                             </div>
 
-                            <div className="flex-1 overflow-y-auto bg-slate-950/30 rounded-lg p-2 h-full">
+                            <div className="flex-1 overflow-y-auto bg-slate-950/30 rounded-lg p-2">
                                 {filteredHeroes.length === 0 ? (
                                     <div className="flex items-center justify-center h-full text-slate-500">
                                         No heroes found.
@@ -2093,7 +2093,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     </TabsContent>
 
                     {/* Tab 2: GLOBAL BANS */}
-                    <TabsContent value="global-bans" className="flex-1 flex flex-col min-h-0 bg-slate-900/50 border border-slate-800 rounded-xl p-4 data-[state=active]:flex m-0 overflow-y-auto">
+                    <TabsContent value="global-bans" className="flex-1 flex flex-col min-h-0 bg-slate-900/50 border border-slate-800 rounded-xl p-4 data-[state=active]:flex m-0 overflow-y-auto mb-14 lg:mb-0">
                         <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest text-center mb-4">Historical Bans (Previous Games)</h4>
 
                         <div className="space-y-3">
@@ -2124,26 +2124,26 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                             </span>
                                         </div>
 
-                                        <div className="grid grid-cols-2 gap-2 md:gap-8 divide-x divide-slate-800/50">
+                                        <div className="grid grid-cols-2 gap-1 md:gap-8 divide-x divide-slate-800/50">
                                             {/* Left Column: Team A Picks */}
-                                            <div className="flex flex-wrap gap-2 justify-center content-start">
+                                            <div className="flex flex-wrap gap-1 justify-center content-start">
                                                 {teamAPicks.map(id => {
                                                     const h = getHero(id)
                                                     return h ? (
                                                         <div key={id} className="relative group">
-                                                            <Image src={h.icon_url} alt={h.name} width={32} height={32} className="rounded border border-slate-700 grayscale opacity-75 group-hover:grayscale-0 group-hover:opacity-100 transition-all" title={h.name} />
+                                                            <Image src={h.icon_url} alt={h.name} width={24} height={24} className="rounded border border-slate-700 grayscale opacity-75 group-hover:grayscale-0 group-hover:opacity-100 transition-all" title={h.name} />
                                                         </div>
                                                     ) : null
                                                 })}
                                                 {teamAPicks.length === 0 && <span className="text-xs text-slate-600">-</span>}
                                             </div>
                                             {/* Right Column: Team B Picks */}
-                                            <div className="flex flex-wrap gap-2 justify-center content-start">
+                                            <div className="flex flex-wrap gap-1 justify-center content-start">
                                                 {teamBPicks.map(id => {
                                                     const h = getHero(id)
                                                     return h ? (
                                                         <div key={id} className="relative group">
-                                                            <Image src={h.icon_url} alt={h.name} width={32} height={32} className="rounded border border-slate-700 grayscale opacity-75 group-hover:grayscale-0 group-hover:opacity-100 transition-all" title={h.name} />
+                                                            <Image src={h.icon_url} alt={h.name} width={24} height={24} className="rounded border border-slate-700 grayscale opacity-75 group-hover:grayscale-0 group-hover:opacity-100 transition-all" title={h.name} />
                                                         </div>
                                                     ) : null
                                                 })}
@@ -2164,7 +2164,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     </TabsContent>
 
                     {/* Tab 3: CEREBRO AI */}
-                    <TabsContent value="cerebro-ai" className="flex-1 flex flex-col min-h-0 bg-slate-900 border border-slate-800 rounded-xl p-2 data-[state=active]:flex m-0 overflow-hidden">
+                    <TabsContent value="cerebro-ai" className="flex-1 flex flex-col min-h-0 bg-slate-900 border border-slate-800 rounded-xl p-2 data-[state=active]:flex m-0 overflow-hidden mb-14 lg:mb-0">
                         <Tabs value={aiTab} onValueChange={setAiTab} className="flex-1 flex flex-col min-h-0">
                             <div className="flex flex-col md:flex-row md:items-center justify-between mb-2 shrink-0 gap-2">
                                 <div className="flex items-center gap-2 overflow-hidden">

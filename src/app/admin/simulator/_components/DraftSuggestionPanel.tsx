@@ -50,7 +50,7 @@ export default function DraftSuggestionPanel({
     activeLayers,
     upcomingSlots = []
 }: DraftSuggestionPanelProps) {
-    const [isCollapsed, setIsCollapsed] = useState(false);
+    const [isCollapsed, setIsCollapsed] = useState(true);
     const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
 
     // Toggle position filter
