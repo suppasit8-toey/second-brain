@@ -13,7 +13,7 @@ export interface ConditionItem {
 
 export interface WinCondition {
     id: string;
-    name: string; // Optional: user could name it, or auto-generate
+    name?: string; // Optional: user could name it, or auto-generate
     version: string;
     tournamentId?: string;
     allyConditions: ConditionItem[];

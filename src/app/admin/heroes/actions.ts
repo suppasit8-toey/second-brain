@@ -41,6 +41,20 @@ export async function getHeroesByVersion(versionId: number) {
     return data
 }
 
+export async function getAllHeroes() {
+    const supabase = await createClient()
+    const { data, error } = await supabase
+        .from('heroes')
+        .select('*')
+        .order('name')
+
+    if (error) {
+        console.error('Error fetching all heroes:', error)
+        return []
+    }
+    return data
+}
+
 export async function addHero(prevState: any, formData: FormData) {
     const supabase = await createClient()
 

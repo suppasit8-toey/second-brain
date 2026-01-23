@@ -45,3 +45,19 @@ export async function activateVersion(versionId: number) {
 
     revalidatePath('/admin/versions')
 }
+
+// ... (existing code)
+
+export async function getVersions() {
+    const supabase = await createClient()
+    const { data, error } = await supabase
+        .from('versions')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+    if (error) {
+        console.error('Error fetching versions:', error)
+        return []
+    }
+    return data
+}

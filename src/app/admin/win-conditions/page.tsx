@@ -1,5 +1,6 @@
 import { getVersions, getHeroesByVersion } from '@/app/admin/heroes/actions'
 import { getTournaments } from '@/app/admin/tournaments/actions'
+import { getWinConditions } from './actions'
 import { WinConditionManager } from './_components/WinConditionManager'
 import { Flag } from 'lucide-react'
 
@@ -35,6 +36,8 @@ export default async function WinConditionPage() {
         roles: h.main_position
     })) || []
 
+    const initialConditions = await getWinConditions()
+
     return (
         <div className="p-6 space-y-6 pb-24">
             <div className="flex items-center gap-4">
@@ -53,6 +56,7 @@ export default async function WinConditionPage() {
                 heroes={heroes}
                 versions={versions}
                 tournaments={tournaments}
+                initialConditions={initialConditions}
             />
         </div>
     )

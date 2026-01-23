@@ -157,3 +157,123 @@ export async function analyzeWinCondition(filters: AnalysisFilters) {
         matches: detailedMatches
     }
 }
+
+export async function getWinConditions() {
+    const supabase = await createClient()
+    const { data, error } = await supabase
+        .from('win_conditions')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+    if (error) {
+        console.error('Error fetching win conditions:', JSON.stringify(error, null, 2))
+        // Fallback or re-throw?
+        // return []
+        // Let's return empty for now but log loudly
+        return []
+    }
+
+    // Map DB shape to UI shape
+    return data.map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        version: item.version,
+        tournamentId: item.tournament_id,
+        allyConditions: typeof item.ally_conditions === 'string' ? JSON.parse(item.ally_conditions) : item.ally_conditions,
+        enemyConditions: typeof item.enemy_conditions === 'string' ? JSON.parse(item.enemy_conditions) : item.enemy_conditions,
+        createdAt: new Date(item.created_at).getTime(),
+        result: item.last_result
+    }))
+}
+
+export async function createWinCondition(data: any) {
+    const supabase = await createClient()
+
+    // 1. Insert
+    const { data: newCondition, error } = await supabase
+        .from('win_conditions')
+        .insert({
+            name: data.name,
+            version: data.version,
+            tournament_id: data.tournamentId,
+            ally_conditions: data.allyConditions, // Supabase handles JSON array automatically usually
+            enemy_conditions: data.enemyConditions,
+            last_result: data.result
+        })
+        .select()
+        .single()
+
+    if (error) {
+        console.error('Error creating win condition:', error)
+        return { success: false, error: error.message }
+    }
+
+    return { success: true, data: newCondition }
+}
+
+export async function updateWinCondition(id: string, data: any) {
+    const supabase = await createClient()
+
+    const { error } = await supabase
+        .from('win_conditions')
+        .update({
+            name: data.name,
+            version: data.version,
+            tournament_id: data.tournamentId,
+            ally_conditions: data.allyConditions,
+            enemy_conditions: data.enemyConditions,
+            // Note: We might want to clear 'last_result' here if the definition changes, 
+            // but 'analyzeWinCondition' will likely be called immediately after anyway.
+            last_result: null
+        })
+        .eq('id', id)
+
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+export async function deleteWinCondition(id: string) {
+    const supabase = await createClient()
+    const { error } = await supabase
+        .from('win_conditions')
+        .delete()
+        .eq('id', id)
+
+    if (error) return { success: false, error: error.message }
+    return { success: true }
+}
+
+export async function updateWinConditionResult(id: string, result: any) {
+    const supabase = await createClient()
+    const { error } = await supabase
+        .from('win_conditions')
+        .update({ last_result: result })
+        .eq('id', id)
+
+    if (error) console.error("Failed to update cache", error)
+}
+
+export async function getWinCondition(id: string) {
+    const supabase = await createClient()
+    const { data, error } = await supabase
+        .from('win_conditions')
+        .select('*')
+        .eq('id', id)
+        .single()
+
+    if (error) {
+        console.error('Error fetching win condition:', error)
+        return null
+    }
+
+    return {
+        id: data.id,
+        name: data.name,
+        version: data.version,
+        tournamentId: data.tournament_id,
+        allyConditions: typeof data.ally_conditions === 'string' ? JSON.parse(data.ally_conditions) : data.ally_conditions,
+        enemyConditions: typeof data.enemy_conditions === 'string' ? JSON.parse(data.enemy_conditions) : data.enemy_conditions,
+        createdAt: new Date(data.created_at).getTime(),
+        result: data.last_result
+    }
+}

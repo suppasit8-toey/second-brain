@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
-import { CreateWinConditionDialog } from './CreateWinConditionDialog'
+import { WinConditionDialog } from './WinConditionDialog'
 import { WinConditionCard } from './WinConditionCard'
 import { WinCondition, Hero } from './types'
 
@@ -10,12 +10,13 @@ interface WinConditionManagerProps {
     heroes: Hero[];
     versions: string[];
     tournaments: { id: string; name: string }[];
+    initialConditions: WinCondition[];
 }
 
-import { analyzeWinCondition } from '../actions'
+import { analyzeWinCondition, createWinCondition, deleteWinCondition } from '../actions'
 
-export function WinConditionManager({ heroes, versions, tournaments }: WinConditionManagerProps) {
-    const [conditions, setConditions] = useState<WinCondition[]>([])
+export function WinConditionManager({ heroes, versions, tournaments, initialConditions }: WinConditionManagerProps) {
+    const [conditions, setConditions] = useState<WinCondition[]>(initialConditions)
     const [isDialogOpen, setIsDialogOpen] = useState(false)
 
     const handleCreate = async (data: Omit<WinCondition, 'id' | 'createdAt'>) => {
@@ -43,17 +44,37 @@ export function WinConditionManager({ heroes, versions, tournaments }: WinCondit
             console.error("Auto-analysis failed", e)
         }
 
-        const newCondition: WinCondition = {
+        // Save to DB
+        const result = await createWinCondition({
             ...data,
-            id: Math.random().toString(36).substring(7),
-            createdAt: Date.now(),
             result: initialResult
+        })
+
+        if (result.success && result.data) {
+            // Re-map from DB format
+            const newCondition: WinCondition = {
+                id: result.data.id,
+                name: result.data.name,
+                version: result.data.version,
+                tournamentId: result.data.tournament_id,
+                allyConditions: result.data.ally_conditions,
+                enemyConditions: result.data.enemy_conditions,
+                createdAt: new Date(result.data.created_at).getTime(),
+                result: result.data.last_result
+            }
+            setConditions([newCondition, ...conditions])
+        } else {
+            alert('Failed to save condition')
         }
-        setConditions([newCondition, ...conditions])
     }
 
-    const handleDelete = (id: string) => {
-        setConditions(conditions.filter(c => c.id !== id))
+    const handleDelete = async (id: string) => {
+        const res = await deleteWinCondition(id)
+        if (res.success) {
+            setConditions(conditions.filter(c => c.id !== id))
+        } else {
+            alert('Failed to delete condition')
+        }
     }
 
     return (
@@ -82,7 +103,7 @@ export function WinConditionManager({ heroes, versions, tournaments }: WinCondit
                 ))}
             </div>
 
-            <CreateWinConditionDialog
+            <WinConditionDialog
                 open={isDialogOpen}
                 onOpenChange={setIsDialogOpen}
                 heroes={heroes}
