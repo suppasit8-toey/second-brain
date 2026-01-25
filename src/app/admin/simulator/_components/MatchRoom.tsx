@@ -9,7 +9,8 @@ import MatchSummary from './MatchSummary'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { MobileHeaderActions } from '@/components/admin/MobileHeaderContext'
-import { Lock, Trophy, ArrowLeft, RefreshCw, Maximize2, Minimize2, Play, Pause, Share2, Check, RotateCcw, Gamepad2 } from 'lucide-react'
+import { Lock, Trophy, ArrowLeft, RefreshCw, Maximize2, Minimize2, Play, Pause, Share2, Check, RotateCcw, Gamepad2, FileDown } from 'lucide-react'
+import * as XLSX from 'xlsx'
 import Link from 'next/link'
 import { useSearchParams, useRouter, usePathname } from 'next/navigation'
 import { resetGame, finishMatch } from '../actions'
@@ -37,8 +38,10 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
     const [isGameMenuOpen, setIsGameMenuOpen] = useState(false)
 
     // 1. Determine Max Games based on Mode
-    const getMaxGames = (mode: string) => {
-        switch (mode) {
+    const mode = match.mode?.trim().toUpperCase() || 'BO1'
+
+    const getMaxGames = (m: string) => {
+        switch (m) {
             case 'BO1': return 1;
             case 'BO2': return 2;
             case 'BO3': return 3;
@@ -48,7 +51,7 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
             default: return 1;
         }
     }
-    const maxGames = getMaxGames(match.mode || 'BO1')
+    const maxGames = getMaxGames(mode)
     const seriesArray = Array.from({ length: maxGames }, (_, i) => i + 1)
 
     // 2. Score Calculation
@@ -64,11 +67,11 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
     let winningThreshold = 1
     let playAllGames = false
 
-    if (match.mode === 'BO2') { playAllGames = true; winningThreshold = 2 } // Though threshold technically doesn't apply if we force play all, but we use it for checking 'finished' count
-    if (match.mode === 'BO3') winningThreshold = 2
-    if (match.mode === 'BO4') { playAllGames = true; winningThreshold = 4 }
-    if (match.mode === 'BO5') winningThreshold = 3
-    if (match.mode === 'BO7') winningThreshold = 4
+    if (mode === 'BO2') { playAllGames = true; winningThreshold = 2 } // Though threshold technically doesn't apply if we force play all, but we use it for checking 'finished' count
+    if (mode === 'BO3') winningThreshold = 2
+    if (mode === 'BO4') { playAllGames = true; winningThreshold = 4 }
+    if (mode === 'BO5') winningThreshold = 3
+    if (mode === 'BO7') winningThreshold = 4
 
     const finishedGamesCount = games.filter(g => g.winner).length
 
@@ -167,6 +170,123 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
             setGameToReset(activeGame.id)
             setResetDialogOpen(true)
         }
+    }
+
+    const handleExport = () => {
+        const headers = [
+            'MATCH ID', 'Date', 'Tournament', 'Patch',
+            'Recording Mode (Full,Quick)', 'Number of Games (1Game..... 7 games)', 'GAME(เกมที่ 1,2,3,4....)',
+            'TEAM A', 'Team B', 'TEAM A SIDE (BLUE OR RED)', 'MATCH WIN (name TEAM A or name TEAM B)',
+            '1-Blue-BAN1', '2-Red-BAN2', '3-Blue-BAN3', '4-Red-BAN4',
+            '5-Blue-Pick1', '6-Red-Pick2', '7-Red-Pick3', '8-Blue-Pick4', '9-Blue-Pick5', '10-Red-Pick6',
+            '11-Red-BAN5', '12-Blue-BAN6', '13-Red-BAN7', '14-Blue-BAN8',
+            '15-Red-Pick7', '16-Blue-Pick8', '17-Blue-Pick9', '18-Red-Pick10',
+            'TEAM A POSITION1', 'TEAM A POSITION2', 'TEAM A POSITION3', 'TEAM A POSITION4', 'TEAM A POSITION5',
+            'TEAM B POSITION1', 'TEAM B POSITION2', 'TEAM B POSITION3', 'TEAM B POSITION4', 'TEAM B POSITION5',
+            'MVPTEAM A', 'MVPTEAM B', 'WIN % BLUE TEAM'
+        ]
+
+        const rows: any[] = []
+
+        games.forEach(g => {
+            const isABlue = g.blue_team_name === match.team_a_name
+            const teamASide = isABlue ? 'BLUE' : 'RED'
+
+            // Winner Logic
+            let winnerName = ''
+            if (g.winner === 'Blue') winnerName = g.blue_team_name
+            else if (g.winner === 'Red') winnerName = g.red_team_name
+
+            const basicRow = {
+                'MATCH ID': match.slug || match.id,
+                'Date': match.match_date ? new Date(match.match_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                'Tournament': match.tournament?.name || 'Unknown',
+                'Patch': match.version?.name || 'Current',
+                'Recording Mode (Full,Quick)': 'Full Draft Simulator',
+                'Number of Games (1Game..... 7 games)': match.mode || 'BO1',
+                'GAME(เกมที่ 1,2,3,4....)': `Game ${g.game_number}`,
+                'TEAM A': match.team_a_name,
+                'Team B': match.team_b_name,
+                'TEAM A SIDE (BLUE OR RED)': teamASide,
+                'MATCH WIN (name TEAM A or name TEAM B)': winnerName,
+                'WIN % BLUE TEAM': g.analysis_data?.winPrediction?.blue || 50
+            }
+
+            // Map Picks
+            const row: any = { ...basicRow }
+            const picks = g.picks || []
+
+            // Helper to find hero name
+            const getHeroName = (id: string) => heroes.find(h => h.id === id)?.name || ''
+
+            // Slot Configuration (Same as ScrimClient/Page)
+            const SLOT_CONFIG: any = {
+                1: { side: 'BLUE', type: 'BAN', col: '1-Blue-BAN1' },
+                2: { side: 'RED', type: 'BAN', col: '2-Red-BAN2' },
+                3: { side: 'BLUE', type: 'BAN', col: '3-Blue-BAN3' },
+                4: { side: 'RED', type: 'BAN', col: '4-Red-BAN4' },
+                5: { side: 'BLUE', type: 'PICK', col: '5-Blue-Pick1' },
+                6: { side: 'RED', type: 'PICK', col: '6-Red-Pick2' },
+                7: { side: 'RED', type: 'PICK', col: '7-Red-Pick3' },
+                8: { side: 'BLUE', type: 'PICK', col: '8-Blue-Pick4' },
+                9: { side: 'BLUE', type: 'PICK', col: '9-Blue-Pick5' },
+                10: { side: 'RED', type: 'PICK', col: '10-Red-Pick6' },
+                11: { side: 'RED', type: 'BAN', col: '11-Red-BAN5' },
+                12: { side: 'BLUE', type: 'BAN', col: '12-Blue-BAN6' },
+                13: { side: 'RED', type: 'BAN', col: '13-Red-BAN7' },
+                14: { side: 'BLUE', type: 'BAN', col: '14-Blue-BAN8' },
+                15: { side: 'RED', type: 'PICK', col: '15-Red-Pick7' },
+                16: { side: 'BLUE', type: 'PICK', col: '16-Blue-Pick8' },
+                17: { side: 'BLUE', type: 'PICK', col: '17-Blue-Pick9' },
+                18: { side: 'RED', type: 'PICK', col: '18-Red-Pick10' },
+            }
+
+            // Fill Slots
+            for (let i = 1; i <= 18; i++) {
+                const config = SLOT_CONFIG[i]
+                const p = picks.find((p: any) => p.position_index === i)
+                if (p) {
+                    row[config.col] = getHeroName(p.hero_id)
+                } else {
+                    row[config.col] = ''
+                }
+            }
+
+            // Logic to find Assigned Role for Team A/B Positions
+            // We need to know which slots belong to Team A and B
+            const getTeamPickSlot = (isTeamBlue: boolean, pickNum: number) => {
+                const bluePicks = [5, 8, 9, 16, 17]
+                const redPicks = [6, 7, 10, 15, 18]
+                return isTeamBlue ? bluePicks[pickNum - 1] : redPicks[pickNum - 1]
+            }
+
+            // TEAM A POSITIONS (1-5)
+            for (let k = 1; k <= 5; k++) {
+                const slot = getTeamPickSlot(isABlue, k)
+                const p = picks.find((p: any) => p.position_index === slot)
+                row[`TEAM A POSITION${k}`] = p?.assigned_role || ''
+            }
+
+            // TEAM B POSITIONS (1-5)
+            for (let k = 1; k <= 5; k++) {
+                const slot = getTeamPickSlot(!isABlue, k)
+                const p = picks.find((p: any) => p.position_index === slot)
+                row[`TEAM B POSITION${k}`] = p?.assigned_role || ''
+            }
+
+            // MVPs
+            const mvpAId = isABlue ? g.blue_key_player_id : g.red_key_player_id
+            const mvpBId = isABlue ? g.red_key_player_id : g.blue_key_player_id
+            row['MVPTEAM A'] = getHeroName(mvpAId || '')
+            row['MVPTEAM B'] = getHeroName(mvpBId || '')
+
+            rows.push(row)
+        })
+
+        const ws = XLSX.utils.json_to_sheet(rows, { header: headers })
+        const wb = XLSX.utils.book_new()
+        XLSX.utils.book_append_sheet(wb, ws, "Export")
+        XLSX.writeFile(wb, `${match.team_a_name}_vs_${match.team_b_name}_Simulator_Export.xlsx`)
     }
 
     return (
@@ -337,6 +457,10 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
 
                         <div className="w-px h-4 bg-slate-800 mx-2" />
 
+                        <div className="px-3 py-1 rounded bg-slate-800/50 text-[10px] text-slate-500 font-mono border border-slate-700/50">
+                            ID: <span className="text-slate-300 select-all font-bold">{match.slug || match.id}</span>
+                        </div>
+
                         <Button
                             size="sm"
                             variant="outline"
@@ -353,6 +477,17 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                         >
                             {isMatchCopied ? <Check className="w-3.5 h-3.5 mr-2" /> : <Share2 className="w-3.5 h-3.5 mr-2" />}
                             {isMatchCopied ? 'Link Copied!' : 'Share Match'}
+                            {isMatchCopied ? 'Link Copied!' : 'Share Match'}
+                        </Button>
+
+                        <Button
+                            size="sm"
+                            variant="default"
+                            className="h-8 bg-green-600 hover:bg-green-500 text-white"
+                            onClick={handleExport}
+                        >
+                            <FileDown className="w-3.5 h-3.5 mr-2" />
+                            Export
                         </Button>
 
                         <Badge variant="outline" className="h-8 px-3 border-indigo-500/30 text-indigo-300 bg-indigo-500/10">

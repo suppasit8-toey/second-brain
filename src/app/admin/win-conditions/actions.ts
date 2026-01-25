@@ -31,7 +31,9 @@ export async function analyzeWinCondition(filters: AnalysisFilters) {
             draft_matches!inner (
                 id,
                 tournament_id,
-                match_date
+                match_date,
+                slug,
+                match_type
             ),
             draft_picks (
                 hero_id,
@@ -107,6 +109,8 @@ export async function analyzeWinCondition(filters: AnalysisFilters) {
             detailedMatches.push({
                 gameId: game.id,
                 matchId: (game.draft_matches as any)?.id,
+                matchSlug: (game.draft_matches as any)?.slug,
+                matchType: (game.draft_matches as any)?.match_type,
                 date: (game.draft_matches as any)?.match_date,
                 team: teamName,
                 enemy: enemyName,

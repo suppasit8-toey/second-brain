@@ -106,6 +106,32 @@ export default async function WinConditionDetailPage({ params }: { params: Promi
                 </div>
             </div>
 
+            {/* High Win Rate Teams */}
+            {(() => {
+                const strongTeams = result.teamStats?.filter((t: any) => t.winRate >= 70 && t.matches > 0) || []
+                if (strongTeams.length > 0) {
+                    return (
+                        <div className="bg-emerald-950/30 border border-emerald-500/20 p-6 rounded-2xl flex items-center gap-6 mt-4">
+                            <div className="shrink-0 bg-emerald-500/20 p-3 rounded-full">
+                                <span className="text-2xl">🏆</span>
+                            </div>
+                            <div>
+                                <h3 className="text-emerald-400 font-bold uppercase tracking-widest text-sm mb-1">Winning Condition For</h3>
+                                <div className="flex flex-wrap gap-3">
+                                    {strongTeams.map((t: any, idx: number) => (
+                                        <div key={idx} className="flex items-center gap-2 bg-emerald-900/40 px-3 py-1.5 rounded-lg border border-emerald-500/30">
+                                            <span className="font-bold text-white shadow-black drop-shadow-md">{t.name}</span>
+                                            <span className="text-emerald-400 font-bold text-sm">({t.winRate.toFixed(0)}%)</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )
+                }
+                return null
+            })()}
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-4">
                 {/* Teams Breakdown */}
                 <div className="flex flex-col h-[600px] overflow-hidden bg-slate-900/40 rounded-2xl border border-slate-800">
@@ -114,7 +140,7 @@ export default async function WinConditionDetailPage({ params }: { params: Promi
                     </div>
                     <ScrollArea className="flex-1 p-0">
                         <div className="divide-y divide-slate-800/50">
-                            {result.teamStats?.map((stat: any, idx: number) => (
+                            {result.teamStats?.sort((a: any, b: any) => b.winRate - a.winRate).map((stat: any, idx: number) => (
                                 <div key={idx} className="p-4 flex items-center justify-between hover:bg-slate-800/30 transition-colors">
                                     <div className="flex items-center gap-3">
                                         <div className="font-bold text-slate-200">{stat.name}</div>
@@ -149,7 +175,9 @@ export default async function WinConditionDetailPage({ params }: { params: Promi
                             {result.matches?.map((match: any, idx: number) => (
                                 <Link
                                     key={idx}
-                                    href={`/admin/simulator/${match.matchId}`}
+                                    href={match.matchType === 'scrim_summary'
+                                        ? `/admin/scrims/${match.matchSlug || match.matchId}`
+                                        : `/admin/simulator/${match.matchId}`}
                                     className="block hover:bg-slate-800/30 transition-colors group relative"
                                 >
                                     <div className="p-4">
@@ -177,8 +205,8 @@ export default async function WinConditionDetailPage({ params }: { params: Promi
                             )}
                         </div>
                     </ScrollArea>
-                </div>
-            </div>
-        </div>
+                </div >
+            </div >
+        </div >
     )
 }

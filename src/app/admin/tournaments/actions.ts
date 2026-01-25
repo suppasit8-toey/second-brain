@@ -371,7 +371,7 @@ export async function getAllTeams() {
     const supabase = await createClient()
     const { data, error } = await supabase
         .from('teams')
-        .select('id, name, short_name')
+        .select('id, name, short_name, logo_url')
         .order('name', { ascending: true })
 
     if (error) {

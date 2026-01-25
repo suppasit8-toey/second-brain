@@ -12,14 +12,16 @@ import { cn } from '@/lib/utils'
 interface WinConditionCardProps {
     condition: WinCondition;
     heroes: Hero[];
+    teams?: { id: string; name: string; logo_url: string }[];
     tournamentName?: string;
     onDelete: (id: string) => void;
 }
 
 import Link from 'next/link'
 
-export function WinConditionCard({ condition, heroes, tournamentName, onDelete }: WinConditionCardProps) {
+export function WinConditionCard({ condition, heroes, teams, tournamentName, onDelete }: WinConditionCardProps) {
     const getHeroImage = (id: string) => heroes.find(h => h.id === id)?.image_url
+    const getTeamLogo = (name: string) => teams?.find(t => t.name === name)?.logo_url
 
     return (
         <div className="relative group">
@@ -96,21 +98,60 @@ export function WinConditionCard({ condition, heroes, tournamentName, onDelete }
 
                         <div className="pt-2">
                             {condition.result && (
-                                <div className="grid grid-cols-2 gap-2 text-center bg-slate-950/50 p-2 rounded border border-slate-800">
-                                    <div>
-                                        <div className="text-[10px] text-slate-500 uppercase">Win Rate</div>
-                                        <div className={cn(
-                                            "text-lg font-black",
-                                            (condition.result.winRate || 0) > 50 ? "text-emerald-400" : "text-rose-400"
-                                        )}>
-                                            {condition.result.winRate}%
+                                <>
+                                    <div className="grid grid-cols-2 gap-2 text-center bg-slate-950/50 p-2 rounded border border-slate-800">
+                                        <div>
+                                            <div className="text-[10px] text-slate-500 uppercase">Win Rate</div>
+                                            <div className={cn(
+                                                "text-lg font-black",
+                                                (condition.result.winRate || 0) > 50 ? "text-emerald-400" : "text-rose-400"
+                                            )}>
+                                                {condition.result.winRate}%
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <div className="text-[10px] text-slate-500 uppercase">Matches</div>
+                                            <div className="text-lg font-bold text-slate-300">{condition.result.totalMatches}</div>
                                         </div>
                                     </div>
-                                    <div>
-                                        <div className="text-[10px] text-slate-500 uppercase">Matches</div>
-                                        <div className="text-lg font-bold text-slate-300">{condition.result.totalMatches}</div>
-                                    </div>
-                                </div>
+
+                                    {/* Winning Condition For */}
+                                    {(() => {
+                                        const teamStats = (condition.result as any).teamStats || []
+                                        const strongTeams = teamStats.filter((t: any) => t.winRate >= 70 && t.matches > 0)
+
+                                        if (strongTeams.length > 0) {
+                                            return (
+                                                <div className="bg-emerald-950/20 border border-emerald-500/20 rounded p-2 mt-2">
+                                                    <div className="flex items-center gap-1.5 mb-1.5">
+                                                        <Trophy className="w-3 h-3 text-emerald-400" />
+                                                        <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Winning Condition</span>
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-1.5">
+                                                        {strongTeams.map((t: any, i: number) => {
+                                                            const logo = getTeamLogo(t.name)
+                                                            return (
+                                                                <div key={i} title={t.name} className="relative">
+                                                                    {logo ? (
+                                                                        <div className="w-6 h-6 rounded border border-emerald-500/30 bg-emerald-900/40 overflow-hidden">
+                                                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                                            <img src={logo} alt={t.name} className="w-full h-full object-contain" />
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="text-[9px] font-bold text-white bg-emerald-900/40 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                                                                            {t.name}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            )
+                                        }
+                                        return null
+                                    })()}
+                                </>
                             )}
 
                             {!condition.result && (
@@ -135,6 +176,6 @@ export function WinConditionCard({ condition, heroes, tournamentName, onDelete }
             >
                 <Trash2 className="w-4 h-4" />
             </Button>
-        </div>
+        </div >
     )
 }

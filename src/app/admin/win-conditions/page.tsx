@@ -1,5 +1,5 @@
 import { getVersions, getHeroesByVersion } from '@/app/admin/heroes/actions'
-import { getTournaments } from '@/app/admin/tournaments/actions'
+import { getTournaments, getAllTeams } from '@/app/admin/tournaments/actions'
 import { getWinConditions } from './actions'
 import { WinConditionManager } from './_components/WinConditionManager'
 import { Flag } from 'lucide-react'
@@ -10,6 +10,7 @@ export default async function WinConditionPage() {
     // 1. Fetch Versions & Tournaments
     const versionsData = await getVersions()
     const tournamentsData = await getTournaments()
+    const teamsData = await getAllTeams()
 
     // 2. Fetch Heroes (Use active version or first one)
     const activeVersion = versionsData?.find((v: any) => v.is_active) || versionsData?.[0]
@@ -36,6 +37,12 @@ export default async function WinConditionPage() {
         roles: h.main_position
     })) || []
 
+    const teams = teamsData?.map((t: any) => ({
+        id: t.id,
+        name: t.name,
+        logo_url: t.logo_url
+    })) || []
+
     const initialConditions = await getWinConditions()
 
     return (
@@ -56,8 +63,10 @@ export default async function WinConditionPage() {
                 heroes={heroes}
                 versions={versions}
                 tournaments={tournaments}
+                teams={teams}
                 initialConditions={initialConditions}
             />
         </div>
     )
+
 }

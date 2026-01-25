@@ -10,12 +10,13 @@ interface WinConditionManagerProps {
     heroes: Hero[];
     versions: string[];
     tournaments: { id: string; name: string }[];
+    teams: { id: string; name: string; logo_url: string }[];
     initialConditions: WinCondition[];
 }
 
 import { analyzeWinCondition, createWinCondition, deleteWinCondition } from '../actions'
 
-export function WinConditionManager({ heroes, versions, tournaments, initialConditions }: WinConditionManagerProps) {
+export function WinConditionManager({ heroes, versions, tournaments, teams, initialConditions }: WinConditionManagerProps) {
     const [conditions, setConditions] = useState<WinCondition[]>(initialConditions)
     const [isDialogOpen, setIsDialogOpen] = useState(false)
 
@@ -97,6 +98,7 @@ export function WinConditionManager({ heroes, versions, tournaments, initialCond
                         key={condition.id}
                         condition={condition}
                         heroes={heroes}
+                        teams={teams}
                         onDelete={handleDelete}
                         tournamentName={tournaments.find(t => t.id === condition.tournamentId)?.name}
                     />

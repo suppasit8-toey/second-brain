@@ -114,6 +114,7 @@ export async function getMatch(matchId: string) {
         .select(`
             *,
             version:versions(*),
+            tournament:tournaments(*),
             games:draft_games(
                 *,
                 picks:draft_picks(*)
