@@ -186,3 +186,28 @@ export async function deleteMatch(matchId: string) {
     revalidatePath('/admin/scrims')
     return { success: true, message: 'Match deleted' }
 }
+
+export async function getSimulatorData(versionId: number) {
+    const supabase = await createClient()
+
+    // Fetch Combos (Synergy)
+    const { data: combos } = await supabase
+        .from('hero_combos')
+        .select('*')
+        .eq('version_id', versionId)
+
+    // Fetch Matchups (Counters) - Only significant ones (> 52% WR or < 48% WR to save payload?)
+    // Actually, for simulator we want broad data. Let's fetch all relevant ones or maybe filter slightly.
+    // Fetching all might be heavy if N*N is huge.
+    // Let's optimize: fetch where matches > 5 to avoid noise.
+    const { data: matchups } = await supabase
+        .from('matchups')
+        .select('*')
+        .eq('version_id', versionId)
+        .gt('matches', 5)
+
+    return {
+        combos: combos || [],
+        matchups: matchups || []
+    }
+}

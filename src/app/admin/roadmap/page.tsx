@@ -59,7 +59,7 @@ export default function RoadmapPage() {
             </Card>
 
             <Tabs defaultValue="developer" className="w-full">
-                <TabsList className="grid w-full grid-cols-2 bg-[#0B0B15] border border-white/5 p-1 h-auto mb-8">
+                <TabsList className="grid w-full grid-cols-3 bg-[#0B0B15] border border-white/5 p-1 h-auto mb-8">
                     <TabsTrigger
                         value="developer"
                         className="data-[state=active]:bg-[#1A1A2E] data-[state=active]:text-cyan-400 py-3 text-slate-400 flex items-center gap-2 transition-all duration-300"
@@ -78,6 +78,16 @@ export default function RoadmapPage() {
                         <div className="flex flex-col items-start text-left">
                             <span className="font-bold">PROFESSOR</span>
                             <span className="text-[10px] font-normal opacity-70">Knowledge Base & Data</span>
+                        </div>
+                    </TabsTrigger>
+                    <TabsTrigger
+                        value="tester"
+                        className="data-[state=active]:bg-[#1A1A2E] data-[state=active]:text-green-400 py-3 text-slate-400 flex items-center gap-2 transition-all duration-300"
+                    >
+                        <Bug className="w-4 h-4" />
+                        <div className="flex flex-col items-start text-left">
+                            <span className="font-bold">SYSTEM TESTER</span>
+                            <span className="text-[10px] font-normal opacity-70">QA & Bug Hunting</span>
                         </div>
                     </TabsTrigger>
                 </TabsList>
@@ -229,6 +239,77 @@ export default function RoadmapPage() {
                         />
                     </div>
                 </TabsContent>
+
+                {/* SYSTEM TESTER ROADMAP */}
+                <TabsContent value="tester" className="space-y-6 animate-in fade-in slide-in-from-right-8 duration-500">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* DOING */}
+                        <RoadmapColumn
+                            title="กำลังดำเนินการ"
+                            phase="เฟส 1"
+                            color="green"
+                            icon={Bug}
+                            items={[
+                                {
+                                    status: "doing",
+                                    title: "ทดสอบระบบ Manual",
+                                    description: "ตรวจสอบความถูกต้องของการทำงานทุกฟีเจอร์",
+                                    tags: ['QA', 'Manual']
+                                },
+                                {
+                                    status: "doing",
+                                    title: "แจ้งปัญหาและติดตามผล",
+                                    description: "รวบรวมและแจ้ง Bug ที่พบให้ทีมพัฒนา",
+                                    tags: ['QA', 'Report']
+                                }
+                            ]}
+                        />
+
+                        {/* PLANNED */}
+                        <RoadmapColumn
+                            title="แผนงานถัดไป"
+                            phase="เฟส 2"
+                            color="orange"
+                            icon={Code2}
+                            items={[
+                                {
+                                    status: "planned",
+                                    title: "จัดทำ Test Case",
+                                    description: "สร้างเอกสาร Test Cases มาตรฐาน",
+                                    tags: ['Doc', 'Standard']
+                                },
+                                {
+                                    status: "planned",
+                                    title: "ตรวจสอบ Usability",
+                                    description: "ประเมินความยากง่ายในการใช้งาน",
+                                    tags: ['UX', 'Review']
+                                }
+                            ]}
+                        />
+
+                        {/* BACKLOG */}
+                        <RoadmapColumn
+                            title="แนวคิดในอนาคต"
+                            phase="รอการพิจารณา"
+                            color="slate"
+                            icon={Brain}
+                            items={[
+                                {
+                                    status: "backlog",
+                                    title: "Automated Testing",
+                                    description: "นำระบบทดสอบอัตโนมัติมาช่วยลดงาน",
+                                    tags: ['Automation']
+                                },
+                                {
+                                    status: "backlog",
+                                    title: "Load Testing",
+                                    description: "ทดสอบประสิทธิภาพการรองรับผู้ใช้จำนวนมาก",
+                                    tags: ['Performance']
+                                }
+                            ]}
+                        />
+                    </div>
+                </TabsContent>
             </Tabs>
         </div>
     )
@@ -240,6 +321,8 @@ function RoadmapColumn({ title, phase, color, icon: Icon, items }: { title: stri
         blue: "text-blue-400 bg-blue-500/10 border-blue-500/20",
         purple: "text-purple-400 bg-purple-500/10 border-purple-500/20",
         pink: "text-pink-400 bg-pink-500/10 border-pink-500/20",
+        green: "text-green-400 bg-green-500/10 border-green-500/20",
+        orange: "text-orange-400 bg-orange-500/10 border-orange-500/20",
         slate: "text-slate-400 bg-slate-700/50 border-white/10",
     }
 
@@ -248,6 +331,8 @@ function RoadmapColumn({ title, phase, color, icon: Icon, items }: { title: stri
         blue: "border-blue-500/20",
         purple: "border-purple-500/20",
         pink: "border-pink-500/20",
+        green: "border-green-500/20",
+        orange: "border-orange-500/20",
         slate: "border-white/5",
     }
 

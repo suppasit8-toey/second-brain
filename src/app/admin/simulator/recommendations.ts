@@ -565,56 +565,82 @@ export async function getRecommendations(
             let protectScore = 0
             const counteredAllies: string[] = []
 
+            // [NEW] Calculate Enemy Missing Roles to ensure we only ban counters for lanes they haven't picked yet
+            const enemyHeroes = heroes.filter(eh => enemyHeroIds.includes(eh.id))
+            const enemyRolesFilled = new Set<string>()
+            const STANDARD_ROLES = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam']
+
+            enemyHeroes.forEach(eh => {
+                // Try to infer role based on main_position
+                // (In a real draft, assigned_role is better, but here we infer)
+                // Use a greedy match or predefined map if available. 
+                // Simple inference:
+                if (eh.main_position) {
+                    eh.main_position.forEach((p: string) => {
+                        const norm = p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)
+                        if (STANDARD_ROLES.includes(norm)) enemyRolesFilled.add(norm)
+                    })
+                }
+            })
+
+            // If strict role tracking isn't perfect, we can be lenient. 
+            // But the User request is specific: "Analyze from the position opponent hasn't picked yet"
+            // So we must try to be strict.
+            const enemyMissingRoles = STANDARD_ROLES.filter(r => !enemyRolesFilled.has(r))
+
             // Iterate our team - picks 1-3 are most important to protect
-            for (let i = 0; i < allyHeroes.length && i < 3; i++) {
+            for (let i = 0; i < allyHeroes.length; i++) {
                 const ally = allyHeroes[i]
+
                 // Find enemies that counter 'ally'
                 const vsAlly = relativeMatchups?.find(m => m.hero_id === h.id && m.enemy_hero_id === ally.id)
-                if (vsAlly && vsAlly.win_rate > 53) { // 53% threshold
-                    const threat = (vsAlly.win_rate - 50) * 4 // Higher multiplier for Pick 1-3
-                    protectScore += threat
-                    counteredAllies.push(ally.name)
-                }
-            }
 
-            // Also check remaining picks (Pick 4-5 area) but with lower weight
-            for (let i = 3; i < allyHeroes.length; i++) {
-                const ally = allyHeroes[i]
-                const vsAlly = relativeMatchups?.find(m => m.hero_id === h.id && m.enemy_hero_id === ally.id)
-                if (vsAlly && vsAlly.win_rate > 55) { // Higher threshold for late picks
-                    const threat = (vsAlly.win_rate - 50) * 2
-                    protectScore += threat
-                    counteredAllies.push(ally.name)
+                // LOGIC: High Threat Counter AND Enemy Needs Role
+                if (vsAlly && vsAlly.win_rate > 52) {
+                    // Check if 'h' (The Counter Hero) fills a generic role the enemy is missing
+                    const hRoles = h.main_position?.map((p: string) => p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)) || []
+                    const isLaneThreat = hRoles.some((r: string) => enemyMissingRoles.includes(r))
+
+                    if (isLaneThreat) {
+                        // Higher multiplier because it's a VALID Lane Counter
+                        const threat = (vsAlly.win_rate - 50) * 5
+                        protectScore += threat
+                        // Format: "Beat Zata 60%"
+                        counteredAllies.push(`Beat ${ally.name} ${vsAlly.win_rate.toFixed(0)}%`)
+                    }
                 }
             }
 
             if (protectScore > 0) {
                 score += protectScore
-                reasons.push(`⚔️ Counters: ${counteredAllies.slice(0, 2).join(', ')}`)
+                reasons.push(`${counteredAllies.slice(0, 2).join(', ')}`)
             }
 
             // 2.2 Deny Enemy Win Conditions (Comfort Picks)
             // If Enemy plays this hero often and wins often -> Ban it
             const enemyHeroStat = enemyTeamStats?.heroStats?.[h.id]
-            if (enemyHeroStat && enemyHeroStat.picks >= 1) { // Even 1 game in scrim is signal
-                const enemyWR = (enemyHeroStat.wins / enemyHeroStat.picks) * 100
-                if (enemyWR >= 60 || enemyHeroStat.picks >= 3) {
-                    const comfortBonus = 30 + (enemyHeroStat.picks * 5)
-                    score += comfortBonus
-                    reasons.push(`Enemy Comfort (${enemyHeroStat.picks}g, ${enemyWR.toFixed(0)}% WR)`)
+            if (enemyHeroStat && enemyHeroStat.picks >= 1) {
+                // [NEW] Role Check: Does enemy need this role?
+                const hRoles = h.main_position?.map((p: string) => p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)) || []
+                const enemyNeedsRole = hRoles.some((r: string) => enemyMissingRoles.includes(r))
+
+                if (enemyNeedsRole) {
+                    const enemyWR = (enemyHeroStat.wins / enemyHeroStat.picks) * 100
+                    if (enemyWR >= 60 || enemyHeroStat.picks >= 3) {
+                        const comfortBonus = 30 + (enemyHeroStat.picks * 5)
+                        score += comfortBonus
+                        reasons.push(`Enemy Comfort (${enemyHeroStat.picks}g, ${enemyWR.toFixed(0)}% WR)`)
+                    }
                 }
             }
 
             // 2.3 Predict Missing Roles (Standard Logic preserved)
             if (totalPicks >= 6) {
-                const enemyHeroes = heroes.filter(eh => enemyHeroIds.includes(eh.id))
-                const enemyRolesFilled = new Set<string>()
-                enemyHeroes.forEach(eh => eh.main_position?.forEach((p: string) => enemyRolesFilled.add(p)))
-
-                const roles = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
-                const missingRoles = roles.filter(r => !enemyRolesFilled.has(r))
-
-                if (h.main_position?.some((p: string) => missingRoles.includes(p))) {
+                // We already calculated enemyMissingRoles above
+                if (h.main_position?.some((p: string) => {
+                    const norm = p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)
+                    return enemyMissingRoles.includes(norm)
+                })) {
                     score += 15
                     reasons.push(`Deny Role: ${h.main_position[0]}`)
                 }
@@ -899,37 +925,68 @@ export async function getRecommendations(
 
         // 3.6 [Ban Priority]
         // 3.6 [Ban Priority]
+        // 3.6 [Ban Priority]
+        // 3.6 [Ban Priority]
         if (context?.phase === 'BAN' || h.is_ban_suggestion) { // Explicitly check if we are in Ban Suggestion Mode
+
+            // [NEW] Calc Enemy Missing Roles for usage here if context.phase is BAN
+            let banEnemyMissingRoles: string[] = []
+            if (context?.phase === 'BAN') {
+                const enemyHeroes = heroes.filter(eh => enemyHeroIds.includes(eh.id))
+                const enemyRolesFilled = new Set<string>()
+                const STANDARD_ROLES = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam']
+                enemyHeroes.forEach(eh => {
+                    if (eh.main_position) {
+                        eh.main_position.forEach((p: string) => {
+                            const norm = p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)
+                            if (STANDARD_ROLES.includes(norm)) enemyRolesFilled.add(norm)
+                        })
+                    }
+                })
+                banEnemyMissingRoles = STANDARD_ROLES.filter(r => !enemyRolesFilled.has(r))
+            }
 
             // 3.6a Deny Enemy Main (Original)
             if (wBan > 0 && enemyKeyPlayerIds.has(h.id)) {
-                const banBonus = 20 * wBan
-                score += banBonus
-                reasons.push(`Deny Enemy Main +${Math.round(banBonus)}`)
+                // [NEW] Role Check
+                const hRoles = h.main_position?.map((p: string) => p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)) || []
+                const enemyNeedsRole = hRoles.some((r: string) => banEnemyMissingRoles.includes(r))
+
+                if (enemyNeedsRole) {
+                    const banBonus = 20 * wBan
+                    score += banBonus
+                    reasons.push(`Deny Enemy Main +${Math.round(banBonus)}`)
+                }
             }
 
             // 3.6b [NEW] Protect Comp: Ban heroes that counter US
             const threats = threatMatchups?.filter(m => m.hero_id === h.id) || []
             if (threats.length > 0) {
-                let totalThreatBonus = 0
-                const threatNames: string[] = []
+                // [NEW] Role Check
+                const hRoles = h.main_position?.map((p: string) => p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)) || []
+                const enemyNeedsRole = hRoles.some((r: string) => banEnemyMissingRoles.includes(r))
 
-                threats.forEach(threat => {
-                    const myHeroName = queryHeroName(threat.enemy_hero_id, heroes)
-                    const winAdvantage = threat.win_rate - 50 // How much Candidate Ban wins against Us
-                    const bonus = Math.max(winAdvantage * 4, 10) // High multiplier for protection
-                    totalThreatBonus += bonus
-                    threatNames.push(myHeroName)
-                })
+                if (enemyNeedsRole) {
+                    let totalThreatBonus = 0
+                    const threatNames: string[] = []
 
-                const weightedThreat = totalThreatBonus * wBan
-                score += weightedThreat
+                    threats.forEach(threat => {
+                        const myHeroName = queryHeroName(threat.enemy_hero_id, heroes)
+                        const winAdvantage = threat.win_rate - 50 // How much Candidate Ban wins against Us
+                        const bonus = Math.max(winAdvantage * 4, 10) // High multiplier for protection
+                        totalThreatBonus += bonus
+                        threatNames.push(myHeroName)
+                    })
 
-                const uniqueThreatNames = Array.from(new Set(threatNames))
-                if (uniqueThreatNames.length === 1) {
-                    reasons.push(`Protect ${uniqueThreatNames[0]} (High Threat) +${Math.round(weightedThreat)}`)
-                } else {
-                    reasons.push(`Protect Team (Threatens ${uniqueThreatNames.join(', ')}) +${Math.round(weightedThreat)}`)
+                    const weightedThreat = totalThreatBonus * wBan
+                    score += weightedThreat
+
+                    const uniqueThreatNames = Array.from(new Set(threatNames))
+                    if (uniqueThreatNames.length === 1) {
+                        reasons.push(`Protect ${uniqueThreatNames[0]} (High Threat) +${Math.round(weightedThreat)}`)
+                    } else {
+                        reasons.push(`Protect Team (Threatens ${uniqueThreatNames.join(', ')}) +${Math.round(weightedThreat)}`)
+                    }
                 }
             }
         }

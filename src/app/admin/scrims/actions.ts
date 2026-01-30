@@ -573,3 +573,88 @@ export async function getEnemyCounterPickStats(teamName: string) {
 
     return result
 }
+
+export async function getEnemyThreatStats(teamName: string) {
+    if (!teamName) return []
+
+    const supabase = await createClient()
+
+    // Fetch games where the team participated
+    const { data: games, error } = await supabase
+        .from('draft_games')
+        .select(`
+            id,
+            blue_team_name,
+            red_team_name,
+            winner,
+            draft_picks (
+                hero_id,
+                side,
+                type,
+                assigned_role
+            )
+        `)
+        .or(`blue_team_name.eq.${teamName},red_team_name.eq.${teamName}`)
+
+    if (error || !games) {
+        console.error('Error fetching threat stats:', error)
+        return []
+    }
+
+    const heroStats = new Map<string, { total: number, wins: number, roles: Map<string, number> }>()
+
+    games.forEach((game: any) => {
+        const isBlue = game.blue_team_name === teamName
+        const winnerUpper = game.winner?.trim().toUpperCase()
+        const won = (isBlue && winnerUpper === 'BLUE') || (!isBlue && winnerUpper === 'RED')
+        const mySide = isBlue ? 'BLUE' : 'RED'
+
+        // Debug Log for first few games
+        if (heroStats.size === 0) console.log(`[ThreatStats] Game ${game.id}: Team=${teamName}, Blue=${game.blue_team_name}, isBlue=${isBlue}, Winner=${game.winner}, Won=${won}`)
+
+        game.draft_picks?.forEach((pick: any) => {
+            if (pick.side === mySide && pick.type === 'PICK') {
+                const entry = heroStats.get(pick.hero_id) || { total: 0, wins: 0, roles: new Map() }
+                entry.total++
+                if (won) entry.wins++
+
+                // Track Role
+                const role = pick.assigned_role || 'FLEX'
+                entry.roles.set(role, (entry.roles.get(role) || 0) + 1)
+
+                heroStats.set(pick.hero_id, entry)
+
+                // Debug Mganga
+                if (pick.hero_id === '36') console.log(`[Mganga] Won=${won}, Total=${entry.total}, Wins=${entry.wins}`)
+            }
+        })
+    })
+
+    // Convert to array and score threats
+    // Threat Score = Win Rate * (Log(Total Played) + 1) -> Favor high WR with DECENT sample size
+    return Array.from(heroStats.entries())
+        .map(([heroId, stats]) => {
+            const winRate = stats.total > 0 ? (stats.wins / stats.total) * 100 : 0
+
+            // Find most played role
+            let bestRole = 'FLEX'
+            let maxRoleCount = 0
+            stats.roles.forEach((count, role) => {
+                if (count > maxRoleCount) {
+                    maxRoleCount = count
+                    bestRole = role
+                }
+            })
+
+            return {
+                heroId,
+                role: bestRole,
+                totalPlayed: stats.total,
+                winRate: Math.round(winRate),
+                // Simple threat level logic: >60% High, >50% Medium, else Low
+                // Also require at least 2 games to be "High"
+                threatLevel: (winRate >= 60 && stats.total >= 2) ? 'High' : (winRate >= 50 ? 'Medium' : 'Low')
+            }
+        })
+        .sort((a, b) => b.winRate - a.winRate || b.totalPlayed - a.totalPlayed)
+}

@@ -171,23 +171,36 @@ export async function getWinConditions() {
 
     if (error) {
         console.error('Error fetching win conditions:', JSON.stringify(error, null, 2))
-        // Fallback or re-throw?
-        // return []
-        // Let's return empty for now but log loudly
         return []
     }
 
-    // Map DB shape to UI shape
-    return data.map((item: any) => ({
-        id: item.id,
-        name: item.name,
-        version: item.version,
-        tournamentId: item.tournament_id,
-        allyConditions: typeof item.ally_conditions === 'string' ? JSON.parse(item.ally_conditions) : item.ally_conditions,
-        enemyConditions: typeof item.enemy_conditions === 'string' ? JSON.parse(item.enemy_conditions) : item.enemy_conditions,
-        createdAt: new Date(item.created_at).getTime(),
-        result: item.last_result
+    // Process in parallel
+    const conditions = await Promise.all(data.map(async (item: any) => {
+        const allyConditions = typeof item.ally_conditions === 'string' ? JSON.parse(item.ally_conditions) : item.ally_conditions
+        const enemyConditions = typeof item.enemy_conditions === 'string' ? JSON.parse(item.enemy_conditions) : item.enemy_conditions
+
+        // Re-run analysis to get fresh stats (including teamStats)
+        const result = await analyzeWinCondition({
+            allyConditions,
+            enemyConditions,
+            tournamentId: item.tournament_id,
+            version: item.version,
+            patch: ''
+        })
+
+        return {
+            id: item.id,
+            name: item.name,
+            version: item.version,
+            tournamentId: item.tournament_id,
+            allyConditions,
+            enemyConditions,
+            createdAt: new Date(item.created_at).getTime(),
+            result: result // Use fresh result instead of stale item.last_result
+        }
     }))
+
+    return conditions
 }
 
 export async function createWinCondition(data: any) {
@@ -280,4 +293,158 @@ export async function getWinCondition(id: string) {
         createdAt: new Date(data.created_at).getTime(),
         result: data.last_result
     }
+}
+
+export async function getDynamicWinConditions(teamName?: string) {
+    const supabase = await createClient()
+
+    // 1. Get Active Version ID for Matchup Data
+    const { data: activeVersion } = await supabase.from('versions').select('id').eq('is_active', true).single()
+    const versionId = activeVersion?.id
+
+    // 2. Fetch Matchup Data (known counters) if version exists
+    let matchupMap = new Map<string, number>() // key: heroId|enemyId, value: winRate (My Win Rate)
+    if (versionId) {
+        // Fetch ALL matchups for this version to be safe, or we could filter by specific heroes later
+        // For performance, let's fetch all (usually < 2000 rows) or optimize if needed.
+        const { data: matchups } = await supabase
+            .from('matchups')
+            .select('hero_id, enemy_hero_id, win_rate')
+            .eq('version_id', versionId)
+
+        matchups?.forEach((m: any) => {
+            // Store My Win Rate against Enemy
+            matchupMap.set(`${m.hero_id}|${m.enemy_hero_id}`, m.win_rate)
+        })
+    }
+
+    // 3. Fetch all finished games
+    let query = supabase
+        .from('draft_games')
+        .select(`
+            id,
+            winner,
+            blue_team_name,
+            red_team_name,
+            draft_picks ( hero_id, side, assigned_role, type )
+        `)
+        .eq('status', 'finished')
+
+    // If teamName is provided, only look for games where this team played
+    if (teamName) {
+        query = query.or(`blue_team_name.eq.${teamName},red_team_name.eq.${teamName}`)
+    }
+
+    const { data: games, error } = await query
+
+    if (error || !games) {
+        console.error('Error fetching dynamic conditions:', error)
+        return []
+    }
+
+    // Map: "HeroA_HeroB" -> { wins, total, heroes: [id, id], enemyStats: Map<heroId, { wins: number, losses: number }> }
+    const duoStats = new Map<string, {
+        wins: number,
+        total: number,
+        heroes: string[],
+        roles: string[],
+        enemyStats: Map<string, { wins: number, losses: number }>
+    }>()
+
+    games.forEach((game: any) => {
+        const winner = game.winner?.trim().toUpperCase()
+        const blueWin = winner === 'BLUE'
+        const redWin = winner === 'RED'
+
+        const processTeam = (side: string, isWin: boolean) => {
+            const picks = game.draft_picks.filter((p: any) => p.side === side && p.type === 'PICK')
+            const enemyPicks = game.draft_picks.filter((p: any) => p.side !== side && p.type === 'PICK') // Only consider picks
+
+            // Sort picks by ID to ensure consistent key generation
+            picks.sort((a: any, b: any) => parseInt(a.hero_id) - parseInt(b.hero_id))
+
+            for (let i = 0; i < picks.length; i++) {
+                for (let j = i + 1; j < picks.length; j++) {
+                    const p1 = picks[i]
+                    const p2 = picks[j]
+
+                    const key = `${p1.hero_id}_${p2.hero_id}`
+
+                    const entry = duoStats.get(key) || {
+                        wins: 0,
+                        total: 0,
+                        heroes: [p1.hero_id, p2.hero_id],
+                        roles: [p1.assigned_role || 'FLEX', p2.assigned_role || 'FLEX'],
+                        enemyStats: new Map()
+                    }
+
+                    entry.total++
+                    if (isWin) entry.wins++
+
+                    // Track Enemy Heroes
+                    enemyPicks.forEach((ep: any) => {
+                        const eStat = entry.enemyStats.get(ep.hero_id) || { wins: 0, losses: 0 }
+                        if (isWin) eStat.wins++
+                        else eStat.losses++ // If we lost, this enemy contributed to loss
+                        entry.enemyStats.set(ep.hero_id, eStat)
+                    })
+
+                    duoStats.set(key, entry)
+                }
+            }
+        }
+
+        processTeam('BLUE', blueWin)
+        processTeam('RED', redWin)
+    })
+
+    // Convert to Array & Filter
+    return Array.from(duoStats.entries())
+        .map(([key, stats]) => {
+            const winRate = stats.total > 0 ? (stats.wins / stats.total) * 100 : 0
+
+            // Find Top Threats (Enemies that cause losses OR are known counters)
+            // Score = Losses + Bonus (from Matchup Data)
+            const scoredThreats = Array.from(stats.enemyStats.entries())
+                .map(([hId, s]) => {
+                    let score = s.losses * 1.0 // Base score is raw losses
+
+                    // Matchup Data Bonus
+                    // Check if hId (Enemy) counters p1 or p2
+                    const [myH1, myH2] = stats.heroes
+
+                    // Check vs Hero 1
+                    const wr1 = matchupMap.get(`${myH1}|${hId}`) // My WR vs Enemy
+                    if (wr1 !== undefined) {
+                        if (wr1 < 40) score += 3.0 // Hard Counter
+                        else if (wr1 < 48) score += 1.5 // Soft Counter
+                    }
+
+                    // Check vs Hero 2
+                    const wr2 = matchupMap.get(`${myH2}|${hId}`)
+                    if (wr2 !== undefined) {
+                        if (wr2 < 40) score += 3.0
+                        else if (wr2 < 48) score += 1.5
+                    }
+
+                    return { heroId: hId, losses: s.losses, score, total: s.wins + s.losses }
+                })
+                .filter(t => t.score > 0) // Keep anything that has negative impact
+                .sort((a, b) => b.score - a.score) // Sort by Impact Score
+                .slice(0, 10) // Top 10 threats
+                .map(t => t.heroId)
+
+            return {
+                id: `duo_${key}`,
+                heroes: stats.heroes,
+                roles: stats.roles,
+                winRate: Math.round(winRate),
+                total: stats.total,
+                type: 'DUO',
+                avoidHeroes: scoredThreats
+            }
+        })
+        .filter(item => item.total >= 3 && item.winRate >= 60 && !item.roles.some(r => r.toUpperCase().includes('FLEX'))) // Threshold
+        .sort((a, b) => b.winRate - a.winRate || b.total - a.total)
+        .slice(0, 8) // Top 8 Duos
 }
