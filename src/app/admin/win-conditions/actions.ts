@@ -196,7 +196,14 @@ export async function getWinConditions() {
             allyConditions,
             enemyConditions,
             createdAt: new Date(item.created_at).getTime(),
-            result: result // Use fresh result instead of stale item.last_result
+            result: result.success ? {
+                winRate: result.winRate!,
+                totalMatches: result.totalMatches!,
+                winCount: result.winCount!,
+                lossCount: result.lossCount!,
+                teamStats: result.teamStats,
+                matches: result.matches
+            } : undefined
         }
     }))
 
