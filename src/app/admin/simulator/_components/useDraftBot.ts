@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { DraftGame, DraftMatch, Hero } from '@/utils/types'
-import { getRecommendations } from '../recommendations'
+import { normalizeRole, resolveTeamRoles, STANDARD_ROLES } from '../recommendation-utils'
 
 interface UseDraftBotProps {
     game: DraftGame;
@@ -125,33 +125,17 @@ export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initi
                         })
 
                         // 1. Identify Needed Roles
-                        const STANDARD_ROLES = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam']
-                        const allyHeroes = initialHeroes.filter(h => allyPicks.includes(String(h.id)))
-
-                        // Simple Greedy Assignment
-                        const tempRoles = new Set<string>()
-                        const sortedAllies = [...allyHeroes].sort((a, b) => (a.main_position?.length || 0) - (b.main_position?.length || 0))
-
-                        sortedAllies.forEach(h => {
-                            const role = h.main_position?.find(r => {
-                                const normalized = r === 'Abyssal' ? 'Abyssal Dragon' : (r === 'Support' ? 'Roam' : r)
-                                return STANDARD_ROLES.includes(normalized) && !tempRoles.has(normalized)
-                            })
-                            if (role) {
-                                const normalized = role === 'Abyssal' ? 'Abyssal Dragon' : (role === 'Support' ? 'Roam' : role)
-                                tempRoles.add(normalized)
-                            }
-                        })
-
-                        const missingRoles = STANDARD_ROLES.filter(r => !tempRoles.has(r))
-                        console.log("[Bot] Missing Roles:", missingRoles)
+                        // 1. Identify Needed Roles (Using Shared Solver)
+                        const filledRoles = resolveTeamRoles(allyPicks, initialHeroes)
+                        const missingRoles = STANDARD_ROLES.filter(r => !filledRoles.has(r))
+                        console.log("[Bot] Missing Roles (Advanced):", missingRoles)
 
                         // 2. Filter Suggestions for Missing Roles
                         if (missingRoles.length > 0) {
                             // Look for top suggestion that fills a missing role
                             const roleFillSuggestion = availableSuggestions.find((s: any) =>
                                 s.hero.main_position?.some((pos: string) => {
-                                    const norm = pos === 'Abyssal' ? 'Abyssal Dragon' : (pos === 'Support' ? 'Roam' : pos)
+                                    const norm = normalizeRole(pos)
                                     return missingRoles.includes(norm)
                                 })
                             )

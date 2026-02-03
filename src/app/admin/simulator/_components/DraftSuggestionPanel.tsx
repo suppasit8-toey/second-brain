@@ -108,7 +108,7 @@ export default function DraftSuggestionPanel({
                     <Brain className={`w-4 h-4 shrink-0 ${isActive ? 'text-green-400 animate-pulse' : 'text-slate-500'}`} />
                     <div className="min-w-0">
                         <CardTitle className="text-sm font-bold uppercase tracking-wider text-slate-300 truncate">
-                            {teamName} Advisor
+                            {teamName} CEREBRO AI
                         </CardTitle>
                         {/* Current Slot Badge - Combined with Phase */}
                         {upcomingSlots.length > 0 && (

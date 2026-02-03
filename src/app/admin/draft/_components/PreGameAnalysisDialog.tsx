@@ -5,9 +5,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { DraftMatch, Hero } from '@/utils/types'
-import { Loader2, ShieldCheck, Trophy, Skull, Swords, AlertTriangle, TrendingUp, ArrowRight, Users, Ban, ListOrdered, Sparkles, BrainCircuit, ChevronLeft } from 'lucide-react'
+import { Loader2, ShieldCheck, Trophy, Skull, Swords, AlertTriangle, TrendingUp, ArrowRight, Users, Ban, ListOrdered, Sparkles, BrainCircuit, ChevronLeft, Gamepad2 } from 'lucide-react'
 import { getWinConditions } from '@/app/admin/win-conditions/actions'
 import StrategySimulator from './StrategySimulator'
+import DraftPractice from './DraftPractice'
 import { getDynamicWinConditions } from "../../win-conditions/actions"
 import { getHeroesByVersion } from '@/app/admin/heroes/actions'
 
@@ -450,6 +451,13 @@ export default function PreGameAnalysisDialog({ open, onOpenChange, match, gameN
                                             >
                                                 <Skull className="w-4 h-4 mr-2" />
                                                 Enemy Threats
+                                            </TabsTrigger>
+                                            <TabsTrigger
+                                                value="draft-practice"
+                                                className="data-[state=active]:bg-transparent data-[state=active]:text-cyan-400 data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 rounded-none px-0 py-4 text-slate-400 hover:text-white text-base font-bold bg-transparent border-b-2 border-transparent transition-all"
+                                            >
+                                                <Gamepad2 className="w-4 h-4 mr-2" />
+                                                Draft Practice
                                             </TabsTrigger>
                                         </TabsList>
 
@@ -1003,6 +1011,22 @@ export default function PreGameAnalysisDialog({ open, onOpenChange, match, gameN
                                                         )}
                                                     </div>
                                                 </div>
+                                            </TabsContent>
+
+                                            <TabsContent value="draft-practice" className="h-full m-0 focus-visible:outline-none">
+                                                <DraftPractice
+                                                    heroes={heroes}
+                                                    heroMap={heroMap}
+                                                    myTeamName={perspectiveTeam}
+                                                    enemyTeamName={enemyTeam}
+                                                    myTeamStats={teamStats}
+                                                    blueTeamName={blueSide}
+                                                    redTeamName={blueSide === match.team_a_name ? match.team_b_name : match.team_a_name}
+                                                    globalBanIds={new Set<string>()}
+                                                    combos={simulatorData.combos}
+                                                    matchups={simulatorData.matchups}
+                                                    versionId={match.version_id}
+                                                />
                                             </TabsContent>
                                         </div>
                                     </Tabs>

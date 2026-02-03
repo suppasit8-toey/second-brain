@@ -13,7 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown, RefreshCw, Users, Globe, Swords, Link as LinkIcon, User, Target, Settings2, Home, Eye, Zap, Share2, Shield, Ban } from 'lucide-react'
+import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown, RefreshCw, Users, Globe, Swords, Link as LinkIcon, User, Target, Settings2, Home, Eye, Zap, Share2, Shield, Ban, History, FileClock, Wrench, AlertTriangle } from 'lucide-react'
 import Image from 'next/image'
 import PostDraftResult from '@/components/draft/PostDraftResult'
 import { Input } from '@/components/ui/input'
@@ -45,6 +45,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false)
     const [currentTab, setCurrentTab] = useState('hero')
     const [aiTab, setAiTab] = useState('suggestions')
+    const [historyMode, setHistoryMode] = useState<'team' | 'global'>('team')
 
     // Default to 'board' on mobile
     useEffect(() => {
@@ -937,10 +938,44 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         const ALL_POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
         const opponentRemainingPositions = ALL_POSITIONS.filter(p => !opponentFilledPositions.has(p))
 
-        // Identify Core Heroes (Top 10 most picked by this team)
-        const coreHeroes = Object.values(blueStats.heroStats || {})
+        // Identify Core Heroes (Top 10 most picked by this team) - MUST BE AVAILABLE FOR PROTECTION
+        const isBlueTeamA = game.blue_team_name === match.team_a_name
+        const blueGlobalBans = Array.from(isBlueTeamA ? playedHeroesTeamA : playedHeroesTeamB)
+
+        const protectInvalidSet = new Set([
+            ...unavailableIds,
+            ...opponentPicks,
+            ...blueGlobalBans
+        ].map(String))
+
+        // Keep our own picks
+        const ourPicks = Object.values(state.bluePicks).filter(Boolean) as string[]
+        ourPicks.forEach(id => protectInvalidSet.delete(String(id)))
+
+        // 1. Get Top 10 Core Heroes (Historical)
+        const coreHeroesList = Object.values(blueStats.heroStats || {})
+            .filter((h: any) => !protectInvalidSet.has(String(h.id)))
             .sort((a: any, b: any) => b.picks - a.picks)
             .slice(0, 10);
+
+        // 2. Add CURRENT PICKS if they are not in the Top 10 (We must protect what we picked!)
+        const heroesToProtect = [...coreHeroesList]
+        ourPicks.forEach(pickId => {
+            const alreadyIncluded = heroesToProtect.some((h: any) => String(h.id) === String(pickId))
+            if (!alreadyIncluded) {
+                // Try to find stats for this pick
+                const pickStats = blueStats.heroStats?.[pickId]
+                if (pickStats) {
+                    heroesToProtect.push(pickStats)
+                } else {
+                    // Fallback if no stats: Create dummy object so we can at least TRY to find matchups (if any exist in laneMatchups)
+                    const fallbackHero = initialHeroes?.find(h => String(h.id) === String(pickId))
+                    if (fallbackHero) {
+                        heroesToProtect.push({ id: pickId, name: fallbackHero.name })
+                    }
+                }
+            }
+        })
 
         const laneMatchups = blueStats.laneMatchups || {};
 
@@ -959,23 +994,55 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 let protectBonus = 0;
                 const protectReasons: string[] = [];
 
-                coreHeroes.forEach((coreHero: any) => {
-                    Object.entries(laneMatchups).forEach(([role, roleData]: [string, any]) => {
-                        const matchup = roleData?.[coreHero.id]?.[heroId];
-                        if (matchup && matchup.games >= 3) {
-                            const ourWinRate = (matchup.wins / matchup.games);
-                            const enemyWinRate = 1 - ourWinRate;
-                            if (enemyWinRate > 0.55) {
-                                const threatLevel = Math.round((enemyWinRate - 0.5) * 100 * 2);
-                                protectBonus += threatLevel;
-                                if (protectReasons.length < 2) {
-                                    protectReasons.push(`Protect ${coreHero.name}`);
+                // Only apply Protect Bonus in Phase 2 (Closing Bans)
+                if (autoDetectedPhase === 'PHASE_2') {
+                    heroesToProtect.forEach((coreHero: any) => {
+                        Object.entries(laneMatchups).forEach(([role, roleData]: [string, any]) => {
+                            const matchup = roleData?.[coreHero.id]?.[heroId];
+                            if (matchup && matchup.games >= 1) {
+                                const ourWinRate = (matchup.wins / matchup.games);
+                                const enemyWinRate = 1 - ourWinRate;
+                                if (enemyWinRate > 0.50) {
+                                    const confidence = Math.min(matchup.games, 3) / 3;
+                                    const threatLevel = Math.round((enemyWinRate - 0.5) * 100 * 2 * confidence);
+                                    protectBonus += threatLevel;
+                                    if (protectReasons.length < 2) {
+                                        protectReasons.push(`Protect ${coreHero.name}`);
+                                    }
                                 }
                             }
-                        }
+                        });
                     });
-                });
-                protectBonus = Math.min(protectBonus, 150);
+                    protectBonus = Math.min(protectBonus, 150);
+                } else {
+                    // PHASE 1 LOGIC: History + Context
+                    // 1. History (Already in 'count')
+
+                    // 2. [New] Global Ban Context (Heroes we played already -> Opponent might ban? No, we ban opponent's heroes)
+                    // Logic: Ban heroes that opponent hasn't played but are strong?
+                    // User Request: "+ Score for heroes we played already and opponent hasn't played" 
+                    // This implies denying opponent from taking "Remaining Strong Heroes" or "Heroes we already used" (If Global BP applies to opponent?)
+                    // Usually Global BP applies to SELF. Opponent CAN pick heroes we played.
+                    // So we might want to BAN heroes we played if they are strong and we can't pick them anymore?
+                    // Yes, "Opponent hasn't played yet" + "We played".
+
+                    // Check if WE played this hero (Global Ban for US)
+                    // redGlobalBans / blueGlobalBans contains heroes WE played.
+                    // But 'heroId' is the candidate to BAN.
+                    // If 'heroId' is in 'ourGlobalBans', we can't pick it. Opponent CAN.
+                    // So it's a good ban target if it's strong.
+
+                    const isGlobalBannedForUs = protectInvalidSet.has(heroId) // Wait, protectInvalidSet includes Global Bans
+                    // We need to check pure global bans list
+                    // const globalBans = ... (Need to access from scope)
+                    // 'blueGlobalBans' is defined above.
+
+                    if (blueGlobalBans.includes(heroId)) {
+                        const denyScore = 20
+                        protectBonus += denyScore
+                        protectReasons.push(`Deny Used Hero`)
+                    }
+                }
 
                 const baseReason = `${count} bans`;
                 const reason = protectReasons.length > 0
@@ -1034,10 +1101,44 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         const ALL_POSITIONS = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
         const opponentRemainingPositions = ALL_POSITIONS.filter(p => !opponentFilledPositions.has(p))
 
-        // Identify Core Heroes (Top 10 most picked by this team)
-        const coreHeroes = Object.values(redStats.heroStats || {})
+        // Identify Core Heroes (Top 10 most picked by this team) - MUST BE AVAILABLE FOR PROTECTION
+        // Exclude heroes that are banned (unavailableIds) or picked by opponent
+        const isRedTeamA = game.red_team_name === match.team_a_name
+        const redGlobalBans = Array.from(isRedTeamA ? playedHeroesTeamA : playedHeroesTeamB)
+
+        const protectInvalidSet = new Set([
+            ...unavailableIds, // Includes Bans + Picks
+            ...opponentPicks,
+            ...redGlobalBans // Heroes WE played in previous games (cannot pick again)
+        ].map(String))
+
+        // If WE picked it (Red Picks), it should STAY in coreHeroes because we want to protect our own pick!
+        // But unavailableIds includes our picks too. We need to un-filter our own picks.
+        const ourPicks = Object.values(state.redPicks).filter(Boolean) as string[]
+        ourPicks.forEach(id => protectInvalidSet.delete(String(id)))
+
+        // 1. Get Top 10 Core Heroes (Historical)
+        const coreHeroesList = Object.values(redStats.heroStats || {})
+            .filter((h: any) => !protectInvalidSet.has(String(h.id)))
             .sort((a: any, b: any) => b.picks - a.picks)
             .slice(0, 10);
+
+        // 2. Add CURRENT PICKS if they are not in the Top 10
+        const heroesToProtect = [...coreHeroesList]
+        ourPicks.forEach(pickId => {
+            const alreadyIncluded = heroesToProtect.some((h: any) => String(h.id) === String(pickId))
+            if (!alreadyIncluded) {
+                const pickStats = redStats.heroStats?.[pickId]
+                if (pickStats) {
+                    heroesToProtect.push(pickStats)
+                } else {
+                    const fallbackHero = initialHeroes?.find(h => String(h.id) === String(pickId))
+                    if (fallbackHero) {
+                        heroesToProtect.push({ id: pickId, name: fallbackHero.name })
+                    }
+                }
+            }
+        })
 
         const laneMatchups = redStats.laneMatchups || {};
 
@@ -1056,23 +1157,34 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 let protectBonus = 0;
                 const protectReasons: string[] = [];
 
-                coreHeroes.forEach((coreHero: any) => {
-                    Object.entries(laneMatchups).forEach(([role, roleData]: [string, any]) => {
-                        const matchup = roleData?.[coreHero.id]?.[heroId];
-                        if (matchup && matchup.games >= 3) {
-                            const ourWinRate = (matchup.wins / matchup.games);
-                            const enemyWinRate = 1 - ourWinRate;
-                            if (enemyWinRate > 0.55) {
-                                const threatLevel = Math.round((enemyWinRate - 0.5) * 100 * 2);
-                                protectBonus += threatLevel;
-                                if (protectReasons.length < 2) {
-                                    protectReasons.push(`Protect ${coreHero.name}`);
+                // Only apply Protect Bonus in Phase 2 (Closing Bans)
+                if (autoDetectedPhase === 'PHASE_2') {
+                    heroesToProtect.forEach((coreHero: any) => {
+                        Object.entries(laneMatchups).forEach(([role, roleData]: [string, any]) => {
+                            const matchup = roleData?.[coreHero.id]?.[heroId];
+                            if (matchup && matchup.games >= 1) {
+                                const ourWinRate = (matchup.wins / matchup.games);
+                                const enemyWinRate = 1 - ourWinRate;
+                                if (enemyWinRate > 0.50) {
+                                    const confidence = Math.min(matchup.games, 3) / 3;
+                                    const threatLevel = Math.round((enemyWinRate - 0.5) * 100 * 2 * confidence);
+                                    protectBonus += threatLevel;
+                                    if (protectReasons.length < 2) {
+                                        protectReasons.push(`Protect ${coreHero.name}`);
+                                    }
                                 }
                             }
-                        }
+                        });
                     });
-                });
-                protectBonus = Math.min(protectBonus, 150);
+                    protectBonus = Math.min(protectBonus, 150);
+                } else {
+                    // Phase 1 Logic for Red Team
+                    if (redGlobalBans.includes(heroId)) {
+                        const denyScore = 20
+                        protectBonus += denyScore
+                        protectReasons.push(`Deny Used Hero`)
+                    }
+                }
 
                 const baseReason = `${count} bans`;
                 const reason = protectReasons.length > 0
@@ -1159,10 +1271,15 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             pickOrder: currentPhase === 'BAN' ? redBansCount + 1 : redPicksCount + 1
         }
 
+        // Determine Global Bans for each side for THIS game
+        const blueIsTeamA = game.blue_team_name === match.team_a_name
+        const blueGlobalBans = blueIsTeamA ? teamAGlobalBans : teamBGlobalBans
+        const redGlobalBans = blueIsTeamA ? teamBGlobalBans : teamAGlobalBans
+
         // Fetch for BOTH teams in parallel
         Promise.all([
-            getRecommendations(match.version_id, currentBluePicks, currentRedPicks, bannedIds, [], blueCtx),
-            getRecommendations(match.version_id, currentRedPicks, currentBluePicks, bannedIds, [], redCtx)
+            getRecommendations(match.version_id, currentBluePicks, currentRedPicks, bannedIds, blueGlobalBans, blueCtx, currentMode ? { layers: currentMode.layers.map((w: any) => ({ id: w.id, weight: w.weight, isActive: w.weight > 0 })) } : undefined, teamStats[game.blue_team_name?.replace(/\s*\(Bot\)\s*$/i, '') || ''] || undefined, historyMode),
+            getRecommendations(match.version_id, currentRedPicks, currentBluePicks, bannedIds, redGlobalBans, redCtx, currentMode ? { layers: currentMode.layers.map((w: any) => ({ id: w.id, weight: w.weight, isActive: w.weight > 0 })) } : undefined, teamStats[game.red_team_name?.replace(/\s*\(Bot\)\s*$/i, '') || ''] || undefined, historyMode)
         ]).then(([blueData, redData]) => {
             if (currentStep.side === 'BLUE') setRecommendations(blueData)
             else setRecommendations(redData)
@@ -1227,7 +1344,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             setIsRedSuggestLoading(false)
         })
 
-    }, [state.stepIndex, state.bluePicks, state.redPicks])
+    }, [state.stepIndex, state.bluePicks, state.redPicks, historyMode])
 
     // Immediately set Advisor suggestions from Strategic Bans when available (BAN phase)
     // Shows loading until Strategic Bans data is ready
@@ -1259,7 +1376,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
             // Red Advisor - set data when Strategic Bans is ready
             if (redStrategicBans.length > 0 && redSuggestions.length === 0) {
-                const formatted = redStrategicBans.slice(0, 8).map((r: any) => ({
+                const formatted = redStrategicBans.slice(0, 12).map((r: any) => ({
                     hero: r.hero,
                     score: r.score,
                     reason: r.reason,
@@ -1298,6 +1415,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             // For PICK phase or when no strategic data, use getRecommendations
             const allyPicks = isBlue ? Object.values(state.bluePicks) : Object.values(state.redPicks)
             const enemyPicks = isBlue ? Object.values(state.redPicks) : Object.values(state.bluePicks)
+            const bannedIds = [...state.blueBans, ...state.redBans].map(String).filter(Boolean)
 
             // Calculate Pick Order for this side
             const pCount = isBlue ? Object.values(state.bluePicks).filter(Boolean).length : Object.values(state.redPicks).filter(Boolean).length
@@ -1308,12 +1426,17 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             const targetTeamName = (isBlue ? game.blue_team_name : game.red_team_name)?.replace(/\s*\(Bot\)\s*$/i, '') || ''
             const targetTeamStats = teamStats[targetTeamName] || null
 
+            // Determine Global Bans for the current allocating team
+            const allyGlobalBans = isBlue
+                ? (game.blue_team_name === match.team_a_name ? teamAGlobalBans : teamBGlobalBans)
+                : (game.red_team_name === match.team_a_name ? teamAGlobalBans : teamBGlobalBans)
+
             const data = await getRecommendations(
                 match.version_id,
                 allyPicks as string[],
                 enemyPicks as string[],
                 bannedIds,
-                [],
+                allyGlobalBans,
                 {
                     matchId: match.id,
                     phase: currentPhase,
@@ -1324,7 +1447,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     targetTeamName: isBlue ? game.blue_team_name : game.red_team_name
                 },
                 currentMode ? { layers: currentMode.layers.map((w: any) => ({ id: w.id, weight: w.weight, isActive: w.weight > 0 })) } : undefined,
-                targetTeamStats // Pass CEREBRO Draft Strategy data
+                targetTeamStats, // Pass CEREBRO Draft Strategy data
+                historyMode // Pass History Mode
             )
 
             // Select array based on mode
@@ -1678,7 +1802,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     }
 
     return (
-        <div className="flex flex-col lg:flex-row h-full w-full overflow-hidden gap-1 p-0 lg:p-1 text-white bg-slate-950 overscroll-none">
+        <div className="flex flex-col lg:flex-row h-full w-full overflow-hidden gap-1 p-0 lg:p-1 text-white bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black overscroll-none">
             {/* MOBILE SECTION 1: Locked Header (Score & Game Info) */}
             <div className="lg:hidden shrink-0 bg-gradient-to-b from-slate-900 to-slate-950 border-b border-white/10 relative z-40 shadow-md">
                 {/* Phase Indicator */}
@@ -1714,7 +1838,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             </div>
 
             {/* MOBILE SECTION 2: Draft Controls (Timer & Lock In) */}
-            <div className="lg:hidden shrink-0 bg-slate-950 p-2 flex items-center gap-3 border-b border-slate-800 shadow-lg z-30">
+            <div className="lg:hidden shrink-0 bg-slate-950/80 backdrop-blur-md p-2 flex items-center gap-3 border-b border-indigo-500/20 shadow-lg z-30">
                 <div className={`text-4xl font-mono font-black tracking-tighter w-20 text-center ${state.timer <= 10 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
                     {state.timer}
                 </div>
@@ -1761,7 +1885,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
 
             {/* LEFT: BLUE TEAM (Desktop Only) */}
-            <div className="hidden lg:flex w-[22%] flex-col gap-1 shrink-0 bg-slate-950/50">
+            <div className="hidden lg:flex w-[22%] flex-col gap-1 shrink-0 bg-slate-950/50 min-h-0 overflow-hidden">
                 <DraftTeamPanel
                     side="BLUE"
                     teamName={game.blue_team_name}
@@ -1797,9 +1921,9 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             </div>
 
             {/* CENTER: BOARD & CONTROLS */}
-            <div className="w-full flex-1 flex flex-col gap-0.5 min-h-0 shrink-0">
+            <div className="w-full lg:w-auto flex-1 flex flex-col gap-0.5 min-h-0 shrink-0">
                 {/* Desktop Header / Timer (Hidden on Mobile) */}
-                <div className="hidden lg:flex h-20 bg-slate-900 border border-slate-700 rounded-xl items-center justify-between px-4 relative shrink-0 z-30">
+                <div className="hidden lg:flex h-20 bg-slate-950/60 backdrop-blur-md border border-indigo-500/20 rounded-xl items-center justify-between px-4 relative shrink-0 z-30 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
                     <div className="z-10 flex flex-col items-center w-full">
                         {state.isFinished ? (
                             <h2 className="text-4xl font-black text-green-400">DRAFT COMPLETE</h2>
@@ -1810,10 +1934,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         {match.team_a_name} vs {match.team_b_name}
                                     </span>
                                 </div>
-                                <span className={`text-xs font-bold tracking-wider uppercase mb-[-4px] ${currentStep?.side === 'BLUE' ? 'text-blue-400' : 'text-red-400'}`}>
+                                <span className={`text-xs font-mono font-bold tracking-[0.2em] uppercase mb-[-4px] ${currentStep?.side === 'BLUE' ? 'text-blue-400 drop-shadow-[0_0_5px_rgba(96,165,250,0.5)]' : 'text-red-400 drop-shadow-[0_0_5px_rgba(248,113,113,0.5)]'}`}>
                                     {currentStep?.side} SIDE {currentStep?.type}
                                 </span>
-                                <div className="text-5xl font-mono font-black tracking-tighter shadow-black drop-shadow-lg">{state.timer}</div>
+                                <div className="text-5xl font-mono font-black tracking-tighter shadow-black drop-shadow-lg text-white">{state.timer}</div>
                             </>
                         )}
                     </div>
@@ -1875,23 +1999,27 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
                 {/* Tabs for Hero Selection / Global Bans / Cerebro AI */}
                 <Tabs value={currentTab} onValueChange={setCurrentTab} className="flex-1 flex flex-col min-h-0">
-                    <TabsList className="grid w-full grid-cols-4 lg:grid-cols-3 bg-slate-900 h-9 lg:h-7 p-0.5 mb-0 shrink-0 border-b border-slate-800">
+                    <TabsList className="grid w-full grid-cols-4 lg:grid-cols-3 bg-slate-950/60 h-9 lg:h-8 p-1 mb-0 shrink-0 border-b border-white/5 backdrop-blur-sm gap-1">
                         {/* Mobile: Board Tab Trigger */}
-                        <TabsTrigger value="board" className="lg:hidden text-[10px] font-bold data-[state=active]:bg-slate-800 data-[state=active]:text-white">
+                        <TabsTrigger value="board" className="lg:hidden text-[10px] font-mono font-bold data-[state=active]:bg-indigo-500/20 data-[state=active]:text-indigo-300 data-[state=active]:border data-[state=active]:border-indigo-500/50 skew-x-[-10deg] transition-all">
                             BOARD
                         </TabsTrigger>
 
-                        <TabsTrigger value="hero" className="text-[10px] lg:text-xs font-bold data-[state=active]:bg-slate-800 data-[state=active]:text-white">
+                        <TabsTrigger value="hero" className="text-[10px] lg:text-xs font-mono font-bold data-[state=active]:bg-indigo-500/20 data-[state=active]:text-indigo-300 data-[state=active]:border data-[state=active]:border-indigo-500/50 skew-x-[-10deg] transition-all">
                             HEROES
                         </TabsTrigger>
-                        <TabsTrigger value="global-bans" className="text-[10px] lg:text-xs font-bold data-[state=active]:bg-slate-800 data-[state=active]:text-white flex items-center gap-1 justify-center">
+                        <TabsTrigger value="global-bans" className="text-[10px] lg:text-xs font-mono font-bold data-[state=active]:bg-indigo-500/20 data-[state=active]:text-indigo-300 data-[state=active]:border data-[state=active]:border-indigo-500/50 skew-x-[-10deg] transition-all flex items-center gap-1 justify-center">
                             <ShieldBan className="w-3 h-3 hidden md:block" />
                             <span className="md:hidden">BANS</span>
                             <span className="hidden md:inline">GLOBAL BANS</span>
                         </TabsTrigger>
-                        <TabsTrigger value="cerebro-ai" className="text-[10px] lg:text-xs font-bold data-[state=active]:bg-slate-800 data-[state=active]:text-white flex items-center gap-1 justify-center">
+                        <TabsTrigger value="cerebro-ai" className="text-[10px] lg:text-xs font-mono font-bold data-[state=active]:bg-indigo-500/20 data-[state=active]:text-indigo-300 data-[state=active]:border data-[state=active]:border-indigo-500/50 skew-x-[-10deg] transition-all flex items-center gap-1 justify-center">
                             <Brain className="w-3 h-3 text-indigo-400 hidden md:block" />
                             CEREBRO
+                        </TabsTrigger>
+                        <TabsTrigger value="history-repair" className="text-[10px] lg:text-xs font-mono font-bold data-[state=active]:bg-teal-500/20 data-[state=active]:text-teal-300 data-[state=active]:border data-[state=active]:border-teal-500/50 skew-x-[-10deg] transition-all flex items-center gap-1 justify-center">
+                            <FileClock className="w-3 h-3 text-teal-400 hidden md:block" />
+                            HISTORY
                         </TabsTrigger>
                     </TabsList>
 
@@ -1997,7 +2125,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 </div>
                             </div>
 
-                            <div className="flex-1 overflow-y-auto bg-slate-950/30 rounded-lg p-2">
+                            <div className="flex-1 overflow-y-auto bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 shadow-inner shadow-black/50">
                                 {filteredHeroes.length === 0 ? (
                                     <div className="flex items-center justify-center h-full text-slate-500">
                                         No heroes found.
@@ -2093,7 +2221,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     </TabsContent>
 
                     {/* Tab 2: GLOBAL BANS */}
-                    <TabsContent value="global-bans" className="flex-1 flex flex-col min-h-0 bg-slate-900/50 border border-slate-800 rounded-xl p-4 data-[state=active]:flex m-0 overflow-y-auto mb-14 lg:mb-0">
+                    <TabsContent value="global-bans" className="flex-1 flex flex-col min-h-0 bg-slate-950/80 backdrop-blur-md border border-indigo-500/20 shadow-[0_0_20px_rgba(99,102,241,0.1)] rounded-xl p-4 data-[state=active]:flex m-0 overflow-y-auto mb-14 lg:mb-0 relative before:absolute before:inset-0 before:bg-[url('/grid-pattern.svg')] before:opacity-5">
                         <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest text-center mb-4">Historical Bans (Previous Games)</h4>
 
                         <div className="space-y-3">
@@ -2116,7 +2244,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 const teamBPicks = teamAIsBlue ? redPicks : bluePicks
 
                                 return (
-                                    <div key={g.id} className="flex flex-col gap-1 bg-slate-950/30 p-3 rounded-lg border border-slate-800">
+                                    <div key={g.id} className="flex flex-col gap-1 bg-slate-950/40 p-3 rounded-lg border border-indigo-500/10 shadow-sm shadow-black/50 hover:border-indigo-500/30 transition-colors">
                                         <div className="flex items-center justify-between mb-2">
                                             <span className="text-xs font-mono text-slate-500">GAME {g.game_number}</span>
                                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded bg-slate-900 border border-slate-700 ${teamAIsBlue ? 'text-blue-400' : 'text-red-400'}`}>
@@ -2164,8 +2292,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     </TabsContent>
 
                     {/* Tab 3: CEREBRO AI */}
-                    <TabsContent value="cerebro-ai" className="flex-1 flex flex-col min-h-0 bg-slate-900 border border-slate-800 rounded-xl p-2 data-[state=active]:flex m-0 overflow-hidden mb-14 lg:mb-0">
-                        <Tabs value={aiTab} onValueChange={setAiTab} className="flex-1 flex flex-col min-h-0">
+                    <TabsContent value="cerebro-ai" className="flex-1 flex flex-col min-h-0 bg-slate-950/80 backdrop-blur-md border border-indigo-500/30 shadow-[0_0_20px_rgba(99,102,241,0.15)] rounded-xl p-2 data-[state=active]:flex m-0 overflow-hidden mb-14 lg:mb-0 relative before:absolute before:inset-0 before:bg-[url('/grid-pattern.svg')] before:opacity-5">
+                        <Tabs value={aiTab} onValueChange={setAiTab} className="flex-1 flex flex-col min-h-0 h-full">
                             <div className="flex flex-col md:flex-row md:items-center justify-between mb-2 shrink-0 gap-2">
                                 <div className="flex items-center gap-2 overflow-hidden">
                                     <Button
@@ -2177,32 +2305,35 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     >
                                         <ChevronDown className="w-4 h-4 rotate-90" />
                                     </Button>
-                                    <h3 className="font-bold text-indigo-400 flex items-center gap-2 text-xs md:text-sm truncate min-w-0">
-                                        <Brain className="w-4 h-4 md:w-5 md:h-5 shrink-0" />
-                                        <span className="shrink-0">CEREBRO AI •</span>
-                                        <span className="truncate">{currentMode.name.split('(')[0]}</span>
+                                    <h3 className="font-mono tracking-[0.2em] font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-300 flex items-center gap-2 text-xs md:text-sm truncate min-w-0 drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]">
+                                        <Brain className="w-4 h-4 md:w-5 md:h-5 shrink-0 text-cyan-400" />
+                                        <span className="shrink-0">CEREBRO AI</span>
+                                        <span className="text-slate-500 mx-2">|</span>
+                                        <span className="truncate text-indigo-200">{currentMode.name.includes('Pro Competitive Standard') ? 'PRO' : currentMode.name.split('(')[0]}</span>
                                     </h3>
                                 </div>
 
-                                <TabsList className="bg-slate-950/50 border border-slate-800 p-0.5 h-auto min-h-[36px] md:h-10 w-full md:w-auto overflow-x-auto justify-start gap-0.5 scrollbar-none">
-                                    <TabsTrigger value="suggestions" title="Suggestion" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-indigo-500/20 data-[state=active]:text-indigo-400 data-[state=active]:border-indigo-500/50 border border-transparent text-slate-500 hover:text-indigo-300 transition-all shrink-0"><Home className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
-                                    <TabsTrigger value="meta" title="Meta Analysis" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-400 data-[state=active]:border-purple-500/50 border border-transparent text-slate-500 hover:text-purple-300 transition-all shrink-0"><Globe className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
-                                    <TabsTrigger value="counter" title="Counter Matchups" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-red-500/20 data-[state=active]:text-red-400 data-[state=active]:border-red-500/50 border border-transparent text-slate-500 hover:text-red-300 transition-all shrink-0"><Swords className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
-                                    <TabsTrigger value="comfort" title="Team Hero Pool" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-blue-500/20 data-[state=active]:text-blue-400 data-[state=active]:border-blue-500/50 border border-transparent text-slate-500 hover:text-blue-300 transition-all shrink-0"><Users className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
-                                    <TabsTrigger value="opponent-pool" title="Opponent Pool" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-yellow-500/20 data-[state=active]:text-yellow-400 data-[state=active]:border-yellow-500/50 border border-transparent text-slate-500 hover:text-yellow-300 transition-all shrink-0"><Eye className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
-                                    <TabsTrigger value="roster" title="Roster Dominance" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-cyan-500/20 data-[state=active]:text-cyan-400 data-[state=active]:border-cyan-500/50 border border-transparent text-slate-500 hover:text-cyan-300 transition-all shrink-0"><Target className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
-                                    <TabsTrigger value="ban" title="Ban Strategy" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-orange-500/20 data-[state=active]:text-orange-400 data-[state=active]:border-orange-500/50 border border-transparent text-slate-500 hover:text-orange-300 transition-all shrink-0"><ShieldBan className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
-                                    <TabsTrigger value="composition" title="Draft Composition" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-pink-500/20 data-[state=active]:text-pink-400 data-[state=active]:border-pink-500/50 border border-transparent text-slate-500 hover:text-pink-300 transition-all shrink-0"><Brain className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
-                                    <TabsTrigger value="synergy" title="Synergies" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-emerald-500/20 data-[state=active]:text-emerald-400 data-[state=active]:border-emerald-500/50 border border-transparent text-slate-500 hover:text-emerald-300 transition-all shrink-0"><LinkIcon className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
-                                    <TabsTrigger value="analysis" title="Analysis Config" className="w-9 h-9 md:w-10 md:h-9 px-0 data-[state=active]:bg-slate-700 data-[state=active]:text-white border border-transparent text-slate-500 hover:text-slate-300 transition-all shrink-0"><Settings2 className="w-5 h-5 md:w-5 md:h-5" /></TabsTrigger>
+                                <TabsList className="bg-slate-950/60 border-b border-indigo-500/20 p-0.5 h-auto min-h-[36px] w-full md:w-auto flex flex-wrap justify-start gap-1 backdrop-blur-sm">
+                                    <TabsTrigger value="suggestions" title="Suggestion" className="w-9 h-9 px-0 data-[state=active]:bg-indigo-600/20 data-[state=active]:text-indigo-300 data-[state=active]:border-indigo-500/50 data-[state=active]:shadow-[0_0_10px_rgba(99,102,241,0.3)] border border-transparent text-slate-500 hover:text-indigo-400 hover:bg-indigo-950/30 transition-all shrink-0"><Home className="w-5 h-5" /></TabsTrigger>
+                                    <TabsTrigger value="meta" title="Meta Analysis" className="w-9 h-9 px-0 data-[state=active]:bg-purple-600/20 data-[state=active]:text-purple-300 data-[state=active]:border-purple-500/50 data-[state=active]:shadow-[0_0_10px_rgba(168,85,247,0.3)] border border-transparent text-slate-500 hover:text-purple-400 hover:bg-purple-950/30 transition-all shrink-0"><Globe className="w-5 h-5" /></TabsTrigger>
+                                    <TabsTrigger value="history" title="Global Bans (History)" className="w-9 h-9 px-0 data-[state=active]:bg-slate-700/40 data-[state=active]:text-slate-200 data-[state=active]:border-slate-500/50 data-[state=active]:shadow-[0_0_10px_rgba(148,163,184,0.3)] border border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/30 transition-all shrink-0"><History className="w-5 h-5" /></TabsTrigger>
+                                    <TabsTrigger value="counter" title="Counter Matchups" className="w-9 h-9 px-0 data-[state=active]:bg-red-600/20 data-[state=active]:text-red-300 data-[state=active]:border-red-500/50 data-[state=active]:shadow-[0_0_10px_rgba(248,113,113,0.3)] border border-transparent text-slate-500 hover:text-red-400 hover:bg-red-950/30 transition-all shrink-0"><Swords className="w-5 h-5" /></TabsTrigger>
+                                    <TabsTrigger value="comfort" title="Team Hero Pool" className="w-9 h-9 px-0 data-[state=active]:bg-blue-600/20 data-[state=active]:text-blue-300 data-[state=active]:border-blue-500/50 data-[state=active]:shadow-[0_0_10px_rgba(59,130,246,0.3)] border border-transparent text-slate-500 hover:text-blue-400 hover:bg-blue-950/30 transition-all shrink-0"><Users className="w-5 h-5" /></TabsTrigger>
+                                    <TabsTrigger value="opponent-pool" title="Opponent Pool" className="w-9 h-9 px-0 data-[state=active]:bg-yellow-600/20 data-[state=active]:text-yellow-300 data-[state=active]:border-yellow-500/50 data-[state=active]:shadow-[0_0_10px_rgba(234,179,8,0.3)] border border-transparent text-slate-500 hover:text-yellow-400 hover:bg-yellow-950/30 transition-all shrink-0"><Eye className="w-5 h-5" /></TabsTrigger>
+                                    <TabsTrigger value="roster" title="Roster Dominance" className="w-9 h-9 px-0 data-[state=active]:bg-cyan-600/20 data-[state=active]:text-cyan-300 data-[state=active]:border-cyan-500/50 data-[state=active]:shadow-[0_0_10px_rgba(34,211,238,0.3)] border border-transparent text-slate-500 hover:text-cyan-400 hover:bg-cyan-950/30 transition-all shrink-0"><Target className="w-5 h-5" /></TabsTrigger>
+                                    <TabsTrigger value="ban" title="Ban Strategy" className="w-9 h-9 px-0 data-[state=active]:bg-orange-600/20 data-[state=active]:text-orange-300 data-[state=active]:border-orange-500/50 data-[state=active]:shadow-[0_0_10px_rgba(249,115,22,0.3)] border border-transparent text-slate-500 hover:text-orange-400 hover:bg-orange-950/30 transition-all shrink-0"><ShieldBan className="w-5 h-5" /></TabsTrigger>
+                                    <TabsTrigger value="composition" title="Draft Composition" className="w-9 h-9 px-0 data-[state=active]:bg-pink-600/20 data-[state=active]:text-pink-300 data-[state=active]:border-pink-500/50 data-[state=active]:shadow-[0_0_10px_rgba(236,72,153,0.3)] border border-transparent text-slate-500 hover:text-pink-400 hover:bg-pink-950/30 transition-all shrink-0"><Brain className="w-5 h-5" /></TabsTrigger>
+                                    <TabsTrigger value="synergy" title="Synergies" className="w-9 h-9 px-0 data-[state=active]:bg-emerald-600/20 data-[state=active]:text-emerald-300 data-[state=active]:border-emerald-500/50 data-[state=active]:shadow-[0_0_10px_rgba(16,185,129,0.3)] border border-transparent text-slate-500 hover:text-emerald-400 hover:bg-emerald-950/30 transition-all shrink-0"><LinkIcon className="w-5 h-5" /></TabsTrigger>
+
+                                    <TabsTrigger value="analysis" title="Analysis Config" className="w-9 h-9 px-0 data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-[0_0_10px_rgba(255,255,255,0.1)] border border-transparent text-slate-500 hover:text-slate-300 transition-all shrink-0"><Settings2 className="w-5 h-5" /></TabsTrigger>
                                 </TabsList>
                             </div>
 
 
 
-                            <TabsContent value="suggestions" className="flex-1 min-h-0 mt-0 flex flex-col">
+                            <TabsContent value="suggestions" className="flex-1 min-h-0 mt-0 flex flex-col overflow-hidden h-full">
                                 {/* Role Filter */}
-                                <div className="flex gap-1 mb-2 px-1">
+                                <div className="flex gap-1 mb-2 px-1 relative z-10">
                                     {['ALL', 'DSL', 'JUG', 'MID', 'ADL', 'SUP'].map(role => (
                                         <button
                                             key={role}
@@ -2218,7 +2349,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 </div>
 
                                 {/* Picks / Bans Toggle */}
-                                <div className="flex gap-2 mb-2 px-1 shrink-0">
+                                <div className="flex gap-2 mb-2 px-1 shrink-0 relative z-10">
                                     <button
                                         onClick={() => setRecTypeFilter('PICKS')}
                                         className={`flex-1 py-1.5 text-[10px] font-bold rounded flex items-center justify-center gap-2 border transition-all ${recTypeFilter === 'PICKS'
@@ -2258,7 +2389,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     </div>
                                 )}
 
-                                <ScrollArea className="flex-1 -mr-2 pr-2 pb-24">
+                                <ScrollArea className="flex-1 bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 overflow-y-auto max-h-[calc(100vh-350px)] lg:max-h-[calc(100vh-400px)] shadow-inner shadow-black/50">
                                     {(() => {
                                         if (isLoadingRecommendations) {
                                             return (
@@ -2286,12 +2417,38 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                             return recs.filter(r => r.hero.main_position?.includes(targetRole) || r.hero.main_position?.includes(targetRole === 'Abyssal Dragon' ? 'Abyssal' : targetRole))
                                         }
 
-                                        const limit = recRoleFilter === 'ALL' ? 12 : 6
+                                        const limit = recRoleFilter === 'ALL' ? 20 : 10
 
-                                        // Use calculatedStrategicBans for the Right Panel
-                                        const banRecs = (calculatedStrategicBans.length > 0
-                                            ? filterByRole(calculatedStrategicBans)
-                                            : filterByRole(recommendations.smartBan || [])).slice(0, limit)
+                                        // Use side-specific Strategic Bans for the Right Panel (Matches Advisor)
+                                        // Use side-specific Strategic Bans for the Right Panel (Matches Advisor)
+                                        const activeStrategicBans = currentStep?.side === 'BLUE' ? blueStrategicBans : redStrategicBans
+
+                                        // Merge Client (History) and Server (Meta/Counter) Bans
+                                        const serverBans = recommendations.smartBan || []
+                                        const mergedBansMap = new Map<string, any>()
+
+                                        // 1. Add Server Bans
+                                        serverBans.forEach((b: any) => mergedBansMap.set(String(b.hero.id), { ...b }))
+
+                                        // 2. Merge Client Bans
+                                        activeStrategicBans.forEach((b: any) => {
+                                            const existing = mergedBansMap.get(String(b.hero.id))
+                                            if (existing) {
+                                                const maxScore = Math.max(existing.score, b.score)
+                                                // Combine unique reasons
+                                                const reasons = Array.from(new Set([
+                                                    ...(existing.reason || '').split(' • '),
+                                                    ...(b.reason || '').split(' • ')
+                                                ])).filter(Boolean).slice(0, 3).join(' • ')
+
+                                                mergedBansMap.set(String(b.hero.id), { ...existing, ...b, score: maxScore, reason: reasons })
+                                            } else {
+                                                mergedBansMap.set(String(b.hero.id), { ...b })
+                                            }
+                                        })
+
+                                        const mergedBans = Array.from(mergedBansMap.values()).sort((a: any, b: any) => b.score - a.score)
+                                        const banRecs = filterByRole(mergedBans).slice(0, limit)
 
                                         const pickRecs = filterByRole(recommendations.hybrid || []).slice(0, limit)
 
@@ -2376,6 +2533,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                                                             // Negative penalties
                                                                             else if (r.includes('Countered by') || r.includes('Weak vs')) { Icon = Swords; colorClass = "text-rose-400 bg-rose-900/30 border-rose-800" }
                                                                             else if (r.includes('Role Filled') || r.includes('Needs ')) { Icon = Ban; colorClass = "text-rose-400 bg-rose-900/30 border-rose-800" }
+                                                                            else if (r.includes('Risk') || r.includes('Exposed')) { Icon = ShieldBan; colorClass = "text-red-400 bg-red-950/80 border-red-600 font-bold shadow-sm shadow-red-900/50" }
 
                                                                             return (
                                                                                 <div key={i} className={`text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 ${colorClass}`}>
@@ -2405,11 +2563,11 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 </ScrollArea>
                             </TabsContent>
 
-                            <TabsContent value="comfort" className="flex-1 min-h-0 mt-0 flex flex-col">
+                            <TabsContent value="comfort" className="flex-1 min-h-0 mt-0 flex flex-col overflow-hidden h-full">
                                 <div className="flex items-center justify-between mb-2 border-b border-blue-900/30 pb-1 px-1 pt-1 shrink-0">
                                     <h4 className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Team Hero Pool</h4>
                                     {/* Team Filter Buttons */}
-                                    <div className="flex gap-0.5">
+                                    <div className="flex gap-0.5 relative z-10">
                                         <button
                                             onClick={() => setTeamPoolFilter('ALL')}
                                             className={`px-1.5 py-0.5 text-[8px] font-bold rounded uppercase transition-colors ${teamPoolFilter === 'ALL' ? 'bg-slate-600 text-white' : 'bg-slate-800 text-slate-500 hover:bg-slate-700 hover:text-slate-300'}`}
@@ -2433,7 +2591,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     </div>
                                 </div>
                                 {/* Role Filter Buttons */}
-                                <div className="flex gap-0.5 px-1 pb-2 shrink-0">
+                                <div className="flex gap-0.5 px-1 pb-2 shrink-0 relative z-10">
                                     {['ALL', 'Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam'].map(role => (
                                         <button
                                             key={role}
@@ -2475,7 +2633,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                                 <span className="text-center">Picks</span>
                                                 <span className="text-center">WR</span>
                                             </div>
-                                            <ScrollArea className="flex-1">
+                                            <div className="flex-1">
                                                 {pool.length > 0 ? pool.map((item: any) => {
                                                     return (
                                                         <div
@@ -2502,29 +2660,31 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                                 }) : (
                                                     <div className="text-center text-xs text-slate-600 py-8 italic">No scrim data available</div>
                                                 )}
-                                            </ScrollArea>
+                                            </div>
                                         </div>
                                     )
 
                                     return (
-                                        <div className={`grid gap-2 flex-1 min-h-0 pb-24 ${teamPoolFilter === 'ALL' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
-                                            {(teamPoolFilter === 'ALL' || teamPoolFilter === 'TEAM_A') && (
-                                                <div className="bg-slate-950/30 rounded-lg border border-slate-800 overflow-hidden flex flex-col">
-                                                    {renderPoolTable(teamAPool, match.team_a_name, teamAGames, 'blue')}
-                                                </div>
-                                            )}
-                                            {(teamPoolFilter === 'ALL' || teamPoolFilter === 'TEAM_B') && (
-                                                <div className="bg-slate-950/30 rounded-lg border border-slate-800 overflow-hidden flex flex-col">
-                                                    {renderPoolTable(teamBPool, match.team_b_name, teamBGames, 'red')}
-                                                </div>
-                                            )}
-                                        </div>
+                                        <ScrollArea className="flex-1 bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 overflow-y-auto max-h-[calc(100vh-350px)] lg:max-h-[calc(100vh-400px)] shadow-inner shadow-black/50">
+                                            <div className={`grid gap-2 ${teamPoolFilter === 'ALL' ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'}`}>
+                                                {(teamPoolFilter === 'ALL' || teamPoolFilter === 'TEAM_A') && (
+                                                    <div className="flex flex-col">
+                                                        {renderPoolTable(teamAPool, match.team_a_name, teamAGames, 'blue')}
+                                                    </div>
+                                                )}
+                                                {(teamPoolFilter === 'ALL' || teamPoolFilter === 'TEAM_B') && (
+                                                    <div className="flex flex-col">
+                                                        {renderPoolTable(teamBPool, match.team_b_name, teamBGames, 'red')}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </ScrollArea>
                                     )
                                 })()}
                             </TabsContent>
 
                             {/* Opponent Pool Tab - Shows enemy's hero pool with status */}
-                            <TabsContent value="opponent-pool" className="flex-1 min-h-0 mt-0">
+                            <TabsContent value="opponent-pool" className="flex-1 min-h-0 mt-0 flex flex-col overflow-hidden h-full">
                                 <div className="h-full flex flex-col">
                                     {/* Header with Filters */}
                                     <div className="flex items-center justify-between mb-2 border-b border-yellow-900/30 pb-1 px-2 pt-2 shrink-0">
@@ -2532,7 +2692,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                             Opponent Pool Status
                                         </h4>
                                         {/* Team Filter */}
-                                        <div className="flex gap-0.5">
+                                        <div className="flex gap-0.5 relative z-10">
                                             <button
                                                 onClick={() => setOpponentPoolTeamFilter('OPPONENT')}
                                                 className={`px-1.5 py-0.5 text-[8px] font-bold rounded uppercase transition-colors ${opponentPoolTeamFilter === 'OPPONENT' ? 'bg-yellow-600 text-white' : 'bg-slate-800 text-slate-500 hover:bg-slate-700'}`}
@@ -2557,7 +2717,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     </div>
 
                                     {/* Role Filter */}
-                                    <div className="flex gap-0.5 px-2 mb-2 shrink-0">
+                                    <div className="flex gap-0.5 px-2 mb-2 shrink-0 relative z-10">
                                         {['ALL', 'DS', 'JG', 'MID', 'AB', 'SP'].map(roleKey => {
                                             const roleLabel = roleKey === 'ALL' ? 'ALL' : roleKey
                                             const roleValue = roleKey === 'DS' ? 'Dark Slayer' : roleKey === 'JG' ? 'Jungle' : roleKey === 'MID' ? 'Mid' : roleKey === 'AB' ? 'Abyssal' : roleKey === 'SP' ? 'Roam' : 'ALL'
@@ -2653,7 +2813,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         }
 
                                         return (
-                                            <ScrollArea className="flex-1">
+                                            <ScrollArea className="flex-1 bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 overflow-y-auto max-h-[calc(100vh-350px)] lg:max-h-[calc(100vh-400px)] shadow-inner shadow-black/50">
                                                 <div className="px-2 pb-2 space-y-1">
                                                     <div className="text-[10px] text-slate-500 mb-2">
                                                         <span className="font-bold">{selectedTeamName}</span> pool ({selectedTeamData?.totalGames || 0} games)
@@ -2718,7 +2878,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                             </Badge>
                                         )}
                                     </div>
-                                    <div className="flex gap-0.5">
+                                    <div className="flex gap-0.5 relative z-10">
                                         {['ALL', 'Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam'].map(role => (
                                             <button
                                                 key={role}
@@ -2730,8 +2890,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         ))}
                                     </div>
                                 </div>
-                                <ScrollArea className="flex-1 bg-slate-950/30 rounded-lg border border-slate-800 h-full">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-2 pb-24">
+                                <ScrollArea className="flex-1 bg-slate-950/40 rounded-lg border border-indigo-500/10 overflow-y-auto max-h-[calc(100vh-300px)] lg:max-h-[calc(100vh-350px)] shadow-inner shadow-black/50">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-2 pb-8">
                                         {recommendations.meta?.filter((item: any) => metaFilter === 'ALL' || item.hero.main_position?.includes(metaFilter)).map((item: any) => (
                                             <div key={item.hero.id} className="bg-purple-950/10 border border-purple-900/20 p-2 rounded flex items-center gap-2 hover:bg-purple-900/20 transition-colors cursor-pointer" onClick={() => handleHeroClick(item.hero)}>
                                                 <Image src={item.hero.icon_url} alt={item.hero.name} width={32} height={32} className="rounded" />
@@ -2749,13 +2909,87 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 </ScrollArea>
                             </TabsContent>
 
+                            {/* 3.1 GLOBAL BANS (HISTORY) REPLICA */}
+                            <TabsContent value="history" className="flex-1 min-h-0 mt-0 flex flex-col overflow-hidden h-full">
+                                <div className="flex items-center justify-between mb-2 border-b border-slate-700/50 pb-1 px-1 pt-1 shrink-0">
+                                    <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Historical Bans (Previous Games)</h4>
+                                </div>
+                                <ScrollArea className="flex-1 bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 overflow-y-auto max-h-[calc(100vh-350px)] lg:max-h-[calc(100vh-400px)] shadow-inner shadow-black/50">
+                                    <div className="space-y-3 pb-4">
+                                        {/* Header */}
+                                        <div className="flex justify-between px-4 py-2 bg-slate-950/50 rounded-lg text-xs font-bold uppercase border border-slate-800">
+                                            <span className="text-blue-400 w-1/2 text-center border-r border-slate-800">{match.team_a_name}</span>
+                                            <span className="text-red-400 w-1/2 text-center">{match.team_b_name}</span>
+                                        </div>
+
+                                        {/* Game Rows */}
+                                        {match.games?.filter(g => g.game_number < game.game_number).map((g) => {
+                                            // Extract picks for this specific game
+                                            const picks = g.picks || []
+                                            const bluePicks = picks.filter(p => p.side === 'BLUE' && p.type === 'PICK').map(p => p.hero_id)
+                                            const redPicks = picks.filter(p => p.side === 'RED' && p.type === 'PICK').map(p => p.hero_id)
+
+                                            // Determine which picks belong to Team A (Left Column) and Team B (Right Column)
+                                            const teamAIsBlue = g.blue_team_name === match.team_a_name
+                                            const teamAPicks = teamAIsBlue ? bluePicks : redPicks
+                                            const teamBPicks = teamAIsBlue ? redPicks : bluePicks
+
+                                            return (
+                                                <div key={g.id} className="flex flex-col gap-1 bg-slate-950/40 p-3 rounded-lg border border-indigo-500/10 shadow-sm shadow-black/50 hover:border-indigo-500/30 transition-colors">
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="text-xs font-mono text-slate-500">GAME {g.game_number}</span>
+                                                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded bg-slate-900 border border-slate-700 ${teamAIsBlue ? 'text-blue-400' : 'text-red-400'}`}>
+                                                            {teamAIsBlue ? 'BLUE SIDE' : 'RED SIDE'} (A)
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="grid grid-cols-2 gap-1 md:gap-8 divide-x divide-slate-800/50">
+                                                        {/* Left Column: Team A Picks */}
+                                                        <div className="flex flex-wrap gap-1 justify-center content-start">
+                                                            {teamAPicks.map(id => {
+                                                                const h = getHero(id)
+                                                                return h ? (
+                                                                    <div key={id} className="relative group">
+                                                                        <Image src={h.icon_url} alt={h.name} width={24} height={24} className="rounded border border-slate-700 grayscale opacity-75 group-hover:grayscale-0 group-hover:opacity-100 transition-all" title={h.name} />
+                                                                    </div>
+                                                                ) : null
+                                                            })}
+                                                            {teamAPicks.length === 0 && <span className="text-xs text-slate-600">-</span>}
+                                                        </div>
+                                                        {/* Right Column: Team B Picks */}
+                                                        <div className="flex flex-wrap gap-1 justify-center content-start">
+                                                            {teamBPicks.map(id => {
+                                                                const h = getHero(id)
+                                                                return h ? (
+                                                                    <div key={id} className="relative group">
+                                                                        <Image src={h.icon_url} alt={h.name} width={24} height={24} className="rounded border border-slate-700 grayscale opacity-75 group-hover:grayscale-0 group-hover:opacity-100 transition-all" title={h.name} />
+                                                                    </div>
+                                                                ) : null
+                                                            })}
+                                                            {teamBPicks.length === 0 && <span className="text-xs text-slate-600">-</span>}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+
+                                        {(match.games?.filter(g => g.game_number < game.game_number).length === 0) && (
+                                            <div className="text-center text-slate-500 py-8 italic flex flex-col items-center gap-2">
+                                                <ShieldBan className="w-8 h-8 opacity-20" />
+                                                <span>No global bans active (First Game)</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </ScrollArea>
+                            </TabsContent>
+
                             {/* 4. COUNTER MATCHUPS */}
-                            <TabsContent value="counter" className="flex-1 min-h-0 mt-0 flex flex-col">
+                            <TabsContent value="counter" className="flex-1 min-h-0 mt-0 flex flex-col overflow-hidden h-full">
                                 <div className="flex flex-col gap-1.5 mb-2 border-b border-red-900/30 pb-2 px-1 pt-1 shrink-0">
                                     <div className="flex items-center justify-between">
                                         <h4 className="text-[10px] font-bold text-red-400 uppercase tracking-widest">Counter Matchups (Lane)</h4>
                                         {/* Team Filter */}
-                                        <div className="flex gap-1">
+                                        <div className="flex gap-1 relative z-10">
                                             <button
                                                 onClick={() => setCounterTeamFilter('ALL')}
                                                 className={`px-2 py-0.5 text-[10px] font-bold rounded uppercase transition-colors ${counterTeamFilter === 'ALL' ? 'bg-slate-600 text-white' : 'bg-slate-800 text-slate-500 hover:bg-slate-700 hover:text-slate-300'}`}
@@ -2779,7 +3013,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         </div>
                                     </div>
                                     {/* Role Filter */}
-                                    <div className="flex gap-0.5">
+                                    <div className="flex gap-0.5 relative z-10">
                                         {['ALL', 'Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam'].map(role => (
                                             <button
                                                 key={role}
@@ -2791,7 +3025,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         ))}
                                     </div>
                                 </div>
-                                <ScrollArea className="flex-1 bg-slate-950/30 rounded-lg p-2 border border-slate-800 pb-24">
+                                <ScrollArea className="flex-1 bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 pb-8 overflow-y-auto max-h-[calc(100vh-350px)] lg:max-h-[calc(100vh-400px)] shadow-inner shadow-black/50">
                                     {counterTeamFilter !== 'ALL' ? (
                                         // Team-specific Lane Matchups View
                                         <div className="flex flex-col gap-3">
@@ -2946,15 +3180,15 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
 
                             {/* DRAFT STRATEGY ANALYSIS (4 Sections) */}
-                            <TabsContent value="composition" className="flex-1 min-h-0 mt-0">
-                                <ScrollArea className="h-full bg-slate-950/30 rounded-lg p-2 border border-slate-800">
+                            <TabsContent value="composition" className="flex-1 min-h-0 mt-0 flex flex-col overflow-hidden h-full">
+                                <ScrollArea className="bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 overflow-y-auto max-h-[calc(100vh-350px)] lg:max-h-[calc(100vh-400px)] shadow-inner shadow-black/50">
                                     <div className="space-y-3">
                                         {/* Header with Team & Side Filters */}
                                         <div className="flex items-center justify-between mb-2 border-b border-pink-900/30 pb-2">
                                             <h4 className="text-[10px] font-bold text-pink-400 uppercase tracking-widest">Draft Strategy Analysis</h4>
                                             <div className="flex items-center gap-2">
                                                 {/* Team Filter */}
-                                                <div className="flex gap-1">
+                                                <div className="flex gap-1 relative z-10">
                                                     <button
                                                         onClick={() => setDraftStrategyTeamFilter('BLUE')}
                                                         className={`px-2 py-0.5 text-[8px] rounded font-bold transition-all ${draftStrategyTeamFilter === 'BLUE'
@@ -2982,7 +3216,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         </div>
 
                                         {/* Inner Tabs for 4 Sections */}
-                                        <div className="flex gap-1 mb-2">
+                                        <div className="flex gap-1 mb-2 relative z-10">
                                             {[
                                                 { id: 'priorities', label: 'Pick Order' },
                                                 { id: 'flex', label: 'Flex Picks' },
@@ -3131,8 +3365,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                             </TabsContent>
 
                             {/* 5. SYNERGIES */}
-                            <TabsContent value="synergy" className="flex-1 min-h-0 mt-0">
-                                <ScrollArea className="h-full bg-slate-950/30 rounded-lg p-2 border border-slate-800">
+                            <TabsContent value="synergy" className="flex-1 min-h-0 mt-0 flex flex-col overflow-hidden h-full">
+                                <ScrollArea className="bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 overflow-y-auto max-h-[calc(100vh-350px)] lg:max-h-[calc(100vh-400px)] shadow-inner shadow-black/50">
                                     <h4 className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest mb-2 border-b border-emerald-900/30 pb-1">Synergies (Combo)</h4>
                                     <div className="flex flex-col gap-2">
                                         {recommendations.synergies?.map((item: any, idx: number) => (
@@ -3156,8 +3390,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                             </TabsContent>
 
                             {/* 6. ROSTER DOMINANCE */}
-                            <TabsContent value="roster" className="flex-1 min-h-0 mt-0">
-                                <ScrollArea className="h-full bg-slate-950/30 rounded-lg p-2 border border-slate-800">
+                            <TabsContent value="roster" className="flex-1 min-h-0 mt-0 flex flex-col overflow-hidden h-full">
+                                <ScrollArea className="bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 overflow-y-auto max-h-[calc(100vh-350px)] lg:max-h-[calc(100vh-400px)] shadow-inner shadow-black/50">
                                     <div className="flex items-center justify-between mb-2 border-b border-cyan-900/30 pb-2">
                                         <h4 className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest">
                                             Roster Dominance (Specialist)
@@ -3169,7 +3403,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         {/* Team Filter */}
                                         <div className="flex items-center gap-1">
                                             <span className="text-[8px] text-slate-500 uppercase">Team:</span>
-                                            <div className="flex gap-1">
+                                            <div className="flex gap-1 relative z-10">
                                                 <button
                                                     onClick={() => setRosterTeamFilter('blue')}
                                                     className={`px-2 py-0.5 text-[8px] rounded font-bold transition-all ${rosterTeamFilter === 'blue'
@@ -3192,7 +3426,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         </div>
 
                                         {/* Role Filter */}
-                                        <div className="flex items-center gap-1">
+                                        <div className="flex items-center gap-1 relative z-10">
                                             <span className="text-[8px] text-slate-500 uppercase">Role:</span>
                                             <select
                                                 value={rosterRoleFilter}
@@ -3286,8 +3520,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                             </TabsContent>
 
                             {/* 7. BAN STRATEGY */}
-                            <TabsContent value="ban" className="flex-1 min-h-0 mt-0">
-                                <ScrollArea className="h-full bg-slate-950/30 rounded-lg p-2 border border-slate-800">
+                            <TabsContent value="ban" className="flex-1 min-h-0 mt-0 flex flex-col overflow-hidden h-full">
+                                <ScrollArea className="bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 overflow-y-auto max-h-[calc(100vh-350px)] lg:max-h-[calc(100vh-400px)] shadow-inner shadow-black/50">
                                     <div className="flex items-center justify-between mb-2 border-b border-orange-900/30 pb-2">
                                         <h4 className="text-[10px] font-bold text-orange-400 uppercase tracking-widest">
                                             Ban Strategy Analysis
@@ -3297,7 +3531,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     {/* Team Filter */}
                                     <div className="flex items-center gap-2 mb-3">
                                         <span className="text-[8px] text-slate-500 uppercase">Team:</span>
-                                        <div className="flex gap-1">
+                                        <div className="flex gap-1 relative z-10">
                                             <button
                                                 onClick={() => setRosterTeamFilter('blue')}
                                                 className={`px-2 py-0.5 text-[8px] rounded font-bold transition-all ${rosterTeamFilter === 'blue'
@@ -3469,8 +3703,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 </ScrollArea>
                             </TabsContent>
 
-                            <TabsContent value="analysis" className="flex-1 min-h-0 mt-0">
-                                <ScrollArea className="h-full bg-slate-950/30 rounded-lg p-2 border border-slate-800">
+
+
+                            <TabsContent value="analysis" className="flex-1 min-h-0 mt-0 flex flex-col overflow-hidden h-full">
+                                <ScrollArea className="bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 overflow-y-auto max-h-[calc(100vh-350px)] lg:max-h-[calc(100vh-400px)] shadow-inner shadow-black/50">
                                     <div className="space-y-4">
                                         <div className="flex items-center justify-between">
                                             <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Configuration</h4>
@@ -3506,6 +3742,114 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 </ScrollArea>
                             </TabsContent>
                         </Tabs>
+                    </TabsContent>
+
+                    {/* Tab 4: HISTORY & REPAIR */}
+                    <TabsContent value="history-repair" className="flex-1 flex flex-col min-h-0 bg-slate-950/80 backdrop-blur-md border border-teal-500/20 shadow-[0_0_20px_rgba(20,184,166,0.1)] rounded-xl p-4 data-[state=active]:flex m-0 overflow-y-auto mb-14 lg:mb-0 relative before:absolute before:inset-0 before:bg-[url('/grid-pattern.svg')] before:opacity-5">
+                        <div className="flex items-center justify-between mb-4 z-10 sticky top-0 bg-slate-950/80 p-2 rounded-lg border border-slate-800 backdrop-blur-sm">
+                            <h4 className="text-[10px] font-bold text-teal-400 uppercase tracking-widest flex items-center gap-2">
+                                <FileClock className="w-3 h-3" /> Play History & Repair
+                            </h4>
+
+                            {/* Data Mode Toggle */}
+                            <div className="flex bg-slate-900 rounded p-0.5 border border-slate-700">
+                                <button
+                                    onClick={() => setHistoryMode('team')}
+                                    className={`px-2 py-1 text-[9px] font-bold rounded transition-all ${historyMode === 'team'
+                                        ? 'bg-teal-600 text-white shadow shadow-teal-500/20'
+                                        : 'text-slate-500 hover:text-slate-300'
+                                        }`}
+                                >
+                                    MY TEAM
+                                </button>
+                                <button
+                                    onClick={() => setHistoryMode('global')}
+                                    className={`px-2 py-1 text-[9px] font-bold rounded transition-all ${historyMode === 'global'
+                                        ? 'bg-indigo-600 text-white shadow shadow-indigo-500/20'
+                                        : 'text-slate-500 hover:text-slate-300'
+                                        }`}
+                                >
+                                    GLOBAL
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            {/* Loading State */}
+                            {isLoadingRecommendations && (
+                                <div className="text-center py-8">
+                                    <RefreshCw className="w-6 h-6 text-teal-500 animate-spin mx-auto mb-2" />
+                                    <p className="text-xs text-slate-500">Analyzing history...</p>
+                                </div>
+                            )}
+
+                            {/* Recommendations List */}
+                            {!isLoadingRecommendations && recommendations.historyAnalysis && recommendations.historyAnalysis.length > 0 && (
+                                <div className="grid grid-cols-1 gap-2">
+                                    {recommendations.historyAnalysis.slice(0, 8).map((rec: any, idx: number) => (
+                                        <div
+                                            key={rec.hero.id}
+                                            onClick={() => handleHeroClick(rec.hero)}
+                                            className="group bg-slate-900/40 p-2 rounded-lg border border-slate-800 hover:border-teal-500/50 hover:bg-teal-950/10 transition-all cursor-pointer flex items-center gap-3 relative overflow-hidden"
+                                        >
+                                            {/* Score Bar Background */}
+                                            <div
+                                                className="absolute left-0 top-0 bottom-0 bg-teal-500/5 transition-all group-hover:bg-teal-500/10"
+                                                style={{ width: `${Math.min(rec.score, 100)}%` }}
+                                            />
+
+                                            {/* Hero Icon */}
+                                            <div className="relative shrink-0">
+                                                <Image
+                                                    src={rec.hero.icon_url || rec.hero.icon || ''}
+                                                    alt={rec.hero.name}
+                                                    width={32}
+                                                    height={32}
+                                                    className="rounded-md border border-slate-700 group-hover:border-teal-400/50 transition-colors"
+                                                />
+                                                <div className="absolute -top-1 -left-1 bg-slate-950 text-slate-400 text-[8px] font-mono border border-slate-800 rounded px-1 group-hover:text-teal-400 group-hover:border-teal-500/50">
+                                                    #{idx + 1}
+                                                </div>
+                                            </div>
+
+                                            {/* Info */}
+                                            <div className="flex-1 min-w-0 relative z-10">
+                                                <div className="flex items-center justify-between">
+                                                    <span className="text-xs font-bold text-slate-200 group-hover:text-teal-300 transition-colors truncate">
+                                                        {rec.hero.name}
+                                                    </span>
+                                                    <span className="text-[10px] font-mono font-bold text-teal-400">
+                                                        {Math.round(rec.score)} pts
+                                                    </span>
+                                                </div>
+                                                <div className="text-[9px] text-slate-500 flex items-center gap-1.5 truncate">
+                                                    {rec.reason.split('•').slice(0, 2).map((r: string, i: number) => (
+                                                        <span key={i} className="flex items-center gap-1">
+                                                            {i > 0 && <span className="w-0.5 h-0.5 rounded-full bg-slate-600" />}
+                                                            {r.trim()}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Action Arrow */}
+                                            <ChevronUp className="w-4 h-4 text-slate-600 group-hover:text-teal-400 rotate-90 transition-all opacity-0 group-hover:opacity-100 -ml-2" />
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Empty State */}
+                            {!isLoadingRecommendations && (!recommendations.historyAnalysis || recommendations.historyAnalysis.length === 0) && (
+                                <div className="text-center py-8 border border-dashed border-slate-800 rounded-lg">
+                                    <History className="w-8 h-8 text-slate-700 mx-auto mb-2" />
+                                    <p className="text-xs text-slate-500">No specific history/repair data found.</p>
+                                </div>
+                            )}
+
+                            {/* Section 2: Draft Repair (Static / Logic to be added later if separate from list) */}
+                            {/* We merged repair logic into the main list as "Counter" or "Synergy" reasons, so separate block might be redundant or can be a summary */}
+                        </div>
                     </TabsContent>
                 </Tabs>
 
@@ -3548,7 +3892,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
 
             {/* RIGHT: RED TEAM (Hidden on mobile, shown on desktop) */}
-            < div className="hidden lg:flex w-[22%] flex-col gap-1 shrink-0" >
+            < div className="hidden lg:flex w-[22%] flex-col gap-1 shrink-0 bg-slate-950/50 min-h-0 overflow-hidden" >
                 <DraftTeamPanel
                     side="RED"
                     teamName={game.red_team_name}

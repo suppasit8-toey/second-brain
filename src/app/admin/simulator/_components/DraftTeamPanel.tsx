@@ -39,14 +39,15 @@ export default function DraftTeamPanel({
 }: DraftTeamPanelProps) {
     const isBlue = side === 'BLUE'
     // Theme colors
-    const bgBase = isBlue ? 'bg-blue-900/10' : 'bg-red-900/10'
-    const borderBase = isBlue ? 'border-blue-500/20' : 'border-red-500/20'
-    const borderActive = isBlue ? 'border-blue-400' : 'border-red-400'
-    const shadowActive = isBlue ? 'shadow-[0_0_15px_rgba(96,165,250,0.6)]' : 'shadow-[0_0_15px_rgba(248,113,113,0.6)]'
-    const textBase = isBlue ? 'text-blue-200' : 'text-red-200'
-    const textHeader = isBlue ? 'text-blue-400' : 'text-red-400'
-    const laneActive = isBlue ? 'bg-blue-600' : 'bg-red-600'
-    const laneHover = isBlue ? 'hover:bg-blue-500/20' : 'hover:bg-red-500/20'
+    // Theme colors - Sci-Fi Update
+    const bgBase = isBlue ? 'bg-blue-950/40 backdrop-blur-sm' : 'bg-red-950/40 backdrop-blur-sm'
+    const borderBase = isBlue ? 'border-blue-500/30' : 'border-red-500/30'
+    const borderActive = isBlue ? 'border-blue-400 shadow-[0_0_10px_rgba(96,165,250,0.5)]' : 'border-red-400 shadow-[0_0_10px_rgba(248,113,113,0.5)]'
+    const shadowActive = isBlue ? 'shadow-[0_0_20px_rgba(96,165,250,0.4)]' : 'shadow-[0_0_20px_rgba(248,113,113,0.4)]'
+    const textBase = isBlue ? 'text-blue-100' : 'text-red-100'
+    const textHeader = isBlue ? 'text-blue-400 drop-shadow-[0_0_5px_rgba(96,165,250,0.5)]' : 'text-red-400 drop-shadow-[0_0_5px_rgba(248,113,113,0.5)]'
+    const laneActive = isBlue ? 'bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,0.5)]' : 'bg-red-600 shadow-[0_0_10px_rgba(220,38,38,0.5)]'
+    const laneHover = isBlue ? 'hover:bg-blue-500/30 hover:shadow-[0_0_5px_rgba(59,130,246,0.3)]' : 'hover:bg-red-500/30 hover:shadow-[0_0_5px_rgba(239,68,68,0.3)]'
 
     const lanes = [
         { id: 'Dark Slayer', label: 'DS' },
@@ -57,9 +58,10 @@ export default function DraftTeamPanel({
     ]
 
     return (
-        <div className="flex flex-col gap-1 w-full">
-            <div className={`hidden lg:block p-2 ${isBlue ? 'bg-blue-900/20 border-blue-500/30' : 'bg-red-900/20 border-red-500/30'} border rounded-lg text-center`}>
-                <h3 className={`text-lg font-bold ${textHeader} truncate`}>{teamName}</h3>
+        <div className="flex flex-col gap-1 w-full h-full overflow-y-auto min-h-0 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent pr-1">
+            <div className={`hidden lg:block p-3 ${isBlue ? 'bg-blue-950/60 border-blue-500/40' : 'bg-red-950/60 border-red-500/40'} border rounded-xl text-center shadow-lg relative overflow-hidden group`}>
+                <div className={`absolute inset-0 opacity-20 ${isBlue ? 'bg-gradient-to-r from-transparent via-blue-500/30 to-transparent' : 'bg-gradient-to-r from-transparent via-red-500/30 to-transparent'} translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000`} />
+                <h3 className={`text-xl font-mono font-black tracking-[0.2em] uppercase ${textHeader} truncate`}>{teamName}</h3>
             </div>
 
             {/* Bans */}
@@ -79,7 +81,7 @@ export default function DraftTeamPanel({
                     const preview = isActive && selectedHero ? selectedHero : null
 
                     return (
-                        <div key={i} className={`w-8 h-8 md:w-10 md:h-10 border bg-slate-800 rounded flex items-center justify-center overflow-hidden transition-all ${preview ? `${borderActive} ${shadowActive} animate-pulse` : 'border-slate-700'}`}>
+                        <div key={i} className={`w-8 h-8 md:w-10 md:h-10 border bg-slate-900/80 rounded flex items-center justify-center overflow-hidden transition-all duration-300 ${preview ? `${borderActive} ${shadowActive} animate-pulse scale-110` : 'border-slate-800'}`}>
                             {banHero ? (
                                 <Image src={banHero.icon_url || ''} alt="ban" width={40} height={40} className="grayscale opacity-60" />
                             ) : preview ? (
@@ -103,7 +105,7 @@ export default function DraftTeamPanel({
                     const preview = isActive && selectedHero ? selectedHero : null
 
                     return (
-                        <div key={i} className={`relative flex flex-col ${bgBase} border rounded-lg overflow-hidden shrink-0 transition-all ${preview ? `${borderActive} ${shadowActive}` : borderBase}`}>
+                        <div key={i} className={`relative flex flex-col ${bgBase} border rounded-xl overflow-hidden shrink-0 transition-all duration-300 ${preview ? `${borderActive} ${shadowActive} scale-[1.02]` : borderBase}`}>
                             <div className="h-12 md:h-14 flex items-center px-3 relative overflow-hidden flex-row-reverse text-right shrink-0">
                                 {hero ? (
                                     <>

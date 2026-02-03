@@ -76,29 +76,29 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
     return (
         <div className="flex flex-col h-[calc(100vh-6rem)]">
             {/* Match Header */}
-            <div className="shrink-0 bg-slate-900 border-b border-slate-800 p-4 flex items-center justify-between">
-                <div className="flex items-center gap-8">
-                    <div className="text-right w-48">
-                        <h2 className="text-2xl font-black text-white truncate">{match.team_a_name}</h2>
-                        <p className="text-xs text-slate-500 uppercase tracking-wider">Team A</p>
+            <div className="shrink-0 bg-slate-900 border-b border-slate-800 p-2 lg:p-4 flex flex-col lg:flex-row items-center justify-between gap-4">
+                <div className="flex items-center justify-between w-full lg:w-auto lg:justify-start gap-2 lg:gap-8">
+                    <div className="text-left lg:text-right w-24 lg:w-48">
+                        <h2 className="text-lg lg:text-2xl font-black text-white truncate">{match.team_a_name}</h2>
+                        <p className="text-[10px] lg:text-xs text-slate-500 uppercase tracking-wider">Team A</p>
                     </div>
 
-                    <div className="px-8 py-3 bg-slate-800 rounded-xl border border-slate-700 flex flex-col items-center min-w-[120px]">
-                        <span className="text-xs text-slate-500 font-mono mb-1">{match.mode} Series</span>
-                        <div className="text-4xl font-bold font-mono leading-none tracking-widest text-white">
+                    <div className="px-4 py-2 lg:px-8 lg:py-3 bg-slate-800 rounded-xl border border-slate-700 flex flex-col items-center min-w-[80px] lg:min-w-[120px]">
+                        <span className="text-[10px] lg:text-xs text-slate-500 font-mono mb-1">{match.mode}</span>
+                        <div className="text-2xl lg:text-4xl font-bold font-mono leading-none tracking-widest text-white">
                             <span className={teamAScore > teamBScore ? 'text-blue-400' : ''}>{teamAScore}</span>
-                            <span className="text-slate-600 mx-2">-</span>
+                            <span className="text-slate-600 mx-1 lg:mx-2">-</span>
                             <span className={teamBScore > teamAScore ? 'text-red-400' : ''}>{teamBScore}</span>
                         </div>
                     </div>
 
-                    <div className="text-left w-48">
-                        <h2 className="text-2xl font-black text-white truncate">{match.team_b_name}</h2>
-                        <p className="text-xs text-slate-500 uppercase tracking-wider">Team B</p>
+                    <div className="text-right lg:text-left w-24 lg:w-48">
+                        <h2 className="text-lg lg:text-2xl font-black text-white truncate">{match.team_b_name}</h2>
+                        <p className="text-[10px] lg:text-xs text-slate-500 uppercase tracking-wider">Team B</p>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-4 hidden lg:flex">
                     <Badge variant="outline" className="h-8 px-3 border-indigo-500/30 text-indigo-300 bg-indigo-500/10">
                         Patch {match.version?.name}
                     </Badge>

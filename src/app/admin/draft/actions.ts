@@ -169,6 +169,27 @@ export async function createGame(matchId: string, gameNumber: number, blueTeam: 
     return { success: true, message: 'Game created', gameId: data.id }
 }
 
+export async function deleteGame(gameId: string, matchId: string) {
+    const supabase = await createClient()
+
+    // 1. Delete associated picks first (cascade might handle it but explicit is safer)
+    await supabase.from('draft_picks').delete().eq('game_id', gameId)
+
+    // 2. Delete game
+    const { error } = await supabase
+        .from('draft_games')
+        .delete()
+        .eq('id', gameId)
+
+    if (error) {
+        console.error('Error deleting game:', error)
+        return { success: false, message: error.message }
+    }
+
+    revalidatePath(`/admin/draft/${matchId}`)
+    return { success: true, message: 'Game deleted' }
+}
+
 export async function deleteMatch(matchId: string) {
     const supabase = await createClient()
 

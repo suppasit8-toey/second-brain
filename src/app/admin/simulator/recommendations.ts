@@ -2,6 +2,7 @@
 
 import { createClient } from '@/utils/supabase/server'
 import { Hero } from '@/utils/types'
+import { calculateComposition, normalizeRole, resolveTeamRoles, STANDARD_ROLES } from './recommendation-utils'
 
 export interface Recommendation {
     hero: Hero;
@@ -33,7 +34,8 @@ export async function getRecommendations(
             BLUE?: { pickOrderStats?: Record<number, Record<string, number>> };
             RED?: { pickOrderStats?: Record<number, Record<string, number>> };
         };
-    } // Draft Strategy Analysis data from CEREBRO
+    }, // Draft Strategy Analysis data from CEREBRO
+    mode: 'team' | 'global' = 'team' // NEW: Toggle between Team Specific and Global Meta data
 ) {
     const supabase = await createClient()
 
@@ -102,7 +104,8 @@ export async function getRecommendations(
     const availableHeroes = heroes.filter(h =>
         !allyHeroIds.includes(h.id) &&
         !enemyHeroIds.includes(h.id) &&
-        !bannedHeroIds.includes(h.id)
+        !bannedHeroIds.includes(h.id) &&
+        !allyGlobalBans.includes(h.id)
     )
     console.log("Available Heroes:", availableHeroes.length)
 
@@ -181,6 +184,14 @@ export async function getRecommendations(
         threatMatchups = data || []
         console.log(`[DEBUG] Found ${threatMatchups.length} threat matchups for allies:`, allyHeroIds)
     }
+
+    // [NEW] Fetch "Risk Matchups" (Hard Counters)
+    // Matchups where we (hero_id) have < 35% WR against enemy (enemy_hero_id)
+    const { data: riskMatchups } = await supabase
+        .from('matchups')
+        .select('hero_id, enemy_hero_id, win_rate')
+        .eq('version_id', versionId)
+        .lt('win_rate', 35)
 
     // --- 1. PREPARE ROSTER & TEAM DATA (Enhanced) ---
     let teamRoster: any[] = []
@@ -752,6 +763,65 @@ export async function getRecommendations(
             }
         }
 
+        // --- [NEW] RISKPENALTY: Check if choosing this hero exposes us to a Hard Counter ---
+        // Requirement: Enemy must have a "Missing Role" that the Counter fits into.
+        // We need to know what roles the ENEMY is missing.
+        let enemyMissingRoles: string[] = []
+        if (context?.phase === 'PICK') {
+            const STANDARD_ROLES = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam']
+            const enemyHeroes = heroes.filter(eh => enemyHeroIds.includes(eh.id))
+            const enemyRoles = new Set<string>()
+
+            // Greedy assignment for enemy to see what's filled
+            const sortedEnemies = [...enemyHeroes].sort((a, b) => (a.main_position?.length || 0) - (b.main_position?.length || 0))
+            sortedEnemies.forEach(eh => {
+                const role = eh.main_position?.find((r: string) => {
+                    const norm = r === 'Abyssal' ? 'Abyssal Dragon' : (r === 'Support' ? 'Roam' : r)
+                    return STANDARD_ROLES.includes(norm) && !enemyRoles.has(norm)
+                })
+                if (role) {
+                    const norm = role === 'Abyssal' ? 'Abyssal Dragon' : (role === 'Support' ? 'Roam' : role)
+                    enemyRoles.add(norm)
+                }
+            })
+            enemyMissingRoles = STANDARD_ROLES.filter(r => !enemyRoles.has(r))
+        }
+
+        if (context?.phase === 'PICK' && enemyMissingRoles.length > 0) {
+            const potentialCounters = riskMatchups?.filter(m =>
+                m.hero_id === h.id &&
+                !allyHeroIds.includes(m.enemy_hero_id) &&
+                !enemyHeroIds.includes(m.enemy_hero_id) &&
+                !bannedHeroIds.includes(m.enemy_hero_id) &&
+                !allyGlobalBans.includes(m.enemy_hero_id) // Exclude globally banned heroes (picked in previous games)
+            ) || []
+
+            const validCounters = potentialCounters.filter(m => {
+                const counterHero = heroes.find(ch => ch.id === m.enemy_hero_id)
+                if (!counterHero) return false
+
+                // Check if ANY of the counter's roles fits an EMPTY enemy slot
+                return counterHero.main_position?.some((pos: string) => {
+                    const normalized = pos === 'Abyssal' ? 'Abyssal Dragon' : (pos === 'Support' ? 'Roam' : pos)
+                    return enemyMissingRoles.includes(normalized)
+                })
+            })
+
+            if (validCounters.length > 0) {
+                // Sort by severity (lowest win rate for us = highest threat)
+                const worstThreat = validCounters.sort((a, b) => a.win_rate - b.win_rate)[0]
+                const counterHeroName = heroes.find(x => x.id === worstThreat.enemy_hero_id)?.name
+
+                // Calculate penalty: Starts at 50, increases as WR drops below 35%
+                // Example: WR 30% -> Penalty 50 + (35-30)*4 = 70
+                // Example: WR 20% -> Penalty 50 + (35-20)*4 = 110
+                const penalty = 50 + Math.max(0, (35 - worstThreat.win_rate) * 4)
+
+                score -= penalty
+                reasons.push(`⚠️ Risk: Exposed to ${counterHeroName} (${worstThreat.win_rate.toFixed(0)}% WR) -${Math.round(penalty)}`)
+            }
+        }
+
         // 3.1 [Hero Pool] Team Comfort & Win Rate
         if (wComfort > 0) {
             const teamHeroStat = teamStats.heroStats[h.id]
@@ -774,32 +844,52 @@ export async function getRecommendations(
 
         // 3.3 [Draft Logic] Comparison with Enemy - Calculate against ALL enemy heroes
         if (wCounter > 0) {
-            // Find ALL matchups where this hero (h.id) counters any enemy hero
-            const counterMatches = relativeMatchups?.filter(m => m.hero_id === h.id) || []
-
-            if (counterMatches.length > 0) {
-                let totalCounterBonus = 0
-                const counterDetails: string[] = []
-
-                counterMatches.forEach(counterMatch => {
-                    const enemyName = queryHeroName(counterMatch.enemy_hero_id, heroes)
-                    const winAdvantage = counterMatch.win_rate - 50
-                    const bonus = Math.max(winAdvantage * 3, 5)
-                    totalCounterBonus += bonus
-                    counterDetails.push(`${enemyName}`)
-                })
-
-                const weightedBonus = totalCounterBonus * wCounter
-                score += weightedBonus
-
-                // Show all countered enemies in reason (Unique names only)
-                const uniqueCounterNames = Array.from(new Set(counterDetails))
-                if (uniqueCounterNames.length === 1) {
-                    reasons.push(`Hard Counter to ${uniqueCounterNames[0]} +${Math.round(weightedBonus)}`)
-                } else {
-                    reasons.push(`Counters ${uniqueCounterNames.join(', ')} +${Math.round(weightedBonus)}`)
+            // For PICK phase: Counter enemy picks | For BAN phase: Find threats to OUR picks
+            if (context?.phase === 'BAN') {
+                // BAN Phase: Find heroes that threaten OUR picks
+                const threatMatches = relativeMatchups?.filter(m => m.hero_id === h.id && allyHeroIds.includes(m.enemy_hero_id)) || []
+                if (threatMatches.length > 0) {
+                    let totalThreatBonus = 0
+                    const threatDetails: string[] = []
+                    threatMatches.forEach(tm => {
+                        const allyName = queryHeroName(tm.enemy_hero_id, heroes)
+                        const bonus = Math.max((tm.win_rate - 50) * 4, 5)
+                        totalThreatBonus += bonus
+                        threatDetails.push(allyName)
+                    })
+                    const weightedBonus = totalThreatBonus * wCounter
+                    score += weightedBonus
+                    const uniqueNames = Array.from(new Set(threatDetails))
+                    reasons.push(`Threatens ${uniqueNames.join(', ')} +${Math.round(weightedBonus)}`)
                 }
-            }
+            } else {
+                // PICK Phase: Counter enemy picks (original logic)
+                const counterMatches = relativeMatchups?.filter(m => m.hero_id === h.id) || []
+
+                if (counterMatches.length > 0) {
+                    let totalCounterBonus = 0
+                    const counterDetails: string[] = []
+
+                    counterMatches.forEach(counterMatch => {
+                        const enemyName = queryHeroName(counterMatch.enemy_hero_id, heroes)
+                        const winAdvantage = counterMatch.win_rate - 50
+                        const bonus = Math.max(winAdvantage * 3, 5)
+                        totalCounterBonus += bonus
+                        counterDetails.push(`${enemyName}`)
+                    })
+
+                    const weightedBonus = totalCounterBonus * wCounter
+                    score += weightedBonus
+
+                    // Show all countered enemies in reason (Unique names only)
+                    const uniqueCounterNames = Array.from(new Set(counterDetails))
+                    if (uniqueCounterNames.length === 1) {
+                        reasons.push(`Hard Counter to ${uniqueCounterNames[0]} +${Math.round(weightedBonus)}`)
+                    } else {
+                        reasons.push(`Counters ${uniqueCounterNames.join(', ')} +${Math.round(weightedBonus)}`)
+                    }
+                }
+            } // Close else block (PICK phase)
 
             // 3.3b [Draft Logic] Penalty for being countered by enemy
             const counteredMatches = counteredByMatchups?.filter(m => m.hero_id === h.id) || []
@@ -1410,7 +1500,7 @@ export async function getRecommendations(
         })
         .filter(Boolean)
         .sort((a, b) => b!.score - a!.score)
-        .slice(0, 12) as any[]
+        .slice(0, 20) as any[]
 
     // Filter bans that are specifically strong for Phase 2 (based on counter analysis and P2 scrim data)
     const smartBanPhase2 = Object.entries(smartBanScores)
@@ -1431,7 +1521,7 @@ export async function getRecommendations(
         })
         .filter(Boolean)
         .sort((a, b) => b!.score - a!.score)
-        .slice(0, 12) as any[]
+        .slice(0, 20) as any[]
 
     // --- NEW: Enemy Key Heroes (MVP Heroes remaining) ---
     const enemyKeyHeroesFormatted = Object.entries(enemyMVPHeroes)
@@ -1465,6 +1555,39 @@ export async function getRecommendations(
 
     console.log('[DEBUG] Return Phase1:', smartBanPhase1.length, 'Phase2:', smartBanPhase2.length, 'SmartBan:', smartBanRecs.length)
 
+    // --- Prepare Data for History Analysis ---
+    // Use passed draftStrategyStats (CEREBRO) if available, otherwise rely on local scrim stats
+    const strategyPhase1Bans: Record<string, any> = {}
+    const strategyPhase2Bans: Record<string, any> = {}
+
+    // Determine which stats to use (Side specific if context provided, otherwise general)
+    // Determine which stats to use (Side specific if context provided, otherwise general)
+    const statsAny = draftStrategyStats as any
+    let banSource = statsAny?.banOrderStats || {}
+    if (context?.side && statsAny?.sideStats?.[context.side]?.banOrderStats) {
+        banSource = statsAny.sideStats[context.side].banOrderStats
+    }
+
+    [1, 2, 3, 4].forEach((slot: number) => {
+        const slotData = banSource[slot] || {}
+        Object.entries(slotData).forEach(([hid, count]) => {
+            if (!strategyPhase1Bans[hid]) strategyPhase1Bans[hid] = { count: 0 }
+            strategyPhase1Bans[hid].count += (count as number)
+        })
+    });
+
+    [11, 12, 13, 14].forEach((slot: number) => {
+        const slotData = banSource[slot] || {}
+        Object.entries(slotData).forEach(([hid, count]) => {
+            if (!strategyPhase2Bans[hid]) strategyPhase2Bans[hid] = { count: 0 }
+            strategyPhase2Bans[hid].count += (count as number)
+        })
+    })
+
+    // Use Strategy Bans if available, else fallback to Scrim Bans
+    const effectivePhase1Bans = Object.keys(strategyPhase1Bans).length > 0 ? strategyPhase1Bans : scrimPhase1Bans
+    const effectivePhase2Bans = Object.keys(strategyPhase2Bans).length > 0 ? strategyPhase2Bans : scrimPhase2Bans
+
     return {
         analyst: sortedRecs,
         history: sortedRecs,
@@ -1484,48 +1607,209 @@ export async function getRecommendations(
         counters,
         synergies,
         roster: rosterDominance,
-        composition: calculateComposition(allyHeroIds, heroes)
+        composition: calculateComposition(allyHeroIds, heroes),
+        historyAnalysis: getHistoryRecommendations(mode, context, availableHeroes, teamStats, enemyTeamStats, relativeMatchups || [], relativeCombos || [], effectivePhase1Bans, effectivePhase2Bans, allyHeroIds, enemyHeroIds, heroes)
     }
 }
 
-function calculateComposition(heroIds: string[], heroes: any[]) {
-    const composition = {
-        damage: { Physical: 0, Magic: 0, True: 0, Mixed: 0 },
-        powerSpike: { Early: 0, Mid: 0, Late: 0, Balanced: 0 },
-        attributes: {
-            control: 0,
-            durability: 0,
-            mobility: 0,
-            offense: 0
-        },
-        roles: [] as string[]
-    }
 
-    if (!heroIds || heroIds.length === 0) return composition
 
-    const selectedHeroes = heroes.filter(h => heroIds.includes(h.id))
+// --- NEW: History Analysis Logic ---
+function getHistoryRecommendations(
+    mode: 'team' | 'global',
+    context: any,
+    availableHeroes: Hero[],
+    teamStats: any,
+    enemyTeamStats: any,
+    matchups: any[],
+    combos: any[],
+    phase1Bans: Record<string, any>,
+    phase2Bans: Record<string, any>,
+    allyHeroIds: string[],
+    enemyHeroIds: string[],
+    allHeroes: Hero[]
+) {
+    const recs: Recommendation[] = []
+    const isTeamMode = mode === 'team'
+    const isBanPhase = context?.phase === 'BAN'
+    const isPickPhase = context?.phase === 'PICK'
 
-    selectedHeroes.forEach(h => {
-        // Damage Type
-        if (h.damage_type) composition.damage[h.damage_type as keyof typeof composition.damage]++
+    // Determine specific sub-phase
+    const currentSlot = (context?.bannedHeroIds?.length || 0) + (context?.pickOrder || 0) // Approximation
 
-        // Power Spike (from Stats)
-        const spike = h.hero_stats?.[0]?.power_spike || 'Balanced'
-        composition.powerSpike[spike as keyof typeof composition.powerSpike]++
+    // Ban Phase 2 Check
+    // Phase 1 Bans happen BEFORE any picks. 
+    // If there are ANY picks (ally or enemy), or if bans >= 4, we are in Phase 2 or later.
+    const hasPicks = allyHeroIds.length > 0 || enemyHeroIds.length > 0
+    const isBanPhase2 = isBanPhase && (hasPicks || (context?.bannedHeroIds?.length || 0) >= 4)
 
-        // Attributes (Mocking simple attribute logic based on Role/Key Stats if available, or just generic)
-        // Since we don't have explicit attribute stats in the type definition provided earlier, we will infer generic values or skip.
-        // Let's infer from Role for now to populate the UI.
-        const roles = h.main_position || []
-        if (roles.includes('Tank') || roles.includes('Roam')) composition.attributes.durability += 2
-        if (roles.includes('Warrior') || roles.includes('Dark Slayer')) { composition.attributes.durability += 1; composition.attributes.offense += 1 }
-        if (roles.includes('Mage') || roles.includes('Mid')) { composition.attributes.offense += 2; composition.attributes.control += 1 }
-        if (roles.includes('Marksman') || roles.includes('Abyssal')) { composition.attributes.offense += 3; }
-        if (roles.includes('Assassin') || roles.includes('Jungle')) { composition.attributes.mobility += 3; composition.attributes.offense += 2 }
+    // --- Identify Missing Roles (Role-Based Filtering) ---
+    // Uses shared exported functions
 
-        // Count distinct roles
-        composition.roles.push(...roles)
+    const filledRoles = resolveTeamRoles(allyHeroIds, allHeroes)
+    const missingRoles = STANDARD_ROLES.filter(r => !filledRoles.has(r))
+    const isFullTeam = allyHeroIds.length >= 5
+
+    // [NEW] Resolve Enemy Roles for Smart Ban
+    const enemyFilledRoles = resolveTeamRoles(enemyHeroIds, allHeroes)
+    const enemyMissingRoles = STANDARD_ROLES.filter(r => !enemyFilledRoles.has(r))
+
+    availableHeroes.forEach(h => {
+        let score = 0
+        const reasons: string[] = []
+
+        // --- BAN PHASE 1 LOGIC ---
+        // Only run if NOT Phase 2
+        if (isBanPhase && !isBanPhase2) {
+            // 1. Problematic Enemies (They beat us)
+            if (isTeamMode) {
+                // Check if this hero has high win rate against US (Team Specific)
+                // We use inverted logic: if Enemy plays H and wins vs Us
+                const enemyStats = enemyTeamStats.heroStats?.[h.id]
+            }
+
+            // Simple: Frequent Bans (Comfort Bans)
+            if (isTeamMode && phase1Bans[h.id]) {
+                const count = phase1Bans[h.id].count
+                score += count * 20
+                reasons.push(`Frequent Team Ban (${count}x)`)
+            }
+
+            // Global: Meta Bans
+            if (!isTeamMode) {
+                const banRate = h.hero_stats?.[0]?.ban_rate || 0
+                if (banRate > 15) {
+                    score += banRate
+                    reasons.push(`Global Ban Rate (${banRate}%)`)
+                }
+            }
+        }
+
+        // --- BAN PHASE 2 LOGIC (Smart Target Bans) ---
+        // Trigger if Ban Phase AND NOT Phase 1 (so > 4 bans)
+        // Or if we specifically detect Ban Phase 2 context
+        if (isBanPhase && isBanPhase2) {
+            // 1. Role Check: Only recommend banning heroes for EMPTY enemy roles
+            // Assume strict role filtering for bans too
+            const heroRoles = h.main_position || []
+            const relevantForEnemy = heroRoles.some(r => enemyMissingRoles.includes(normalizeRole(r)))
+
+            if (!relevantForEnemy) {
+                // Severe Penalty if enemy already has this role filled (e.g. banning Jungle when they have Zill)
+                score -= 1000
+            } else {
+                // 2. High Value Bans for Missing Roles
+                // Check if this hero is a "High Win Rate" or "Meta" hero 
+                const banRate = h.hero_stats?.[0]?.ban_rate || 0
+                if (banRate > 10) {
+                    score += banRate
+                    reasons.push(`Block Meta Role (${banRate}%)`)
+                }
+
+                // Check Scrim Data (Phase 2 Specific)
+                if (isTeamMode && phase2Bans[h.id]) {
+                    const count = phase2Bans[h.id].count
+                    score += count * 25
+                    reasons.push(`Frequent Phase 2 Ban`)
+                }
+            }
+        }
+
+        // --- PICK PHASE LOGIC ---
+        if (isPickPhase) {
+            // 0. Role Filling Priority (CRITICAL)
+            // If team is full, ignore roles. If not, prioritize needed roles.
+            if (!isFullTeam) {
+                const heroRoles = h.main_position || []
+
+                const fillsMissing = heroRoles.some(r => {
+                    const norm = normalizeRole(r)
+                    return missingRoles.includes(norm)
+                })
+
+                if (fillsMissing) {
+                    score += 50 // Huge bonus for needed role
+                    const needed = heroRoles.find(r => missingRoles.includes(normalizeRole(r)))
+                    reasons.push(`Fills ${needed}`)
+                } else if (filledRoles.size > 0 && heroRoles.length > 0) {
+                    // Hero only provides roles we ALREADY have
+                    // Strict penalty to hide them
+                    score -= 1000
+                    reasons.push('Role Overlap')
+                }
+            }
+
+            // 1. Synergy (Combo)
+            const synergy = combos.find(c => c.hero_b_id === h.id)
+            if (synergy) {
+                // Mode separation? Synergy data usually global unless we have team-specific synergy table.
+                // Assuming global data for now, maybe filtered by team games later.
+                score += 50
+                reasons.push('Combo Synergy')
+            }
+
+            // 2. Counter Pick (Lane)
+            // If picking AFTER enemy in same lane
+            // ... (Simple placeholder logic for now as detailed counter logic is complex)
+            const counter = matchups.find(m => m.hero_id === h.id && m.win_rate > 55)
+            if (counter) {
+                score += (counter.win_rate - 50) * 5
+                reasons.push(`Counters Enemy`)
+            }
+
+            // 3. Role History (Team Preference)
+            if (isTeamMode) {
+                const picks = teamStats.heroStats[h.id]?.picks || 0
+                if (picks > 0) {
+                    score += picks * 10
+                    reasons.push(`Team Comfort (${picks} games)`)
+                }
+            }
+        }
+
+        if (score > 0) {
+            recs.push({
+                hero: h,
+                score,
+                reason: reasons.join(', '),
+                type: 'history'
+            })
+        }
     })
 
-    return composition
+    // [FALLBACK] If Global Mode and no recommendations, show Top Meta
+    if (!isTeamMode && recs.length < 5) {
+        const keyStat = isBanPhase ? 'ban_rate' : 'win_rate' // Use win_rate for picks as it's a better quality signal
+
+        // Sort all available heroes by the key stat
+        const topMeta = availableHeroes
+            .filter(h => {
+                // Filter out already recommended heroes
+                return !recs.find(r => r.hero.id === h.id)
+            })
+            .sort((a, b) => {
+                const statA = a.hero_stats?.[0]?.[keyStat] || 0
+                const statB = b.hero_stats?.[0]?.[keyStat] || 0
+                return statB - statA
+            })
+            .slice(0, 5)
+
+        topMeta.forEach(h => {
+            const statVal = h.hero_stats?.[0]?.[keyStat] || 0
+            // Only add if it has SOME stats
+            if (statVal > 0) {
+                recs.push({
+                    hero: h,
+                    score: statVal, // Use the raw stat as score (e.g. 50% winrate = 50 pts)
+                    reason: `Global Meta (${keyStat === 'ban_rate' ? 'Ban' : 'Win'} Rate ${statVal}%)`,
+                    type: 'history'
+                })
+            }
+        })
+    }
+
+    return recs.sort((a, b) => b.score - a.score).slice(0, 20)
 }
+
+
+

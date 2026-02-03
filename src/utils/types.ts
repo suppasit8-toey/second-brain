@@ -13,6 +13,8 @@ export interface HeroStats {
     tier: 'S' | 'A' | 'B' | 'C' | 'D';
     power_spike: 'Early' | 'Mid' | 'Late' | 'Balanced';
     win_rate: number;
+    pick_rate: number;
+    ban_rate: number;
     created_at?: string;
 }
 

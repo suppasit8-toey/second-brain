@@ -138,8 +138,7 @@ export async function importTeam(sourceTeamId: string, targetTournamentId: strin
             name: sourceTeam.name,
             slug: newSlug,
             short_name: sourceTeam.short_name,
-            logo_url: sourceTeam.logo_url,
-            role: role
+            logo_url: sourceTeam.logo_url
         })
         .select()
         .single()
@@ -295,8 +294,7 @@ export async function createTeam(formData: FormData) {
             name,
             slug: slugify(name),
             short_name: shortName || null,
-            logo_url: logoUrl || null,
-            role: formData.get('role') as string || 'participant'
+            logo_url: logoUrl || null
         })
         .select()
         .single()
