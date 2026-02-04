@@ -111,6 +111,7 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                 }}
                 seriesScore={{ blue: 0, red: 0 }} // TODO: Calculate actual score
                 matchMode={match.mode}
+                gameNumber={game.game_number}
             />
         )
     }
@@ -248,9 +249,19 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
 
                     <div className="flex-1 p-2 lg:p-4 bg-slate-900/50 overflow-y-auto">
                         {(() => {
-                            const activeRecs = currentStep?.type === 'BAN'
-                                ? recommendations.smartBan
-                                : recommendations.hybrid;
+                            let activeRecs = recommendations.hybrid;
+                            if (currentStep?.type === 'BAN') {
+                                // Phase 1 Bans (Indices 0-3) vs Phase 2 Bans (Indices 10+)
+                                if (state.stepIndex < 10) {
+                                    activeRecs = recommendations.smartBanPhase1 && recommendations.smartBanPhase1.length > 0
+                                        ? recommendations.smartBanPhase1
+                                        : recommendations.smartBan;
+                                } else {
+                                    activeRecs = recommendations.smartBanPhase2 && recommendations.smartBanPhase2.length > 0
+                                        ? recommendations.smartBanPhase2
+                                        : recommendations.smartBan;
+                                }
+                            }
 
                             if (!activeRecs || activeRecs.length === 0) {
                                 return (

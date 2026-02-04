@@ -13,6 +13,8 @@ import { ANALYSIS_LAYER_METADATA } from '../../cerebro/constants';
 export interface Suggestion {
     hero: Hero;
     score: number;
+    cerebroScore?: number;
+    historyScore?: number;
     reason?: string;
     type: 'counter' | 'comfort' | 'meta' | 'hybrid' | 'ban' | 'history';
     phase?: 'PICK' | 'BAN';
@@ -98,18 +100,29 @@ export default function DraftSuggestionPanel({
 
     // Split Suggestions Logic (UPDATED: CEREBRO AI now allows all suggestions)
     const { cerebroSuggestions, historySuggestions, analysisSuggestions } = useMemo(() => {
-        // CEREBRO AI Tab: Show ALL valid suggestions sorted by score
-        const cerebro: Suggestion[] = suggestions.slice(0, 20); // Max 20 to allow filtering lower ranked items
+        // CEREBRO AI Tab: Use cerebroScore and sort by it
+        // If cerebroScore is missing, fallback to score if it's NOT a pure history item
+        const cerebro: Suggestion[] = suggestions
+            .filter(s => s.cerebroScore !== undefined || (s.type !== 'history' && !s.reason?.includes('Team Comfort')))
+            .map(s => ({ ...s, score: s.cerebroScore ?? s.score })) // Map score for display
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 20);
 
-        // HISTORY Tab: Filter for history-related reasons or types
+        // HISTORY Tab: Use historyScore
         const history: Suggestion[] = [];
         suggestions.forEach(s => {
             const reasonLower = s.reason?.toLowerCase() || '';
-            const isHistory = s.type === 'history' || HISTORY_KEYWORDS.some(k => reasonLower.includes(k));
-            if (isHistory) {
-                history.push(s);
+            const isHistory = s.type === 'history' || HISTORY_KEYWORDS.some(k => reasonLower.includes(k)) || s.historyScore !== undefined;
+            if (isHistory && (s.historyScore !== undefined || s.type === 'history')) {
+                history.push({
+                    ...s,
+                    score: s.historyScore ?? s.score // Map score for display
+                });
             }
         });
+        // Sort history by score
+        history.sort((a, b) => b.score - a.score);
+
 
         // ANALYSIS Tab: Overlap logic
         const historyHeroIds = new Set(history.map(h => h.hero.id));
@@ -125,13 +138,21 @@ export default function DraftSuggestionPanel({
         const uniqueAnalysisMap = new Map<string, Suggestion>();
         analysis.forEach(s => {
             const existing = uniqueAnalysisMap.get(s.hero.id);
-            if (!existing || s.score > existing.score) {
+            // Use combined score for evaluation
+            const currentCombined = (s.cerebroScore || 0) + (s.historyScore || 0);
+            const existingCombined = (existing?.cerebroScore || 0) + (existing?.historyScore || 0);
+
+            if (!existing || currentCombined > existingCombined) {
                 uniqueAnalysisMap.set(s.hero.id, s);
             }
         });
 
         const uniqueAnalysis = Array.from(uniqueAnalysisMap.values())
-            .sort((a, b) => b.score - a.score)
+            .sort((a, b) => {
+                const scoreA = (a.cerebroScore || 0) + (a.historyScore || 0);
+                const scoreB = (b.cerebroScore || 0) + (b.historyScore || 0);
+                return scoreB - scoreA;
+            })
             .slice(0, 3); // Max 3
 
         return {
@@ -213,6 +234,7 @@ export default function DraftSuggestionPanel({
                                     {/* Score Badge - Top Right floating over Card */}
                                     <div className="absolute -top-1.5 -right-1.5 z-10">
                                         <div className="bg-slate-950 text-indigo-400 border border-slate-800 text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-md flex items-center justify-center min-w-[20px]">
+                                            {/* DISPLAY SCORE - Already mapped in useMemo */}
                                             {s.score.toFixed(0)}
                                         </div>
                                     </div>
@@ -261,10 +283,18 @@ export default function DraftSuggestionPanel({
                         <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between mb-0.5">
                                 <span className="font-bold text-indigo-100 text-xs">{s.hero.name}</span>
-                                <Badge className="h-4 text-[9px] px-1 bg-indigo-500/80 hover:bg-indigo-500">{s.score.toFixed(0)}</Badge>
+                                <div className="flex gap-1">
+                                    {/* Combined Badge or breakdown */}
+                                    <Badge className="h-4 text-[9px] px-1 bg-indigo-500/80 hover:bg-indigo-500">
+                                        AI: {s.cerebroScore?.toFixed(0) || '-'}
+                                    </Badge>
+                                    <Badge className="h-4 text-[9px] px-1 bg-orange-500/80 hover:bg-orange-500">
+                                        H: {s.historyScore?.toFixed(0) || '-'}
+                                    </Badge>
+                                </div>
                             </div>
                             <div className="text-[9px] text-indigo-300 leading-tight">
-                                Recommended by both AI & History
+                                Consensus Analysis
                             </div>
                             <div className="flex gap-1 mt-1">
                                 {s.phase === 'BAN' || s.type === 'ban'
@@ -281,57 +311,7 @@ export default function DraftSuggestionPanel({
 
 
 
-    // History List View
-    const renderHistoryList = (items: Suggestion[]) => {
-        // Apply position filters
-        const activePosFilters = Array.from(positionFilters).filter(f => f !== 'history');
-        const filteredItems = items.filter(s => {
-            if (activePosFilters.length === 0) return true;
-            const heroPositions = s.hero.main_position || [];
-            return activePosFilters.some(filter => {
-                const normalizedFilter = filter === 'Abyssal' ? ['Abyssal', 'Abyssal Dragon'] : [filter];
-                return heroPositions.some(pos =>
-                    normalizedFilter.some(f => pos.toLowerCase().includes(f.toLowerCase()))
-                );
-            });
-        });
 
-        if (isLoading) return <div className="text-center text-xs text-slate-500 py-4"><Loader2 className="w-4 h-4 animate-spin inline mr-1" /> Loading history...</div>;
-        if (filteredItems.length === 0) return <div className="text-center text-xs text-slate-500 py-4 italic">No history data found.</div>;
-
-        return (
-            <div className="space-y-1">
-                {filteredItems.map((s, idx) => (
-                    <div
-                        key={s.hero.id}
-                        className="flex items-center gap-3 p-2 rounded bg-slate-900/40 border border-slate-800 hover:bg-slate-800/60 cursor-pointer transition-colors group"
-                        onClick={() => onSelectHero && onSelectHero(s.hero)}
-                    >
-                        {/* Rank Badge */}
-                        <div className="flex items-center justify-center w-6 h-6 rounded bg-slate-800 text-[10px] font-bold text-slate-400 shrink-0">
-                            #{idx + 1}
-                        </div>
-
-                        {/* Hero Icon */}
-                        <div className="relative w-10 h-10 rounded overflow-hidden border border-slate-700 group-hover:border-slate-500 shrink-0">
-                            <Image src={s.hero.icon_url} alt={s.hero.name} fill className="object-cover" />
-                        </div>
-
-                        {/* Name & Reason */}
-                        <div className="min-w-0 flex-1 flex flex-col justify-center">
-                            <div className="font-bold text-slate-200 text-sm leading-none mb-1">{s.hero.name}</div>
-                            <div className="text-[10px] text-slate-500 truncate">{s.reason || 'Frequent Selection'}</div>
-                        </div>
-
-                        {/* Score */}
-                        <div className="text-right shrink-0">
-                            <div className="font-mono font-bold text-emerald-400 text-sm">{s.score.toFixed(0)} <span className="text-[10px] text-slate-600 font-normal">pts</span></div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-        )
-    }
 
     return (
         <Card className={`border ${borderColor} bg-slate-950/90 backdrop-blur-md transition-all duration-300 overflow-hidden ${isCollapsed ? 'h-auto' : ''}`}>
@@ -399,7 +379,7 @@ export default function DraftSuggestionPanel({
                                 {renderGrid(cerebroSuggestions, "No AI suggestions available.")}
                             </TabsContent>
                             <TabsContent value="history" className="mt-0">
-                                {renderHistoryList(historySuggestions)}
+                                {renderGrid(historySuggestions, "No history data found.")}
                             </TabsContent>
                             <TabsContent value="analysis" className="mt-0">
                                 {renderAnalysisList(analysisSuggestions)}

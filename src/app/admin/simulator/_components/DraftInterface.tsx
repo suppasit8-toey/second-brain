@@ -1310,8 +1310,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 ...opponentGlobalBans
             ].map(String))
 
-            // BLUE SUGGESTIONS - Use Blue's Strategic Bans for BAN phase
+            // BLUE SUGGESTIONS - Use Blue's Strategic Bans for BAN phase + History Analysis
             let blueFinal: any[] = []
+            let blueHistory: any[] = (blueData?.historyAnalysis || []).map((r: any) => ({ ...r, phase: currentPhase, type: 'history' }))
+
             if (currentPhase === 'BAN') {
                 if (blueStrategicBansRef.current.length > 0) {
                     // Use Blue's Strategic Bans (targets Red team)
@@ -1328,10 +1330,37 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     .filter((r: any) => !allUnavailable.has(String(r.hero?.id)))
                     .slice(0, 20)
             }
+            // MERGE History data into blueFinal (Update score/reasons instead of discarding)
+            const blueHistoryMap = new Map(blueHistory.map(h => [String(h.hero.id), h]));
+
+            // 1. Update existing items in blueFinal
+            blueFinal = blueFinal.map(item => {
+                const historyItem = blueHistoryMap.get(String(item.hero.id));
+                if (historyItem) {
+                    blueHistoryMap.delete(String(item.hero.id)); // Mark as handled
+                    return {
+                        ...item,
+                        cerebroScore: item.score, // Preserve AI score
+                        historyScore: historyItem.score, // Preserve History score
+                        reason: item.reason ? `${item.reason} • ${historyItem.reason}` : historyItem.reason,
+                    };
+                }
+                return { ...item, cerebroScore: item.score };
+            });
+
+            // 2. Append remaining unique History items
+            const blueRemainingHistory = Array.from(blueHistoryMap.values())
+                .filter(h => !allUnavailable.has(String(h.hero.id)))
+                .map(h => ({ ...h, historyScore: h.score }));
+
+            blueFinal = [...blueFinal, ...blueRemainingHistory];
+
             setBlueSuggestions(blueFinal)
 
-            // RED SUGGESTIONS - Use Red's Strategic Bans for BAN phase
+            // RED SUGGESTIONS - Use Red's Strategic Bans for BAN phase + History Analysis
             let redFinal: any[] = []
+            let redHistory: any[] = (redData?.historyAnalysis || []).map((r: any) => ({ ...r, phase: currentPhase, type: 'history' }))
+
             if (currentPhase === 'BAN') {
                 if (redStrategicBansRef.current.length > 0) {
                     // Use Red's Strategic Bans (targets Blue team)
@@ -1346,6 +1375,32 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     .filter((r: any) => !allUnavailable.has(String(r.hero?.id)))
                     .slice(0, 20)
             }
+
+            // MERGE History data into redFinal
+            const redHistoryMap = new Map(redHistory.map(h => [String(h.hero.id), h]));
+
+            // 1. Update existing items in redFinal
+            redFinal = redFinal.map(item => {
+                const historyItem = redHistoryMap.get(String(item.hero.id));
+                if (historyItem) {
+                    redHistoryMap.delete(String(item.hero.id)); // Mark as handled
+                    return {
+                        ...item,
+                        cerebroScore: item.score, // Preserve AI score
+                        historyScore: historyItem.score, // Preserve History score
+                        reason: item.reason ? `${item.reason} • ${historyItem.reason}` : historyItem.reason,
+                    };
+                }
+                return { ...item, cerebroScore: item.score };
+            });
+
+            // 2. Append remaining unique History items
+            const redRemainingHistory = Array.from(redHistoryMap.values())
+                .filter(h => !allUnavailable.has(String(h.hero.id)))
+                .map(h => ({ ...h, historyScore: h.score }));
+
+            redFinal = [...redFinal, ...redRemainingHistory];
+
             setRedSuggestions(redFinal)
 
             setIsLoadingRecommendations(false)

@@ -34,6 +34,7 @@ interface PostDraftResultProps {
     }
     seriesScore: { blue: number, red: number };
     matchMode: string;
+    gameNumber?: number;
 }
 
 export default function PostDraftResult({
@@ -50,7 +51,8 @@ export default function PostDraftResult({
     manualLanes = {},
     initialData,
     seriesScore = { blue: 0, red: 0 },
-    matchMode
+    matchMode,
+    gameNumber
 }: PostDraftResultProps) {
     const router = useRouter()
     const [assignments, setAssignments] = useState<Record<string, string>>(manualLanes)
@@ -471,7 +473,20 @@ export default function PostDraftResult({
                                                         if (isFinished) {
                                                             router.push(`/admin/simulator/${matchId}?game=summary`)
                                                         } else {
-                                                            router.push(`/admin/simulator/${matchId}${nextGameId ? `?game=${nextGameId}` : ''}`)
+                                                            // Determine Max Games to check if we can create a new one
+                                                            const maxGames = matchMode === 'BO1' ? 1
+                                                                : matchMode === 'BO3' ? 3
+                                                                    : matchMode === 'BO5' ? 5
+                                                                        : matchMode === 'BO7' ? 7
+                                                                            : matchMode === 'BO2' ? 2 : 1;
+
+                                                            if (nextGameId) {
+                                                                router.push(`/admin/simulator/${matchId}?game=${nextGameId}`)
+                                                            } else if (gameNumber && gameNumber < maxGames) {
+                                                                router.push(`/admin/simulator/${matchId}?game=new-${gameNumber + 1}`)
+                                                            } else {
+                                                                router.push(`/admin/simulator/${matchId}?game=summary`)
+                                                            }
                                                         }
                                                     }
                                                 }}
@@ -491,6 +506,6 @@ export default function PostDraftResult({
                     </Card>
                 </div>
             </div>
-        </div>
+        </div >
     )
 }

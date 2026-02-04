@@ -41,12 +41,20 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
     // 3. Tab Logic
     const gameIdParam = searchParams.get('game')
 
-    // Default Tab: Latest Created Game or 'game-1' if none
-    const latestGameId = games.length > 0 ? games[games.length - 1].id : 'new-1'
+    // Default Tab: Latest Created Game, OR if the latest game is finished, target the NEXT one (if available)
+    const latestCreatedGame = games.length > 0 ? games[games.length - 1] : null
+    let defaultTab = 'new-1'
+
+    if (latestCreatedGame) {
+        // If latest game is finished (has winner), default to next game (new-X)
+        if (latestCreatedGame.winner && games.length < maxGames) {
+            defaultTab = `new-${games.length + 1}`
+        } else {
+            defaultTab = latestCreatedGame.id
+        }
+    }
 
     // Resolve initial active tab
-    // If param exists and is valid (either a game ID or a placeholder 'new-X') -> use it
-    // Else -> use latestGameId
     const resolveInitialTab = () => {
         if (gameIdParam) {
             // Check if it's an ID
@@ -54,7 +62,7 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
             // Check if it's a valid placeholder like "new-2"
             if (gameIdParam.startsWith('new-')) return gameIdParam
         }
-        return latestGameId
+        return defaultTab
     }
 
     const [activeTab, setActiveTab] = useState<string>(resolveInitialTab())
@@ -66,12 +74,13 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
         router.replace(`${pathname}?${params.toString()}`)
     }
 
-    // Effect: If a new game is created (games length increases), switch to it automatically?
-    // Handled by NewGameButton refresh usually, but let's keep state in sync if props update
+    // Sync state when props/URL change (e.g. after navigating)
     useEffect(() => {
-        // Optional: Auto-select latest game if not viewing history?
-        // sticking to URL param priority
-    }, [games.length])
+        const target = resolveInitialTab()
+        if (target && target !== activeTab) {
+            setActiveTab(target)
+        }
+    }, [gameIdParam, games.length])
 
     return (
         <div className="flex flex-col h-[calc(100vh-6rem)]">
@@ -151,7 +160,7 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                                     {isCreated ? (
                                         <DraftInterface match={match} game={game} initialHeroes={heroes} />
                                     ) : (
-                                        <div className="flex-1 flex items-center justify-center p-12">
+                                        <div className="flex-1 flex items-center justify-center p-4 lg:p-12">
                                             {isLocked ? (
                                                 <div className="text-center space-y-4 opacity-50">
                                                     <Lock className="w-16 h-16 mx-auto text-slate-600" />

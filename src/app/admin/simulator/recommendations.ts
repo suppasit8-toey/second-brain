@@ -1511,7 +1511,7 @@ export async function getRecommendations(
 
     // --- NEW: Phase-specific ban recommendations ---
     // Filter bans that are specifically strong for Phase 1 (based on scrim P1 data and MVP)
-    const smartBanPhase1 = Object.entries(smartBanScores)
+    let smartBanPhase1 = Object.entries(smartBanScores)
         .map(([id, s]) => {
             const h = heroes?.find(x => x.id === id)
             if (!h) return null
@@ -1532,7 +1532,7 @@ export async function getRecommendations(
         .slice(0, 20) as any[]
 
     // Filter bans that are specifically strong for Phase 2 (based on counter analysis and P2 scrim data)
-    const smartBanPhase2 = Object.entries(smartBanScores)
+    let smartBanPhase2 = Object.entries(smartBanScores)
         .map(([id, s]) => {
             const h = heroes?.find(x => x.id === id)
             if (!h) return null
@@ -1580,6 +1580,14 @@ export async function getRecommendations(
             type: 'ban' as const,
             reason: 'High Priority Meta Pick (Fallback)'
         }))
+    }
+
+    // Ensure Phase 1 and Phase 2 also have fallback if empty
+    if (smartBanPhase1.length === 0) {
+        smartBanPhase1 = smartBanRecs.map(r => ({ ...r, phase: 'PHASE_1' as const }))
+    }
+    if (smartBanPhase2.length === 0) {
+        smartBanPhase2 = smartBanRecs.map(r => ({ ...r, phase: 'PHASE_2' as const }))
     }
 
     console.log('[DEBUG] Return Phase1:', smartBanPhase1.length, 'Phase2:', smartBanPhase2.length, 'SmartBan:', smartBanRecs.length)
@@ -1693,15 +1701,27 @@ function getHistoryRecommendations(
             // 1. Problematic Enemies (They beat us)
             if (isTeamMode) {
                 // Check if this hero has high win rate against US (Team Specific)
-                // We use inverted logic: if Enemy plays H and wins vs Us
-                const enemyStats = enemyTeamStats.heroStats?.[h.id]
+                if (teamStats.heroStats[h.id]) {
+                    // logic placeholder
+                }
             }
 
             // Simple: Frequent Bans (Comfort Bans)
+            // Use effective bans source passed in
             if (isTeamMode && phase1Bans[h.id]) {
                 const count = phase1Bans[h.id].count
                 score += count * 20
                 reasons.push(`Frequent Team Ban (${count}x)`)
+            } else if (isTeamMode && teamStats.banOrderStats) {
+                // Fallback to general ban stats if phase1Bans is empty in context but exists in full stats
+                let totalBans = 0
+                Object.values(teamStats.banOrderStats as Record<string, Record<string, number>>).forEach(slotData => {
+                    if (slotData[h.id]) totalBans += slotData[h.id]
+                })
+                if (totalBans > 0) {
+                    score += totalBans * 15
+                    reasons.push(`Frequent Team Ban (${totalBans}x)`)
+                }
             }
 
             // Global: Meta Bans

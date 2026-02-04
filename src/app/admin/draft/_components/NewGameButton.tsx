@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { createGame } from '../actions'
 import { useRouter } from 'next/navigation'
-import { Plus, Loader2, ShieldCheck } from 'lucide-react'
+import { Plus, ShieldCheck, Loader2, Zap, BrainCircuit } from 'lucide-react'
 import { DraftMatch } from '@/utils/types'
 import PreGameAnalysisDialog from './PreGameAnalysisDialog'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -18,6 +18,7 @@ interface NewGameButtonProps {
 }
 
 export default function NewGameButton({ match, gameNumber, disabled }: NewGameButtonProps) {
+    const [choiceOpen, setChoiceOpen] = useState(false)
     const [analysisOpen, setAnalysisOpen] = useState(false)
     const [setupOpen, setSetupOpen] = useState(false)
     const [loading, setLoading] = useState(false)
@@ -51,7 +52,7 @@ export default function NewGameButton({ match, gameNumber, disabled }: NewGameBu
         <>
             <Button
                 disabled={disabled || loading}
-                onClick={() => setAnalysisOpen(true)}
+                onClick={() => setChoiceOpen(true)}
                 variant="outline"
                 className="w-full h-full min-h-[200px] border-dashed border-2 bg-slate-900/50 hover:bg-slate-900 border-slate-700 hover:border-indigo-500/50 flex flex-col items-center justify-center gap-4 group"
             >
@@ -63,6 +64,42 @@ export default function NewGameButton({ match, gameNumber, disabled }: NewGameBu
                     <p className="text-sm text-slate-500">Click to enter analysis & draft</p>
                 </div>
             </Button>
+
+            {/* Step 0: Choice Dialog */}
+            <Dialog open={choiceOpen} onOpenChange={setChoiceOpen}>
+                <DialogContent className="bg-slate-900 border-slate-800 text-white sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-center text-xl font-bold">Start Game {gameNumber}</DialogTitle>
+                    </DialogHeader>
+                    <div className="grid grid-cols-2 gap-4 py-4">
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                setChoiceOpen(false)
+                                setSetupOpen(true)
+                            }}
+                            className="h-32 flex flex-col gap-2 border-slate-700 hover:border-indigo-500 hover:bg-indigo-500/10"
+                        >
+                            <Zap className="w-8 h-8 text-yellow-400" />
+                            <span className="font-bold">Quick Start</span>
+                            <span className="text-[10px] text-slate-400 font-normal">Skip analysis, go to setup</span>
+                        </Button>
+
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                setChoiceOpen(false)
+                                setAnalysisOpen(true)
+                            }}
+                            className="h-32 flex flex-col gap-2 border-slate-700 hover:border-indigo-500 hover:bg-indigo-500/10"
+                        >
+                            <BrainCircuit className="w-8 h-8 text-indigo-400" />
+                            <span className="font-bold">Pre-Game Analysis</span>
+                            <span className="text-[10px] text-slate-400 font-normal">View strategies & stats</span>
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             {/* Step 1: Analysis */}
             <PreGameAnalysisDialog
