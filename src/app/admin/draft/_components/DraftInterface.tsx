@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { DraftGame, DraftMatch, Hero } from '@/utils/types'
 import { useDraftEngine } from './useDraftEngine'
-import { getRecommendations } from '../recommendations'
+import { getRecommendations } from '../../simulator/recommendations' // Switched to Simulator engine for full features
 import { deleteGame } from '../actions'
 import { getHeroesByVersion } from '../../heroes/actions'
 import { Button } from '@/components/ui/button'
@@ -44,14 +44,23 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
         const allyPicks = currentStep.side === 'BLUE' ? Object.values(state.bluePicks) : Object.values(state.redPicks)
         const enemyPicks = currentStep.side === 'BLUE' ? Object.values(state.redPicks) : Object.values(state.bluePicks)
 
-        const currentPhase = currentStep?.type === 'BAN' ? 'BAN' : 'PICK'
+        const currentPhase = (currentStep?.type === 'BAN' ? 'BAN' : 'PICK') as 'BAN' | 'PICK'
+
+        // Determine teams based on side
+        const isBlue = currentStep?.side === 'BLUE'
+        const targetTeamName = isBlue ? match.team_a_name : match.team_b_name
+        const enemyTeamName = isBlue ? match.team_b_name : match.team_a_name
+
         const context = {
             matchId: match.id,
             phase: currentPhase,
-            side: currentStep?.side
+            side: currentStep?.side,
+            targetTeamName,
+            enemyTeamName,
+            pickOrder: state.stepIndex + 1 // Add pick order for slot analysis
         }
 
-        getRecommendations(match.version_id, allyPicks, enemyPicks, bannedIds)
+        getRecommendations(match.version_id, allyPicks, enemyPicks, bannedIds, [], context)
             .then(setRecommendations)
 
     }, [state.stepIndex])
@@ -227,11 +236,11 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                         <div className="flex items-center gap-2">
                             <Brain className={`w-4 h-4 lg:w-5 lg:h-5 text-indigo-400 ${isAiOpen ? 'animate-pulse' : ''}`} />
                             <h3 className="font-bold text-sm lg:text-base text-indigo-100 tracking-wider">CEREBRO AI</h3>
-                            <span className="text-[10px] lg:text-xs text-slate-500 ml-1 lg:ml-2 font-mono hidden sm:inline">{currentStep?.type === 'BAN' ? '[BAN PROTOCOL]' : '[PICK ANALYSIS]'}</span>
+                            <span className="text-[10px] lg:text-xs text-slate-500 ml-1 lg:ml-2 font-mono hidden sm:inline">{currentStep?.type === 'BAN' ? 'STRATEGIC BANS' : 'STRATEGIC PICKS'}</span>
                         </div>
                         <div className="flex items-center gap-2 lg:gap-3">
                             <Badge variant="outline" className="bg-slate-900 border-slate-700 text-slate-400 text-[10px] lg:text-xs px-1 lg:px-2 h-5 lg:h-6">
-                                {isAiOpen ? (currentStep?.type === 'BAN' ? '🛡️ Ban' : '⚡ Pick') : 'Min'}
+                                {isAiOpen ? (currentStep?.type === 'BAN' ? '🛡️ Strategic Ban' : '⚡ Strategic Pick') : 'Min'}
                             </Badge>
                             {isAiOpen ? <ChevronDown className="w-3 h-3 lg:w-4 lg:h-4 text-slate-500" /> : <ChevronUp className="w-3 h-3 lg:w-4 lg:h-4 text-slate-500" />}
                         </div>

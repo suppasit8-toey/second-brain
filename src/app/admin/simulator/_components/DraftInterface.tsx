@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, forwardRef, useImperativeHandle, useMemo, useRef } from 'react'
+import { useState, useEffect, forwardRef, useImperativeHandle, useMemo, useRef, useCallback } from 'react'
 import { DraftGame, DraftMatch, Hero } from '@/utils/types'
 import { useDraftEngine } from './useDraftEngine'
 import { DRAFT_SEQUENCE } from '../constants'
@@ -1262,13 +1262,15 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         // Blue Team Context Update
         const blueCtx = {
             ...blueContext,
-            pickOrder: currentPhase === 'BAN' ? blueBansCount + 1 : bluePicksCount + 1
+            pickOrder: currentPhase === 'BAN' ? blueBansCount + 1 : bluePicksCount + 1,
+            draftSlot: currentStep ? currentStep.orderIndex + 1 : undefined // Ensure Draft Order bonus is calculated
         }
 
         // Red Team Context Update
         const redCtx = {
             ...redContext,
-            pickOrder: currentPhase === 'BAN' ? redBansCount + 1 : redPicksCount + 1
+            pickOrder: currentPhase === 'BAN' ? redBansCount + 1 : redPicksCount + 1,
+            draftSlot: currentStep ? currentStep.orderIndex + 1 : undefined // Ensure Draft Order bonus is calculated
         }
 
         // Determine Global Bans for each side for THIS game
@@ -1281,6 +1283,21 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             getRecommendations(match.version_id, currentBluePicks, currentRedPicks, bannedIds, blueGlobalBans, blueCtx, currentMode ? { layers: currentMode.layers.map((w: any) => ({ id: w.id, weight: w.weight, isActive: w.weight > 0 })) } : undefined, teamStats[game.blue_team_name?.replace(/\s*\(Bot\)\s*$/i, '') || ''] || undefined, historyMode),
             getRecommendations(match.version_id, currentRedPicks, currentBluePicks, bannedIds, redGlobalBans, redCtx, currentMode ? { layers: currentMode.layers.map((w: any) => ({ id: w.id, weight: w.weight, isActive: w.weight > 0 })) } : undefined, teamStats[game.red_team_name?.replace(/\s*\(Bot\)\s*$/i, '') || ''] || undefined, historyMode)
         ]).then(([blueData, redData]) => {
+            // MERGE & DEDUPLICATE scores to ensure consistency with Advisor Sidebar
+            // Deduplicate Hybrid/Analyst/History lists (which may share references or contain duplicates)
+            if (blueData) {
+                const dedupedHybrid = deduplicateSuggestions(blueData.hybrid || [])
+                blueData.hybrid = dedupedHybrid
+                blueData.analyst = dedupedHybrid
+                blueData.history = dedupedHybrid
+            }
+            if (redData) {
+                const dedupedHybrid = deduplicateSuggestions(redData.hybrid || [])
+                redData.hybrid = dedupedHybrid
+                redData.analyst = dedupedHybrid
+                redData.history = dedupedHybrid
+            }
+
             if (currentStep.side === 'BLUE') setRecommendations(blueData)
             else setRecommendations(redData)
 
@@ -1298,18 +1315,18 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             if (currentPhase === 'BAN') {
                 if (blueStrategicBansRef.current.length > 0) {
                     // Use Blue's Strategic Bans (targets Red team)
-                    blueFinal = blueStrategicBansRef.current.slice(0, 8)
+                    blueFinal = blueStrategicBansRef.current.slice(0, 20)
                 } else {
                     // Fallback to smartBan only if no strategic data
                     blueFinal = (blueData?.smartBan || []).map((r: any) => ({ ...r, phase: 'BAN', type: 'ban' }))
                         .filter((r: any) => !allUnavailable.has(String(r.hero?.id)))
-                        .slice(0, 8)
+                        .slice(0, 20)
                 }
             } else {
                 // PICK phase
                 blueFinal = (blueData?.hybrid || []).map((r: any) => ({ ...r, phase: 'PICK', type: 'hybrid' }))
                     .filter((r: any) => !allUnavailable.has(String(r.hero?.id)))
-                    .slice(0, 8)
+                    .slice(0, 20)
             }
             setBlueSuggestions(blueFinal)
 
@@ -1318,16 +1335,16 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             if (currentPhase === 'BAN') {
                 if (redStrategicBansRef.current.length > 0) {
                     // Use Red's Strategic Bans (targets Blue team)
-                    redFinal = redStrategicBansRef.current.slice(0, 8)
+                    redFinal = redStrategicBansRef.current.slice(0, 20)
                 } else {
                     redFinal = (redData?.smartBan || []).map((r: any) => ({ ...r, phase: 'BAN', type: 'ban' }))
                         .filter((r: any) => !allUnavailable.has(String(r.hero?.id)))
-                        .slice(0, 8)
+                        .slice(0, 20)
                 }
             } else {
                 redFinal = (redData?.hybrid || []).map((r: any) => ({ ...r, phase: 'PICK', type: 'hybrid' }))
                     .filter((r: any) => !allUnavailable.has(String(r.hero?.id)))
-                    .slice(0, 8)
+                    .slice(0, 20)
             }
             setRedSuggestions(redFinal)
 
@@ -1363,7 +1380,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
             // Blue Advisor - set data when Strategic Bans is ready
             if (blueStrategicBans.length > 0 && blueSuggestions.length === 0) {
-                const formatted = blueStrategicBans.slice(0, 8).map((r: any) => ({
+                const formatted = blueStrategicBans.slice(0, 20).map((r: any) => ({
                     hero: r.hero,
                     score: r.score,
                     reason: r.reason,
@@ -1376,7 +1393,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
             // Red Advisor - set data when Strategic Bans is ready
             if (redStrategicBans.length > 0 && redSuggestions.length === 0) {
-                const formatted = redStrategicBans.slice(0, 12).map((r: any) => ({
+                const formatted = redStrategicBans.slice(0, 20).map((r: any) => ({
                     hero: r.hero,
                     score: r.score,
                     reason: r.reason,
@@ -1389,7 +1406,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         }
     }, [currentStep?.type, blueStrategicBans.length, redStrategicBans.length, blueSuggestions.length, redSuggestions.length])
 
-    const handleGenerateSuggestion = async (side: 'BLUE' | 'RED', mode: string) => {
+    const handleGenerateSuggestion = useCallback(async (side: 'BLUE' | 'RED', mode: string) => {
         const isBlue = side === 'BLUE'
         const setLoading = isBlue ? setIsBlueSuggestLoading : setIsRedSuggestLoading
         const setRecs = isBlue ? setBlueSuggestions : setRedSuggestions
@@ -1401,7 +1418,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             // For BAN phase or ban mode, use team-specific Strategic Bans
             const teamStrategicBans = isBlue ? blueStrategicBans : redStrategicBans
             if (isBanMode && teamStrategicBans.length > 0) {
-                const formatted = teamStrategicBans.slice(0, 8).map((r: any) => ({
+                const formatted = teamStrategicBans.slice(0, 20).map((r: any) => ({
                     hero: r.hero,
                     score: r.score,
                     reason: r.reason,
@@ -1452,29 +1469,50 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             )
 
             // Select array based on mode
-            let results: any[] = data.hybrid || []
-            if (mode === 'analyst') results = data.analyst
-            else if (mode === 'history') results = data.history
-            else if (mode === 'counter') results = data.hybrid
-            else if (mode === 'smartBan') results = data.smartBan
+            // Select array based on mode
+            let results: any[] = []
+            if (mode === 'history') {
+                results = [
+                    ...(data.history || []),
+                    ...(data.historyAnalysis || []),
+                    ...(data.smartBan || [])
+                ]
+            }
+            else if (mode === 'analyst') results = data.analyst || []
+            else if (mode === 'counter') results = data.hybrid || []
+            else if (mode === 'smartBan') results = data.smartBan || []
+            else results = data.hybrid || []
+
+            // Deduplicate and Format
+            // Deduplicate and Format
+            const dedupedResults = deduplicateSuggestions(results)
 
             // Map to Suggestion Format
-            const formatted = results.map((r: any) => ({
-                hero: r.hero,
-                score: r.score,
-                reason: r.reason,
-                type: mode === 'history' ? 'comfort' : (mode === 'counter' ? 'counter' : 'hybrid'),
-                stepIndex: state.stepIndex
-            })).slice(0, 8) // Top 8
+            const formatted = dedupedResults
+                .map((r: any) => ({
+                    hero: r.hero,
+                    score: r.score,
+                    reason: r.reason,
+                    type: mode === 'history' ? 'comfort' : (mode === 'counter' ? 'counter' : 'hybrid'),
+                    stepIndex: state.stepIndex
+                }))
+                .slice(0, 20) // Top 20
 
             setRecs(formatted)
 
         } catch (err) {
-            console.error("Manual Suggestion Failed:", err)
         } finally {
             setLoading(false)
         }
-    }
+    }, [
+        currentStep?.type, currentStep?.orderIndex,
+        blueStrategicBans, redStrategicBans,
+        state.bluePicks, state.redPicks, state.blueBans, state.redBans, state.stepIndex,
+        game.blue_team_name, game.red_team_name,
+        teamStats, match.version_id, match.id, match.ai_metadata, match.team_a_name,
+        teamAGlobalBans, teamBGlobalBans,
+        currentMode, historyMode
+    ])
 
     const handleHeroClick = (hero: Hero) => {
         if (unavailableIds.includes(hero.id)) return
@@ -3932,5 +3970,24 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
     )
 })
+
+// Helper to deduplicate and merge scores (matches logical flow in handleGenerateSuggestion)
+const deduplicateSuggestions = (results: any[]) => {
+    const map = new Map<string, any>()
+    results.forEach(item => {
+        if (!item.hero) return
+        const id = String(item.hero.id)
+        if (map.has(id)) {
+            const existing = map.get(id)
+            existing.score = Math.max(existing.score, item.score)
+            if (!existing.reason.includes(item.reason)) {
+                existing.reason = `${existing.reason} • ${item.reason}`
+            }
+        } else {
+            map.set(id, { ...item })
+        }
+    })
+    return Array.from(map.values()).sort((a: any, b: any) => b.score - a.score)
+}
 
 export default DraftInterface

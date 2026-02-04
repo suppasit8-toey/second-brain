@@ -7,7 +7,7 @@ export interface Recommendation {
     hero: Hero;
     score: number;
     reason: string;
-    type: 'synergy' | 'counter' | 'history' | 'hybrid';
+    type: 'synergy' | 'counter' | 'history' | 'hybrid' | 'ban';
 }
 
 export async function getRecommendations(
@@ -115,9 +115,60 @@ export async function getRecommendations(
         .sort((a, b) => b.score - a.score)
         .slice(0, 5)
 
+    // --- SMART BAN TAB ---
+    // Identify threats to our team or general OP heroes
+    const smartBanRecs: Recommendation[] = [];
+    const banScores: Record<string, { score: number, reasons: string[] }> = {};
+
+    // 1. Ban counters to our picks (Protect)
+    if (allyHeroIds.length > 0) {
+        // Find enemies that are good against our team
+        const { data: threats } = await supabase
+            .from('matchups')
+            .select('*')
+            .eq('version_id', versionId)
+            .in('opponent_id', allyHeroIds) // Heroes that are opponents to ALLIES (i.e. enemies)
+            .gt('win_rate', 52) // Threats with >52% win rate against us
+
+        threats?.forEach(t => {
+            if (!banScores[t.hero_id]) banScores[t.hero_id] = { score: 0, reasons: [] }
+            const impact = (t.win_rate - 50) * 5
+            banScores[t.hero_id].score += impact
+            banScores[t.hero_id].reasons.push(`Counters your team`)
+        })
+    }
+
+    // 2. Ban General OP Heroes (Deny)
+    availableHeroes.forEach(h => {
+        const stats = h.hero_stats[0]
+        if (stats.tier === 'S' || stats.win_rate > 54) {
+            if (!banScores[h.id]) banScores[h.id] = { score: 0, reasons: [] }
+            banScores[h.id].score += 50 // Flat bonus for S-tier/OP
+            banScores[h.id].reasons.push(`Meta Threat (${stats.win_rate}%)`)
+        }
+    })
+
+    // Convert to array
+    Object.entries(banScores).forEach(([heroId, data]) => {
+        const hero = availableHeroes.find(h => h.id === heroId)
+        if (hero) {
+            smartBanRecs.push({
+                hero,
+                score: data.score,
+                reason: data.reasons[0] || 'Strategic Ban',
+                type: 'ban' as const // Explicitly 'ban' type
+            })
+        }
+    })
+
+    const finalSmartBans = smartBanRecs
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5)
+
     return {
         analyst: analystRecs,
         history: historyRecs,
-        hybrid: hybridRecs
+        hybrid: hybridRecs,
+        smartBan: finalSmartBans
     }
 }

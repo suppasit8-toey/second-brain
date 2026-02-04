@@ -963,11 +963,40 @@ export async function getRecommendations(
                     const heroStats = teamStats.heroStats[h.id]
 
                     if (heroStats && heroStats.picks >= 1) {
+                        // [NEW] 1. Experience Bonus (Pure Game Count)
+                        const xpBonus = heroStats.picks
+                        signatureBonus += xpBonus
+                        bonusReason += ` (+${xpBonus} XP)`
+
+                        // [NEW] 2. Role Specific Comfort (Played in THIS Role)
+                        if (fittingRole) {
+                            // Normalize role to look up in roleStats
+                            const normRole = fittingRole === 'Abyssal Dragon' ? 'Abyssal' : (fittingRole === 'Roam' ? 'Roam' : fittingRole)
+                            // Map 'Abyssal' back to what might be in roleStats if needed, but teamStats uses normalized keys?
+                            // teamStats roleStats keys are normalized in lines 264.
+                            // Let's check teamStats normalization logic: 
+                            // Line 201: 'Abyssal' -> 'Abyssal'
+                            // My fittingRole might be 'Abyssal' or 'Abyssal Dragon'.
+                            // Safe normalization:
+                            let lookupRole = fittingRole
+                            if (fittingRole === 'Abyssal Dragon') lookupRole = 'Abyssal'
+                            if (fittingRole === 'Support') lookupRole = 'Roam'
+
+                            const roleSpecificParams = heroStats.roleStats?.[lookupRole]
+                            if (roleSpecificParams && roleSpecificParams.picks >= 1) {
+                                // High bonus for verifying they play it in this position
+                                const roleComfortBonus = 20 * wRoster
+                                signatureBonus += roleComfortBonus
+                                const roleWR = Math.round((roleSpecificParams.wins / roleSpecificParams.picks) * 100)
+                                bonusReason += ` • ${lookupRole} Main (${roleSpecificParams.picks}g ${roleWR}%)`
+                            }
+                        }
+
                         const winRate = heroStats.wins / heroStats.picks
-                        const winPct = Math.round(winRate * 100)
+                        // const winPct = Math.round(winRate * 100) // Unused?
 
                         // Add game count to display
-                        bonusReason += ` (${heroStats.wins}W/${heroStats.picks - heroStats.wins}L)`
+                        // bonusReason += ` (${heroStats.wins}W/${heroStats.picks - heroStats.wins}L)` // Already covered by XP/Role text
 
                         if (heroStats.picks >= 2) {
                             if (winRate >= 0.7) {
@@ -1808,6 +1837,7 @@ function getHistoryRecommendations(
         })
     }
 
+    // --- CONVERT SMART BAN SCORES ---
     return recs.sort((a, b) => b.score - a.score).slice(0, 20)
 }
 

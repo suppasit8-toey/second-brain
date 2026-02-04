@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Brain, Sparkles, Loader2, Target, History, Shield, ChevronDown, ChevronUp, Globe, Swords, Users, Link as LinkIcon, ShieldBan, Settings2 } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Brain, Sparkles, Loader2, Target, History, Shield, ChevronDown, ChevronUp, Globe, Swords, Users, Link as LinkIcon, ShieldBan, Settings2, ScanSearch } from 'lucide-react';
 import Image from 'next/image';
 import { Hero, AnalysisLayerConfig } from '@/utils/types';
 import Link from 'next/link';
@@ -13,7 +14,7 @@ export interface Suggestion {
     hero: Hero;
     score: number;
     reason?: string;
-    type: 'counter' | 'comfort' | 'meta' | 'hybrid' | 'ban';
+    type: 'counter' | 'comfort' | 'meta' | 'hybrid' | 'ban' | 'history';
     phase?: 'PICK' | 'BAN';
 }
 
@@ -32,6 +33,7 @@ interface DraftSuggestionPanelProps {
 // Position filter icons - using abbreviated text
 const POSITION_ICONS: Record<string, { label: string, color: string }> = {
     'All': { label: 'ALL', color: 'text-slate-400' },
+    'history': { label: 'HISTORY', color: 'text-orange-400' },
     'Dark Slayer': { label: 'DS', color: 'text-red-400' },
     'Jungle': { label: 'JG', color: 'text-green-400' },
     'Mid': { label: 'MID', color: 'text-purple-400' },
@@ -52,6 +54,7 @@ export default function DraftSuggestionPanel({
 }: DraftSuggestionPanelProps) {
     const [isCollapsed, setIsCollapsed] = useState(true);
     const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
+    const [activeTab, setActiveTab] = useState('cerebro');
 
     // Toggle position filter
     const togglePositionFilter = (pos: string) => {
@@ -72,28 +75,81 @@ export default function DraftSuggestionPanel({
     };
 
     // Auto-generate when active phase starts
-    // For BAN phase, suggestions are set by DraftInterface from Strategic Bans
-    // For PICK phase, auto-generate hybrid suggestions
     useEffect(() => {
         if (isActive && suggestions.length === 0 && !isLoading) {
             const isBanPhase = upcomingSlots[0]?.type === 'BAN';
-            // Only auto-generate for PICK phase, BAN phase is handled by DraftInterface
             if (!isBanPhase) {
                 onGenerate('hybrid');
             }
         }
     }, [isActive, suggestions.length, isLoading, onGenerate, upcomingSlots]);
 
-    const borderColor = side === 'BLUE' ? 'border-blue-500/30' : 'border-red-500/30';
-    const bgColor = side === 'BLUE' ? 'bg-blue-950/20' : 'bg-red-950/20';
+    // Use ref for onGenerate to avoid infinite loops when it recreates
+    const onGenerateRef = useRef(onGenerate);
+    useEffect(() => {
+        onGenerateRef.current = onGenerate;
+    }, [onGenerate]);
 
-    // Filter suggestions by position (multiple selection)
-    const filteredSuggestions = positionFilters.size === 0
-        ? suggestions
-        : suggestions.filter(s => {
+
+    const borderColor = side === 'BLUE' ? 'border-blue-500/30' : 'border-red-500/30';
+
+    // Keywords for filtering
+    const HISTORY_KEYWORDS = ['team ban', 'team pool', 'comfort', 'protect', 'deny', 'repair', 'scrim', 'pattern', 'opening ban', 'mvp'];
+
+    // Split Suggestions Logic (UPDATED: CEREBRO AI now allows all suggestions)
+    const { cerebroSuggestions, historySuggestions, analysisSuggestions } = useMemo(() => {
+        // CEREBRO AI Tab: Show ALL valid suggestions sorted by score
+        const cerebro: Suggestion[] = suggestions.slice(0, 20); // Max 20 to allow filtering lower ranked items
+
+        // HISTORY Tab: Filter for history-related reasons or types
+        const history: Suggestion[] = [];
+        suggestions.forEach(s => {
+            const reasonLower = s.reason?.toLowerCase() || '';
+            const isHistory = s.type === 'history' || HISTORY_KEYWORDS.some(k => reasonLower.includes(k));
+            if (isHistory) {
+                history.push(s);
+            }
+        });
+
+        // ANALYSIS Tab: Overlap logic
+        const historyHeroIds = new Set(history.map(h => h.hero.id));
+        const cerebroHeroIds = new Set(cerebro.map(c => c.hero.id));
+
+        // Find heroes present in both concepts
+        const intersectionIds = new Set([...historyHeroIds].filter(x => cerebroHeroIds.has(x)));
+
+        // Get the best suggestion object for these intersection heroes
+        const analysis = suggestions.filter(s => intersectionIds.has(s.hero.id));
+
+        // Deduplicate analysis list by Hero ID, keeping highest score
+        const uniqueAnalysisMap = new Map<string, Suggestion>();
+        analysis.forEach(s => {
+            const existing = uniqueAnalysisMap.get(s.hero.id);
+            if (!existing || s.score > existing.score) {
+                uniqueAnalysisMap.set(s.hero.id, s);
+            }
+        });
+
+        const uniqueAnalysis = Array.from(uniqueAnalysisMap.values())
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 3); // Max 3
+
+        return {
+            cerebroSuggestions: cerebro, // Now contains top 20, renderGrid filters then slices to 8 visible
+            historySuggestions: history.slice(0, 20), // Max 20 for filtering
+            analysisSuggestions: uniqueAnalysis
+        };
+    }, [suggestions]);
+
+
+    const renderGrid = (items: Suggestion[], emptyMsg: string) => {
+        // Apply position filters if any (excluding 'history' which is now a tab concept mostly)
+        const activePosFilters = Array.from(positionFilters).filter(f => f !== 'history');
+
+        const filteredItems = items.filter(s => {
+            if (activePosFilters.length === 0) return true;
             const heroPositions = s.hero.main_position || [];
-            // Check if hero matches ANY of the selected filters
-            return Array.from(positionFilters).some(filter => {
+            return activePosFilters.some(filter => {
                 const normalizedFilter = filter === 'Abyssal' ? ['Abyssal', 'Abyssal Dragon'] : [filter];
                 return heroPositions.some(pos =>
                     normalizedFilter.some(f => pos.toLowerCase().includes(f.toLowerCase()))
@@ -101,18 +157,194 @@ export default function DraftSuggestionPanel({
             });
         });
 
+        if (isLoading) {
+            return (
+                <div className="flex items-center justify-center py-6 col-span-4">
+                    <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
+                    <span className="ml-2 text-xs text-slate-400">Loading...</span>
+                </div>
+            )
+        }
+
+        if (filteredItems.length === 0) {
+            return (
+                <div className="col-span-4 text-center text-xs text-slate-500 py-4 italic">
+                    {emptyMsg}
+                </div>
+            )
+        }
+
+        // Limit to Top 8 for CEREBRO AI
+        const topItems = filteredItems.slice(0, 8);
+
+        return (
+            <div className="grid grid-cols-4 gap-2">
+                {topItems.map((s) => (
+                    <TooltipProvider key={s.hero.id} delayDuration={300}>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onSelectHero && onSelectHero(s.hero);
+                                    }}
+                                    className="relative group flex flex-col items-center gap-1.5 p-1.5 rounded-xl bg-slate-900/60 border border-slate-800 hover:bg-slate-800/80 hover:border-indigo-500/50 transition-all duration-200 shadow-sm"
+                                >
+                                    {/* Image Container with embedded indicators */}
+                                    <div className="relative w-11 h-11 rounded-lg overflow-hidden border border-slate-700 group-hover:border-indigo-400 transition-colors shadow-inner">
+                                        <Image src={s.hero.icon_url} alt={s.hero.name} fill className="object-cover" />
+
+                                        {/* Source Indicator: Strategic Picks (P) or Strategic Bans (B) - Bottom Left of Image */}
+                                        <div className={`absolute bottom-0 left-0 p-0.5 rounded-tr-md shadow-sm ${s.phase === 'BAN' || s.type === 'ban'
+                                            ? 'bg-red-600 text-white'
+                                            : 'bg-emerald-600 text-white'
+                                            }`}>
+                                            {s.phase === 'BAN' || s.type === 'ban' ? <ShieldBan size={10} strokeWidth={3} /> : <Swords size={10} strokeWidth={3} />}
+                                        </div>
+
+                                        {/* Type indicators - Top Left of Image */}
+                                        {s.type === 'counter' && <div className="absolute top-0 left-0 text-[7px] bg-red-500/90 text-white px-1 py-px rounded-br-md font-bold leading-none">VS</div>}
+                                        {s.type === 'comfort' && <div className="absolute top-0 left-0 text-[7px] bg-blue-500/90 text-white px-1 py-px rounded-br-md font-bold leading-none">★</div>}
+                                    </div>
+                                    <div className="text-[10px] font-bold text-slate-200 text-center w-full truncate px-0.5 leading-tight">
+                                        {s.hero.name}
+                                    </div>
+
+                                    {/* Score Badge - Top Right floating over Card */}
+                                    <div className="absolute -top-1.5 -right-1.5 z-10">
+                                        <div className="bg-slate-950 text-indigo-400 border border-slate-800 text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-md flex items-center justify-center min-w-[20px]">
+                                            {s.score.toFixed(0)}
+                                        </div>
+                                    </div>
+                                </button>
+                            </TooltipTrigger>
+                            <TooltipContent className="bg-slate-900 border-slate-700 text-xs text-slate-300">
+                                <div className="font-bold text-slate-200 mb-1">{s.hero.name} ({s.score.toFixed(0)} PTS)</div>
+                                <div>{s.reason || 'Recommended'}</div>
+                            </TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                ))}
+            </div>
+        )
+    }
+
+    // Detailed Card for Analysis Tab
+    const renderAnalysisList = (items: Suggestion[]) => {
+        // Apply position filters
+        const activePosFilters = Array.from(positionFilters).filter(f => f !== 'history');
+        const filteredItems = items.filter(s => {
+            if (activePosFilters.length === 0) return true;
+            const heroPositions = s.hero.main_position || [];
+            return activePosFilters.some(filter => {
+                const normalizedFilter = filter === 'Abyssal' ? ['Abyssal', 'Abyssal Dragon'] : [filter];
+                return heroPositions.some(pos =>
+                    normalizedFilter.some(f => pos.toLowerCase().includes(f.toLowerCase()))
+                );
+            });
+        });
+
+        if (isLoading) return <div className="text-center text-xs text-slate-500 py-4"><Loader2 className="w-4 h-4 animate-spin inline mr-1" /> Analyzing...</div>;
+        if (filteredItems.length === 0) return <div className="text-center text-xs text-slate-500 py-4 italic">No high-confidence overlap found.</div>;
+
+        return (
+            <div className="space-y-2">
+                {filteredItems.map(s => (
+                    <div
+                        key={s.hero.id}
+                        className="flex items-center gap-2 p-2 rounded bg-indigo-950/30 border border-indigo-500/20 hover:bg-indigo-900/40 cursor-pointer transition-colors"
+                        onClick={() => onSelectHero && onSelectHero(s.hero)}
+                    >
+                        <div className="relative w-12 h-12 rounded overflow-hidden border border-indigo-400/50 shrink-0">
+                            <Image src={s.hero.icon_url} alt={s.hero.name} fill className="object-cover" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between mb-0.5">
+                                <span className="font-bold text-indigo-100 text-xs">{s.hero.name}</span>
+                                <Badge className="h-4 text-[9px] px-1 bg-indigo-500/80 hover:bg-indigo-500">{s.score.toFixed(0)}</Badge>
+                            </div>
+                            <div className="text-[9px] text-indigo-300 leading-tight">
+                                Recommended by both AI & History
+                            </div>
+                            <div className="flex gap-1 mt-1">
+                                {s.phase === 'BAN' || s.type === 'ban'
+                                    ? <Badge variant="outline" className="text-[8px] h-3 px-1 border-red-500/50 text-red-400">BAN</Badge>
+                                    : <Badge variant="outline" className="text-[8px] h-3 px-1 border-green-500/50 text-green-400">PICK</Badge>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        )
+    }
+
+
+
+    // History List View
+    const renderHistoryList = (items: Suggestion[]) => {
+        // Apply position filters
+        const activePosFilters = Array.from(positionFilters).filter(f => f !== 'history');
+        const filteredItems = items.filter(s => {
+            if (activePosFilters.length === 0) return true;
+            const heroPositions = s.hero.main_position || [];
+            return activePosFilters.some(filter => {
+                const normalizedFilter = filter === 'Abyssal' ? ['Abyssal', 'Abyssal Dragon'] : [filter];
+                return heroPositions.some(pos =>
+                    normalizedFilter.some(f => pos.toLowerCase().includes(f.toLowerCase()))
+                );
+            });
+        });
+
+        if (isLoading) return <div className="text-center text-xs text-slate-500 py-4"><Loader2 className="w-4 h-4 animate-spin inline mr-1" /> Loading history...</div>;
+        if (filteredItems.length === 0) return <div className="text-center text-xs text-slate-500 py-4 italic">No history data found.</div>;
+
+        return (
+            <div className="space-y-1">
+                {filteredItems.map((s, idx) => (
+                    <div
+                        key={s.hero.id}
+                        className="flex items-center gap-3 p-2 rounded bg-slate-900/40 border border-slate-800 hover:bg-slate-800/60 cursor-pointer transition-colors group"
+                        onClick={() => onSelectHero && onSelectHero(s.hero)}
+                    >
+                        {/* Rank Badge */}
+                        <div className="flex items-center justify-center w-6 h-6 rounded bg-slate-800 text-[10px] font-bold text-slate-400 shrink-0">
+                            #{idx + 1}
+                        </div>
+
+                        {/* Hero Icon */}
+                        <div className="relative w-10 h-10 rounded overflow-hidden border border-slate-700 group-hover:border-slate-500 shrink-0">
+                            <Image src={s.hero.icon_url} alt={s.hero.name} fill className="object-cover" />
+                        </div>
+
+                        {/* Name & Reason */}
+                        <div className="min-w-0 flex-1 flex flex-col justify-center">
+                            <div className="font-bold text-slate-200 text-sm leading-none mb-1">{s.hero.name}</div>
+                            <div className="text-[10px] text-slate-500 truncate">{s.reason || 'Frequent Selection'}</div>
+                        </div>
+
+                        {/* Score */}
+                        <div className="text-right shrink-0">
+                            <div className="font-mono font-bold text-emerald-400 text-sm">{s.score.toFixed(0)} <span className="text-[10px] text-slate-600 font-normal">pts</span></div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        )
+    }
+
     return (
         <Card className={`border ${borderColor} bg-slate-950/90 backdrop-blur-md transition-all duration-300 overflow-hidden ${isCollapsed ? 'h-auto' : ''}`}>
             <CardHeader className="py-2 px-3 flex flex-row items-center justify-between border-b border-white/5 cursor-pointer hover:bg-white/5 transition-colors" onClick={() => setIsCollapsed(!isCollapsed)}>
                 <div className="flex items-center gap-2 overflow-hidden">
                     <Brain className={`w-4 h-4 shrink-0 ${isActive ? 'text-green-400 animate-pulse' : 'text-slate-500'}`} />
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex items-center gap-2">
                         <CardTitle className="text-sm font-bold uppercase tracking-wider text-slate-300 truncate">
-                            {teamName} CEREBRO AI
+                            {teamName} ADVISOR
                         </CardTitle>
-                        {/* Current Slot Badge - Combined with Phase */}
+
                         {upcomingSlots.length > 0 && (
-                            <Badge className={`text-[9px] px-2 py-0.5 font-bold mt-0.5 ${upcomingSlots[0].type === 'BAN'
+                            <Badge className={`text-[9px] px-2 py-0.5 font-bold ${upcomingSlots[0].type === 'BAN'
                                 ? 'bg-red-600 text-white'
                                 : 'bg-green-600 text-white'}`}>
                                 {upcomingSlots[0].type === 'BAN' ? 'BAN' : 'PICK'} #{upcomingSlots[0].slotNum}
@@ -131,91 +363,49 @@ export default function DraftSuggestionPanel({
                     </Button>
                 </div>
             </CardHeader>
-            {!isCollapsed && (
-                <CardContent className="p-3 space-y-3 animate-in slide-in-from-top-2 duration-200">
-                    {/* Position Filter Icons */}
-                    <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-hide">
-                        {Object.entries(POSITION_ICONS).map(([pos, { label, color }]) => {
-                            const isSelected = pos === 'All' ? positionFilters.size === 0 : positionFilters.has(pos);
-                            return (
-                                <button
-                                    key={pos}
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        togglePositionFilter(pos);
-                                    }}
-                                    className={`px-2 py-1 rounded border transition-colors cursor-pointer text-[10px] font-bold ${isSelected
-                                        ? `bg-white/10 border-white/30 ${color}`
-                                        : 'bg-slate-900/50 border-slate-700/50 hover:bg-slate-800 text-slate-400'
-                                        }`}
-                                    title={pos}
-                                >
-                                    {label}
-                                </button>
-                            );
-                        })}
-                    </div>
 
-                    {/* Results Grid */}
-                    <div className="grid grid-cols-4 gap-2 min-h-[60px]">
-                        {isLoading ? (
-                            <div className="col-span-4 flex items-center justify-center py-6">
-                                <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
-                                <span className="ml-2 text-xs text-slate-400">Loading recommendations...</span>
-                            </div>
-                        ) : filteredSuggestions.length > 0 ? (
-                            filteredSuggestions.map((s) => (
-                                <TooltipProvider key={s.hero.id} delayDuration={300}>
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <button
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onSelectHero && onSelectHero(s.hero);
-                                                }}
-                                                className="relative group flex flex-col items-center gap-1 p-1 rounded hover:bg-white/5 transition-colors"
-                                            >
-                                                <div className="relative w-10 h-10 rounded overflow-hidden border border-slate-700 group-hover:border-indigo-400 transition-colors">
-                                                    <Image src={s.hero.icon_url} alt={s.hero.name} fill className="object-cover" />
-                                                </div>
-                                                <div className="text-[9px] font-bold text-slate-300 text-center w-full truncate px-0.5">
-                                                    {s.hero.name}
-                                                </div>
-                                                {/* Score Badge */}
-                                                <div className="absolute top-0 right-0 transform translate-x-1/2 -translate-y-1/2 z-10">
-                                                    <Badge className="px-1 py-0 h-4 text-[8px] min-w-4 justify-center bg-indigo-600 text-white border-0">
-                                                        {s.score.toFixed(0)}
-                                                    </Badge>
-                                                </div>
-                                                {/* Source Indicator: Strategic Picks (P) or Strategic Bans (B) */}
-                                                <div className={`absolute bottom-6 left-0 text-[7px] font-bold px-1 rounded-tr ${s.phase === 'BAN' || s.type === 'ban'
-                                                    ? 'bg-red-600/90 text-white'
-                                                    : 'bg-green-600/90 text-white'
-                                                    }`}>
-                                                    {s.phase === 'BAN' || s.type === 'ban' ? 'B' : 'P'}
-                                                </div>
-                                                {/* Type indicators */}
-                                                {s.type === 'counter' && <div className="absolute top-0 left-0 text-[8px] bg-red-900/80 text-red-200 px-1 rounded-br">VS</div>}
-                                                {s.type === 'comfort' && <div className="absolute top-0 left-0 text-[8px] bg-blue-900/80 text-blue-200 px-1 rounded-br">★</div>}
-                                            </button>
-                                        </TooltipTrigger>
-                                        <TooltipContent className="bg-slate-900 border-slate-700 text-xs text-slate-300">
-                                            <div className="font-bold text-slate-200 mb-1">{s.hero.name} ({s.score.toFixed(0)} PTS)</div>
-                                            <div>{s.reason || 'Recommended'}</div>
-                                        </TooltipContent>
-                                    </Tooltip>
-                                </TooltipProvider>
-                            ))
-                        ) : suggestions.length > 0 && filteredSuggestions.length === 0 ? (
-                            <div className="col-span-4 text-center text-xs text-slate-500 py-4 italic">
-                                No heroes found for selected positions
-                            </div>
-                        ) : (
-                            <div className="col-span-4 text-center text-xs text-slate-500 py-4 italic">
-                                Ready to assist. Select mode and generate.
-                            </div>
-                        )}
-                    </div>
+            {!isCollapsed && (
+                <CardContent className="p-0">
+                    <Tabs defaultValue="cerebro" value={activeTab} onValueChange={setActiveTab} className="w-full">
+                        <div className="px-3 pt-2">
+                            <TabsList className="grid w-full grid-cols-3 h-6 bg-slate-900/80 rounded-md p-0.5">
+                                <TabsTrigger value="cerebro" className="text-[9px] px-1 data-[state=active]:bg-indigo-600 data-[state=active]:text-white rounded-sm">CEREBRO AI</TabsTrigger>
+                                <TabsTrigger value="history" className="text-[9px] px-1 data-[state=active]:bg-orange-600 data-[state=active]:text-white rounded-sm">HISTORY</TabsTrigger>
+                                <TabsTrigger value="analysis" className="text-[9px] px-1 data-[state=active]:bg-teal-600 data-[state=active]:text-white rounded-sm">ANALYSIS</TabsTrigger>
+                            </TabsList>
+                        </div>
+
+                        {/* Common Position Filters */}
+                        <div className="px-3 py-1 flex items-center gap-1 overflow-x-auto pb-1 scrollbar-hide border-b border-white/5">
+                            {Object.entries(POSITION_ICONS).filter(([k]) => k !== 'history').map(([pos, { label, color }]) => {
+                                const isSelected = pos === 'All' ? positionFilters.size === 0 : positionFilters.has(pos);
+                                return (
+                                    <button
+                                        key={pos}
+                                        onClick={() => togglePositionFilter(pos)}
+                                        className={`px-2 h-5 rounded border transition-colors cursor-pointer text-[9px] font-bold flex items-center justify-center whitespace-nowrap ${isSelected
+                                            ? `bg-white/10 border-white/30 ${color}`
+                                            : 'bg-slate-900/50 border-slate-700/50 hover:bg-slate-800 text-slate-400'
+                                            }`}
+                                    >
+                                        {label}
+                                    </button>
+                                );
+                            })}
+                        </div>
+
+                        <div className="p-3 bg-slate-950/50">
+                            <TabsContent value="cerebro" className="mt-0">
+                                {renderGrid(cerebroSuggestions, "No AI suggestions available.")}
+                            </TabsContent>
+                            <TabsContent value="history" className="mt-0">
+                                {renderHistoryList(historySuggestions)}
+                            </TabsContent>
+                            <TabsContent value="analysis" className="mt-0">
+                                {renderAnalysisList(analysisSuggestions)}
+                            </TabsContent>
+                        </div>
+                    </Tabs>
                 </CardContent>
             )}
         </Card>
