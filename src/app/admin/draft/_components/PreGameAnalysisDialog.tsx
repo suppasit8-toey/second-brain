@@ -270,10 +270,19 @@ export default function PreGameAnalysisDialog({ open, onOpenChange, match, gameN
                             <Button
                                 onClick={onProceed}
                                 disabled={loading || analyzing}
-                                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 shadow-[0_0_30px_rgba(79,70,229,0.3)] hover:shadow-[0_0_50px_rgba(79,70,229,0.5)] transition-all"
+                                className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 shadow-[0_0_30px_rgba(79,70,229,0.3)] hover:shadow-[0_0_50px_rgba(79,70,229,0.5)] transition-all min-w-[200px]"
                             >
-                                <ArrowRight className="w-5 h-5 mr-2" />
-                                Proceed to Game Setup
+                                {loading || analyzing ? (
+                                    <>
+                                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                                        Analyzing Match...
+                                    </>
+                                ) : (
+                                    <>
+                                        <ArrowRight className="w-5 h-5 mr-2" />
+                                        Proceed to Game Setup
+                                    </>
+                                )}
                             </Button>
                         </div>
                     </div>
