@@ -313,40 +313,53 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                                 </Button>
                             </PopoverTrigger>
                             <PopoverContent className="w-auto p-2 bg-slate-900 border-slate-800 shadow-xl ml-2 mt-2" align="start" sideOffset={5}>
-                                <TabsList className="flex flex-col h-auto bg-transparent items-stretch gap-1 w-[160px]">
+                                <div className="flex flex-col h-auto bg-transparent items-stretch gap-1 w-[160px]">
                                     {seriesArray.map((num) => {
                                         const game = games.find(g => g.game_number === num)
                                         const isCreated = !!game
-                                        if (!isCreated && isMatchFinished) return null
+
+                                        // Allow seeing next potential games even if match 'finished' (e.g. 2-0 in BO3)
+                                        // if (!isCreated && isMatchFinished) return null
 
                                         const prevGame = games.find(g => g.game_number === num - 1)
                                         const isLocked = !isCreated && (num > 1 && (!prevGame || !prevGame.winner))
                                         const value = isCreated ? game.id : `new-${num}`
+                                        const isActive = activeTab === value
 
                                         return (
-                                            <TabsTrigger
+                                            <button
                                                 key={num}
-                                                value={value}
                                                 disabled={isLocked}
-                                                onClick={() => setIsGameMenuOpen(false)}
-                                                className="w-full justify-start px-4 py-2 data-[state=active]:bg-slate-800 data-[state=active]:text-white text-slate-400 hover:text-slate-200"
+                                                onClick={() => {
+                                                    setIsGameMenuOpen(false)
+                                                    onTabChange(value)
+                                                }}
+                                                className={`w-full flex items-center justify-start px-4 py-2 text-sm font-medium transition-colors rounded-md ${isActive
+                                                        ? 'bg-slate-800 text-white'
+                                                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                                                    } ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
                                             >
                                                 {isLocked ? <Lock className="w-3 h-3 mr-2 opacity-50" /> : null}
                                                 Game {num}
-                                            </TabsTrigger>
+                                            </button>
                                         )
                                     })}
                                     {isMatchFinished && (
-                                        <TabsTrigger
-                                            value="summary"
-                                            onClick={() => setIsGameMenuOpen(false)}
-                                            className="w-full justify-start px-4 py-2 text-yellow-500 data-[state=active]:bg-yellow-900/20 data-[state=active]:text-yellow-400"
+                                        <button
+                                            onClick={() => {
+                                                setIsGameMenuOpen(false)
+                                                onTabChange('summary')
+                                            }}
+                                            className={`w-full flex items-center justify-start px-4 py-2 text-sm font-medium transition-colors rounded-md ${activeTab === 'summary'
+                                                    ? 'bg-yellow-900/20 text-yellow-400'
+                                                    : 'text-yellow-500 hover:bg-yellow-900/10'
+                                                }`}
                                         >
                                             <Trophy className="w-3 h-3 mr-2" />
                                             Summary
-                                        </TabsTrigger>
+                                        </button>
                                     )}
-                                </TabsList>
+                                </div>
                             </PopoverContent>
                         </Popover>
 
@@ -551,8 +564,8 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                                 const game = games.find(g => g.game_number === num)
                                 const isCreated = !!game
 
-                                // Hiding unplayed games if match finished
-                                if (!isCreated && isMatchFinished) return null
+                                // Allow seeing next potential games even if match 'finished' (e.g. 2-0 in BO3)
+                                // if (!isCreated && isMatchFinished) return null
 
                                 const prevGame = games.find(g => g.game_number === num - 1)
                                 const isLocked = !isCreated && (num > 1 && (!prevGame || !prevGame.winner))
@@ -664,7 +677,7 @@ export default function MatchRoom({ match, heroes }: MatchRoomProps) {
                             const game = games.find(g => g.game_number === num)
                             const isCreated = !!game
 
-                            if (!isCreated && isMatchFinished) return null
+                            // if (!isCreated && isMatchFinished) return null
 
                             const value = isCreated ? game.id : `new-${num}`
 

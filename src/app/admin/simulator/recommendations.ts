@@ -9,6 +9,11 @@ export interface Recommendation {
     score: number;
     reason: string;
     type: 'synergy' | 'counter' | 'history' | 'hybrid' | 'ban';
+    matchupData?: {
+        strongAgainst: Hero[]
+        weakAgainst: Hero[]
+        synergyWith: Hero[]
+    }
 }
 
 export async function getRecommendations(
@@ -171,6 +176,15 @@ export async function getRecommendations(
         .select('*')
         .eq('version_id', versionId)
         .in('hero_a_id', allyHeroIds) // Synergy with existing allies
+
+    // [NEW] Fetch Top/Bottom Matchups GLOBALLY for Analysis (Wins > 55% or < 45%)
+    // This allows us to show "Strong Against" / "Weak Against" even if no enemies are picked yet.
+    // Optimizing: Only fetch significant matchups to keep payload small-ish.
+    const { data: globalMatchups } = await supabase
+        .from('matchups')
+        .select('hero_id, enemy_hero_id, win_rate')
+        .eq('version_id', versionId)
+        .or('win_rate.gt.54,win_rate.lt.46')
 
     // NEW: Fetch threats to OUR Team (Candidate Ban counters Our Pick)
     let threatMatchups: any[] = []
@@ -1483,12 +1497,39 @@ export async function getRecommendations(
     }
 
     const sortedRecs = availableHeroes
-        .map(h => ({
-            hero: h,
-            score: analystScores[h.id]?.score || 0,
-            reason: analystScores[h.id]?.reasons.join(' • ') || 'Solid Pick',
-            type: 'hybrid' as const
-        }))
+        .map(h => {
+            // [NEW] Enrichment: Matchup Data (Using Global Data)
+            // Strong Against: Heroes I beat (win_rate > 54)
+            const strongAgainst = globalMatchups
+                ?.filter(m => m.hero_id === h.id && m.win_rate > 54)
+                .sort((a, b) => b.win_rate - a.win_rate)
+                .map(m => heroes?.find(x => x.id === m.enemy_hero_id))
+                .filter((x): x is Hero => !!x) || []
+
+            // Weak Against: Heroes that beat ME (win_rate < 46) -> I am the hero_id, win_rate is low
+            const weakAgainst = globalMatchups
+                ?.filter(m => m.hero_id === h.id && m.win_rate < 46)
+                .sort((a, b) => a.win_rate - b.win_rate) // Lowest WR first (most dangerous)
+                .map(m => heroes?.find(x => x.id === m.enemy_hero_id))
+                .filter((x): x is Hero => !!x) || []
+
+            const synergyWith = relativeCombos
+                ?.filter(c => c.hero_b_id === h.id || c.hero_a_id === h.id)
+                .map(c => heroes?.find(x => x.id === (c.hero_b_id === h.id ? c.hero_a_id : c.hero_b_id)))
+                .filter((x): x is Hero => !!x) || []
+
+            return {
+                hero: h,
+                score: analystScores[h.id]?.score || 0,
+                reason: analystScores[h.id]?.reasons.join(' • ') || 'Solid Pick',
+                type: 'hybrid' as const,
+                matchupData: {
+                    strongAgainst: Array.from(new Set(strongAgainst)),
+                    weakAgainst: Array.from(new Set(weakAgainst)),
+                    synergyWith: Array.from(new Set(synergyWith))
+                }
+            }
+        })
         .sort((a, b) => b.score - a.score)
         .slice(0, 20)
 
@@ -1502,7 +1543,18 @@ export async function getRecommendations(
                 hero: h,
                 score: s.score,
                 reason: s.reasons.join(' • '),
-                type: 'ban'
+                type: 'ban',
+                matchupData: {
+                    strongAgainst: relativeMatchups
+                        ?.filter(m => m.hero_id === h.id && m.win_rate > 50)
+                        .map(m => heroes?.find(x => x.id === m.enemy_hero_id))
+                        .filter((x): x is Hero => !!x) || [],
+                    weakAgainst: counteredByMatchups
+                        ?.filter(m => m.hero_id === h.id)
+                        .map(m => heroes?.find(x => x.id === m.enemy_hero_id))
+                        .filter((x): x is Hero => !!x) || [],
+                    synergyWith: []
+                }
             }
         })
         .filter(Boolean)
@@ -1851,7 +1903,8 @@ function getHistoryRecommendations(
                     hero: h,
                     score: statVal, // Use the raw stat as score (e.g. 50% winrate = 50 pts)
                     reason: `Global Meta (${keyStat === 'ban_rate' ? 'Ban' : 'Win'} Rate ${statVal}%)`,
-                    type: 'history'
+                    type: 'history',
+                    matchupData: { strongAgainst: [], weakAgainst: [], synergyWith: [] }
                 })
             }
         })

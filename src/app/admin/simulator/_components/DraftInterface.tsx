@@ -22,6 +22,7 @@ import DraftSuggestionPanel from './DraftSuggestionPanel'
 import DraftTeamPanel from './DraftTeamPanel'
 import AnalysisModeManager from '../../cerebro/_components/AnalysisModeManager'
 import { DEFAULT_MODES } from '../../cerebro/constants'
+import AutoSelectAnalysisDialog from './AutoSelectAnalysisDialog'
 
 export interface DraftControls {
     togglePause: () => void;
@@ -46,6 +47,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     const [currentTab, setCurrentTab] = useState('hero')
     const [aiTab, setAiTab] = useState('suggestions')
     const [historyMode, setHistoryMode] = useState<'team' | 'global'>('team')
+    const [historyRoleFilter, setHistoryRoleFilter] = useState('ALL')
 
     // Default to 'board' on mobile
     useEffect(() => {
@@ -59,6 +61,11 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     const [redSuggestions, setRedSuggestions] = useState<any[]>([])
     const [isBlueSuggestLoading, setIsBlueSuggestLoading] = useState(false)
     const [isRedSuggestLoading, setIsRedSuggestLoading] = useState(false)
+
+    const [showAnalysisModal, setShowAnalysisModal] = useState(false)
+    const [autoSelectHero, setAutoSelectHero] = useState<Hero | null>(null)
+    const [autoSelectAnalysis, setAutoSelectAnalysis] = useState<{ aiScore: number, historyScore: number, reasons: string[], matchupData?: { strongAgainst: Hero[], weakAgainst: Hero[], synergyWith: Hero[] } } | null>(null)
+    const [autoSelectContext, setAutoSelectContext] = useState<{ remainingAllyRoles: string[], remainingEnemyRoles: string[] } | undefined>(undefined)
 
     useImperativeHandle(ref, () => ({
         togglePause,
@@ -1282,25 +1289,38 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         Promise.all([
             getRecommendations(match.version_id, currentBluePicks, currentRedPicks, bannedIds, blueGlobalBans, blueCtx, currentMode ? { layers: currentMode.layers.map((w: any) => ({ id: w.id, weight: w.weight, isActive: w.weight > 0 })) } : undefined, teamStats[game.blue_team_name?.replace(/\s*\(Bot\)\s*$/i, '') || ''] || undefined, historyMode),
             getRecommendations(match.version_id, currentRedPicks, currentBluePicks, bannedIds, redGlobalBans, redCtx, currentMode ? { layers: currentMode.layers.map((w: any) => ({ id: w.id, weight: w.weight, isActive: w.weight > 0 })) } : undefined, teamStats[game.red_team_name?.replace(/\s*\(Bot\)\s*$/i, '') || ''] || undefined, historyMode)
-        ]).then(([blueData, redData]) => {
-            // MERGE & DEDUPLICATE scores to ensure consistency with Advisor Sidebar
-            // Deduplicate Hybrid/Analyst/History lists (which may share references or contain duplicates)
+        ]).then(([blueRaw, redRaw]) => {
+            // Helper to normalize Array response to Object
+            const normalizeRecs = (data: any) => {
+                if (Array.isArray(data)) {
+                    return {
+                        smartBan: data.filter((d: any) => d.type === 'ban'),
+                        hybrid: data.filter((d: any) => d.type === 'hybrid'),
+                        historyAnalysis: data.filter((d: any) => d.type === 'history'),
+                        analyst: data.filter((d: any) => d.type === 'hybrid')
+                    }
+                }
+                return data || { smartBan: [], hybrid: [], historyAnalysis: [], analyst: [] }
+            }
+
+            const blueData = normalizeRecs(blueRaw)
+            const redData = normalizeRecs(redRaw)
+
+            if (currentStep.side === 'BLUE') setRecommendations(blueData)
+            else setRecommendations(redData)
+
+            // MERGE & DEDUPLICATE scores (Ensure consistency)
             if (blueData) {
                 const dedupedHybrid = deduplicateSuggestions(blueData.hybrid || [])
                 blueData.hybrid = dedupedHybrid
                 blueData.analyst = dedupedHybrid
-                blueData.history = dedupedHybrid
+                // Note: historyAnalysis is separate
             }
             if (redData) {
                 const dedupedHybrid = deduplicateSuggestions(redData.hybrid || [])
                 redData.hybrid = dedupedHybrid
                 redData.analyst = dedupedHybrid
-                redData.history = dedupedHybrid
             }
-
-            if (currentStep.side === 'BLUE') setRecommendations(blueData)
-            else setRecommendations(redData)
-
             // Include global bans (heroes already played in previous games) for PICK phase
             const allUnavailable = new Set([
                 ...bannedIds,
@@ -1580,6 +1600,157 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         if (selectedHero) {
             lockIn(selectedHero.id)
             setSelectedHero(null)
+        }
+    }
+
+    const handleAutoSelect = () => {
+        // Logic: Find best hero from recommendations using CONSENSUS (Intersection of AI & History)
+        const isBan = currentStep?.type === 'BAN'
+
+        // 1. Get AI Suggestions
+        const aiRecs = (isBan ? recommendations.smartBan : recommendations.hybrid) || []
+
+        // 2. Get History Suggestions
+        const historyRecs = recommendations.historyAnalysis || [] // Assuming this is populated for both phases or general history
+
+        // 3. Helper to check availability
+        const isAvailable = (heroId: string) => !unavailableIds.includes(heroId)
+
+        // 4. Find Intersection (Consensus)
+        const aiMap = new Map<string, any>(aiRecs.map((r: any) => [r.hero.id, r]))
+        const historyMap = new Map<string, any>(historyRecs.map((r: any) => [r.hero.id, r]))
+
+        const consensusCandidates: any[] = []
+
+        aiMap.forEach((aiItem: any, heroId: string) => {
+            if (historyMap.has(heroId) && isAvailable(heroId)) {
+                const historyItem = historyMap.get(heroId)
+                consensusCandidates.push({
+                    hero: aiItem.hero,
+                    // Combined Score Logic
+                    score: (aiItem.score || 0) + (historyItem.score || 0),
+                    aiScore: aiItem.score,
+                    hScore: historyItem.score,
+                    reason: `${aiItem.reason} + ${historyItem.reason}`
+                })
+            }
+        })
+
+        // Sort Consensus by Combined Score
+        consensusCandidates.sort((a, b) => b.score - a.score)
+
+        let bestHero = null
+        let pickReason = "ค่าเริ่มต้น"
+
+        if (consensusCandidates.length > 0) {
+            // Scenario A: Consensus found -> Pick top consensus
+            bestHero = consensusCandidates[0].hero
+            pickReason = `ข้อมูลตรงกัน: AI(${consensusCandidates[0].aiScore}) + ประวัติ(${consensusCandidates[0].hScore})`
+            console.log("Auto-Select: Consensus Pick", bestHero.name, "Score:", consensusCandidates[0].score)
+        } else {
+            // Scenario B: No consensus -> Fallback to top available AI pick
+            const availableAI = aiRecs.filter((r: any) => isAvailable(r.hero.id))
+            if (availableAI.length > 0) {
+                bestHero = availableAI[0].hero
+                pickReason = `AI เท่านั้น (คะแนน: ${availableAI[0].score}) - ไม่พบข้อมูลในประวัติ`
+                console.log("Auto-Select: AI Partial Pick", bestHero.name)
+            }
+        }
+
+        if (bestHero) {
+            handleHeroClick(bestHero)
+            // SHOW MODAL instead of Alert
+            setAutoSelectHero(bestHero)
+            // Flatten reasons?
+            // If consensus, we have combined string.
+            // Let's re-parse or build array properly above
+            let reasons: string[] = []
+            if (consensusCandidates.length > 0) {
+                // Try to split the combined reason string back if possible, or just pass as array?
+                // The 'reason' field in consensusCandidates was constructed as string.
+                // Better to pass raw arrays?
+                // Let's use the constructed string and split by ' + ' or ' • ' if used earlier.
+                // In handleAutoSelect above we set: reason: `${aiItem.reason} + ${historyItem.reason}`
+                // In getRecommendations, reasons are comma joined.
+                const rawReason = consensusCandidates[0].reason || ""
+                // Split by common delimiters we introduced
+                reasons = rawReason.split(/ \+ | • |, /).filter(Boolean)
+            } else if (aiRecs.length > 0) {
+                const rawReason = aiRecs.find((r: any) => r.hero.id === bestHero?.id)?.reason || ""
+                reasons = rawReason.split(/, /).filter(Boolean)
+            }
+
+            // We also need separate scores
+            const aiScore = consensusCandidates.length > 0 ? consensusCandidates[0].aiScore : (aiRecs.find((r: any) => r.hero.id === bestHero?.id)?.score || 0)
+            const hScore = consensusCandidates.length > 0 ? consensusCandidates[0].hScore : 0
+
+            // Helper to determine remaining roles
+            const getRemainingRoles = (picks: Record<string, string>) => {
+                const filledRoles = new Set<string>()
+                // Map API roles to Standard Lane Names
+                const ROLES_MAP: Record<string, string> = {
+                    'Dark Slayer': 'Dark Slayer',
+                    'DSL': 'Dark Slayer',
+                    'Slayer': 'Dark Slayer',
+                    'Fighter': 'Dark Slayer',
+                    'Warrior': 'Dark Slayer',
+
+                    'Jungle': 'Jungle',
+                    'Assassin': 'Jungle',
+
+                    'Mid': 'Mid',
+                    'Mage': 'Mid',
+
+                    'Abyssal Dragon': 'Abyssal Dragon',
+                    'Abyssal': 'Abyssal Dragon',
+                    'Marksman': 'Abyssal Dragon',
+                    'Carry': 'Abyssal Dragon',
+
+                    'Support': 'Support',
+                    'Roam': 'Support'
+                }
+                const STANDARD_LANES = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Support']
+
+                Object.values(picks).forEach(pickedId => {
+                    const hero = initialHeroes.find(h => String(h.id) === String(pickedId))
+                    if (hero && hero.main_position) {
+                        hero.main_position.forEach(pos => {
+                            const uiRole = ROLES_MAP[pos] || ROLES_MAP[pos.replace(' Lane', '')]
+                            if (uiRole) filledRoles.add(uiRole)
+                        })
+                    }
+                })
+
+                return STANDARD_LANES.filter(r => !filledRoles.has(r))
+            }
+
+            const currentAllyPicks = isBan ? (currentStep?.side === 'BLUE' ? state.bluePicks : state.redPicks) : (currentStep?.side === 'BLUE' ? state.bluePicks : state.redPicks)
+            const currentEnemyPicks = isBan ? (currentStep?.side === 'BLUE' ? state.redPicks : state.bluePicks) : (currentStep?.side === 'BLUE' ? state.redPicks : state.bluePicks)
+
+            // For BAN phase context:
+            // allyPicks -> The team banning
+            // But usually in ban phase picks are empty or partial.
+            // We show what we NEED.
+
+            setAutoSelectContext({
+                remainingAllyRoles: getRemainingRoles(currentAllyPicks),
+                remainingEnemyRoles: getRemainingRoles(currentEnemyPicks)
+            })
+
+            // Extract Matchup Data from AI Recs or Consensus
+            const aiRecMatch = aiRecs.find((r: any) => r.hero.id === bestHero?.id)
+            const matchupData = aiRecMatch?.matchupData || (consensusCandidates.length > 0 ? consensusCandidates[0].matchupData : undefined)
+
+            setAutoSelectAnalysis({
+                aiScore,
+                historyScore: hScore,
+                reasons,
+                matchupData
+            })
+            setShowAnalysisModal(true)
+        } else {
+            // console.log("No auto-recommendation available")
+            alert("ไม่พบคำแนะนำอัตโนมัติจาก Cerebro หรือ ประวัติการเล่น")
         }
     }
 
@@ -1935,6 +2106,15 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 <div className={`text-4xl font-mono font-black tracking-tighter w-20 text-center ${state.timer <= 10 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
                     {state.timer}
                 </div>
+                {!state.isFinished && !state.isPaused && (
+                    <Button
+                        size="icon"
+                        className="h-12 w-12 shrink-0 bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(99,102,241,0.5)] border border-indigo-400 rounded-lg"
+                        onClick={handleAutoSelect}
+                    >
+                        <Brain className="w-6 h-6" />
+                    </Button>
+                )}
                 <Button
                     size="default"
                     className={`flex-1 h-12 text-lg font-black tracking-widest bg-slate-100 text-slate-900 hover:bg-white hover:scale-[1.02] active:scale-[0.98] transition-all
@@ -2071,10 +2251,22 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 </div>
 
                 {/* Desktop Lock In Button (Hidden on Mobile) */}
-                <div className="hidden lg:flex justify-center shrink-0 bg-slate-900/50 p-0.5">
+                <div className="hidden lg:flex justify-center shrink-0 bg-slate-900/50 p-0.5 gap-2">
+                    {!state.isFinished && !state.isPaused && (
+                        <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-12 px-0 border-indigo-500/30 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/20 hover:border-indigo-500/50"
+                            title="Auto Select (AI Best Pick)"
+                            onClick={handleAutoSelect}
+                        >
+                            <Brain className="w-4 h-4" />
+                        </Button>
+                    )}
+
                     <Button
                         size="sm"
-                        className={`w-full h-8 font-bold ${state.isFinished
+                        className={`flex-1 h-8 font-bold ${state.isFinished
                             ? 'bg-green-600 hover:bg-green-700 animate-pulse text-white'
                             : state.isPaused
                                 ? 'bg-indigo-600 hover:bg-indigo-700 text-white animate-pulse'
@@ -2406,19 +2598,19 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     </h3>
                                 </div>
 
-                                <TabsList className="bg-slate-950/60 border-b border-indigo-500/20 p-0.5 h-auto min-h-[36px] w-full md:w-auto flex flex-wrap justify-start gap-1 backdrop-blur-sm">
-                                    <TabsTrigger value="suggestions" title="Suggestion" className="w-9 h-9 px-0 data-[state=active]:bg-indigo-600/20 data-[state=active]:text-indigo-300 data-[state=active]:border-indigo-500/50 data-[state=active]:shadow-[0_0_10px_rgba(99,102,241,0.3)] border border-transparent text-slate-500 hover:text-indigo-400 hover:bg-indigo-950/30 transition-all shrink-0"><Home className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="meta" title="Meta Analysis" className="w-9 h-9 px-0 data-[state=active]:bg-purple-600/20 data-[state=active]:text-purple-300 data-[state=active]:border-purple-500/50 data-[state=active]:shadow-[0_0_10px_rgba(168,85,247,0.3)] border border-transparent text-slate-500 hover:text-purple-400 hover:bg-purple-950/30 transition-all shrink-0"><Globe className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="history" title="Global Bans (History)" className="w-9 h-9 px-0 data-[state=active]:bg-slate-700/40 data-[state=active]:text-slate-200 data-[state=active]:border-slate-500/50 data-[state=active]:shadow-[0_0_10px_rgba(148,163,184,0.3)] border border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/30 transition-all shrink-0"><History className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="counter" title="Counter Matchups" className="w-9 h-9 px-0 data-[state=active]:bg-red-600/20 data-[state=active]:text-red-300 data-[state=active]:border-red-500/50 data-[state=active]:shadow-[0_0_10px_rgba(248,113,113,0.3)] border border-transparent text-slate-500 hover:text-red-400 hover:bg-red-950/30 transition-all shrink-0"><Swords className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="comfort" title="Team Hero Pool" className="w-9 h-9 px-0 data-[state=active]:bg-blue-600/20 data-[state=active]:text-blue-300 data-[state=active]:border-blue-500/50 data-[state=active]:shadow-[0_0_10px_rgba(59,130,246,0.3)] border border-transparent text-slate-500 hover:text-blue-400 hover:bg-blue-950/30 transition-all shrink-0"><Users className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="opponent-pool" title="Opponent Pool" className="w-9 h-9 px-0 data-[state=active]:bg-yellow-600/20 data-[state=active]:text-yellow-300 data-[state=active]:border-yellow-500/50 data-[state=active]:shadow-[0_0_10px_rgba(234,179,8,0.3)] border border-transparent text-slate-500 hover:text-yellow-400 hover:bg-yellow-950/30 transition-all shrink-0"><Eye className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="roster" title="Roster Dominance" className="w-9 h-9 px-0 data-[state=active]:bg-cyan-600/20 data-[state=active]:text-cyan-300 data-[state=active]:border-cyan-500/50 data-[state=active]:shadow-[0_0_10px_rgba(34,211,238,0.3)] border border-transparent text-slate-500 hover:text-cyan-400 hover:bg-cyan-950/30 transition-all shrink-0"><Target className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="ban" title="Ban Strategy" className="w-9 h-9 px-0 data-[state=active]:bg-orange-600/20 data-[state=active]:text-orange-300 data-[state=active]:border-orange-500/50 data-[state=active]:shadow-[0_0_10px_rgba(249,115,22,0.3)] border border-transparent text-slate-500 hover:text-orange-400 hover:bg-orange-950/30 transition-all shrink-0"><ShieldBan className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="composition" title="Draft Composition" className="w-9 h-9 px-0 data-[state=active]:bg-pink-600/20 data-[state=active]:text-pink-300 data-[state=active]:border-pink-500/50 data-[state=active]:shadow-[0_0_10px_rgba(236,72,153,0.3)] border border-transparent text-slate-500 hover:text-pink-400 hover:bg-pink-950/30 transition-all shrink-0"><Brain className="w-5 h-5" /></TabsTrigger>
-                                    <TabsTrigger value="synergy" title="Synergies" className="w-9 h-9 px-0 data-[state=active]:bg-emerald-600/20 data-[state=active]:text-emerald-300 data-[state=active]:border-emerald-500/50 data-[state=active]:shadow-[0_0_10px_rgba(16,185,129,0.3)] border border-transparent text-slate-500 hover:text-emerald-400 hover:bg-emerald-950/30 transition-all shrink-0"><LinkIcon className="w-5 h-5" /></TabsTrigger>
+                                <TabsList className="bg-slate-950/60 border-b border-indigo-500/20 p-0.5 h-auto min-h-[36px] w-full md:w-auto flex flex-nowrap overflow-x-auto justify-start gap-1 backdrop-blur-sm">
+                                    <TabsTrigger value="suggestions" title="Suggestion" className="w-9 h-9 px-0 data-[state=active]:bg-indigo-600/20 data-[state=active]:text-indigo-300 data-[state=active]:border-indigo-500/50 data-[state=active]:shadow-[0_0_10px_rgba(99,102,241,0.3)] border border-transparent text-slate-500 hover:text-indigo-400 hover:bg-indigo-950/30 transition-all shrink-0"><Home className="w-6 h-6" /></TabsTrigger>
+                                    <TabsTrigger value="meta" title="Meta Analysis" className="w-9 h-9 px-0 data-[state=active]:bg-purple-600/20 data-[state=active]:text-purple-300 data-[state=active]:border-purple-500/50 data-[state=active]:shadow-[0_0_10px_rgba(168,85,247,0.3)] border border-transparent text-slate-500 hover:text-purple-400 hover:bg-purple-950/30 transition-all shrink-0"><Globe className="w-6 h-6" /></TabsTrigger>
+                                    <TabsTrigger value="history" title="Global Bans (History)" className="w-9 h-9 px-0 data-[state=active]:bg-slate-700/40 data-[state=active]:text-slate-200 data-[state=active]:border-slate-500/50 data-[state=active]:shadow-[0_0_10px_rgba(148,163,184,0.3)] border border-transparent text-slate-500 hover:text-slate-300 hover:bg-slate-800/30 transition-all shrink-0"><History className="w-6 h-6" /></TabsTrigger>
+                                    <TabsTrigger value="counter" title="Counter Matchups" className="w-9 h-9 px-0 data-[state=active]:bg-red-600/20 data-[state=active]:text-red-300 data-[state=active]:border-red-500/50 data-[state=active]:shadow-[0_0_10px_rgba(248,113,113,0.3)] border border-transparent text-slate-500 hover:text-red-400 hover:bg-red-950/30 transition-all shrink-0"><Swords className="w-6 h-6" /></TabsTrigger>
+                                    <TabsTrigger value="comfort" title="Team Hero Pool" className="w-9 h-9 px-0 data-[state=active]:bg-blue-600/20 data-[state=active]:text-blue-300 data-[state=active]:border-blue-500/50 data-[state=active]:shadow-[0_0_10px_rgba(59,130,246,0.3)] border border-transparent text-slate-500 hover:text-blue-400 hover:bg-blue-950/30 transition-all shrink-0"><Users className="w-6 h-6" /></TabsTrigger>
+                                    <TabsTrigger value="opponent-pool" title="Opponent Pool" className="w-9 h-9 px-0 data-[state=active]:bg-yellow-600/20 data-[state=active]:text-yellow-300 data-[state=active]:border-yellow-500/50 data-[state=active]:shadow-[0_0_10px_rgba(234,179,8,0.3)] border border-transparent text-slate-500 hover:text-yellow-400 hover:bg-yellow-950/30 transition-all shrink-0"><Eye className="w-6 h-6" /></TabsTrigger>
+                                    <TabsTrigger value="roster" title="Roster Dominance" className="w-9 h-9 px-0 data-[state=active]:bg-cyan-600/20 data-[state=active]:text-cyan-300 data-[state=active]:border-cyan-500/50 data-[state=active]:shadow-[0_0_10px_rgba(34,211,238,0.3)] border border-transparent text-slate-500 hover:text-cyan-400 hover:bg-cyan-950/30 transition-all shrink-0"><Target className="w-6 h-6" /></TabsTrigger>
+                                    <TabsTrigger value="ban" title="Ban Strategy" className="w-9 h-9 px-0 data-[state=active]:bg-orange-600/20 data-[state=active]:text-orange-300 data-[state=active]:border-orange-500/50 data-[state=active]:shadow-[0_0_10px_rgba(249,115,22,0.3)] border border-transparent text-slate-500 hover:text-orange-400 hover:bg-orange-950/30 transition-all shrink-0"><ShieldBan className="w-6 h-6" /></TabsTrigger>
+                                    <TabsTrigger value="composition" title="Draft Composition" className="w-9 h-9 px-0 data-[state=active]:bg-pink-600/20 data-[state=active]:text-pink-300 data-[state=active]:border-pink-500/50 data-[state=active]:shadow-[0_0_10px_rgba(236,72,153,0.3)] border border-transparent text-slate-500 hover:text-pink-400 hover:bg-pink-950/30 transition-all shrink-0"><Brain className="w-6 h-6" /></TabsTrigger>
+                                    <TabsTrigger value="synergy" title="Synergies" className="w-9 h-9 px-0 data-[state=active]:bg-emerald-600/20 data-[state=active]:text-emerald-300 data-[state=active]:border-emerald-500/50 data-[state=active]:shadow-[0_0_10px_rgba(16,185,129,0.3)] border border-transparent text-slate-500 hover:text-emerald-400 hover:bg-emerald-950/30 transition-all shrink-0"><LinkIcon className="w-6 h-6" /></TabsTrigger>
 
-                                    <TabsTrigger value="analysis" title="Analysis Config" className="w-9 h-9 px-0 data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-[0_0_10px_rgba(255,255,255,0.1)] border border-transparent text-slate-500 hover:text-slate-300 transition-all shrink-0"><Settings2 className="w-5 h-5" /></TabsTrigger>
+                                    <TabsTrigger value="analysis" title="Analysis Config" className="w-9 h-9 px-0 data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:shadow-[0_0_10px_rgba(255,255,255,0.1)] border border-transparent text-slate-500 hover:text-slate-300 transition-all shrink-0"><Settings2 className="w-6 h-6" /></TabsTrigger>
                                 </TabsList>
                             </div>
 
@@ -3838,36 +4030,54 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     </TabsContent>
 
                     {/* Tab 4: HISTORY & REPAIR */}
-                    <TabsContent value="history-repair" className="flex-1 flex flex-col min-h-0 bg-slate-950/80 backdrop-blur-md border border-teal-500/20 shadow-[0_0_20px_rgba(20,184,166,0.1)] rounded-xl p-4 data-[state=active]:flex m-0 overflow-y-auto mb-14 lg:mb-0 relative before:absolute before:inset-0 before:bg-[url('/grid-pattern.svg')] before:opacity-5">
-                        <div className="flex items-center justify-between mb-4 z-10 sticky top-0 bg-slate-950/80 p-2 rounded-lg border border-slate-800 backdrop-blur-sm">
-                            <h4 className="text-[10px] font-bold text-teal-400 uppercase tracking-widest flex items-center gap-2">
-                                <FileClock className="w-3 h-3" /> Play History & Repair
-                            </h4>
+                    <TabsContent value="history-repair" className="flex-1 min-h-0 bg-slate-950/80 backdrop-blur-md border border-teal-500/20 shadow-[0_0_20px_rgba(20,184,166,0.1)] rounded-xl p-2 data-[state=active]:flex flex-col m-0 overflow-hidden mb-14 lg:mb-0 relative before:absolute before:inset-0 before:bg-[url('/grid-pattern.svg')] before:opacity-5">
+                        <div className="flex flex-col gap-2 shrink-0 mb-2 z-10 bg-slate-950/80 p-2 rounded-lg border border-slate-800 backdrop-blur-sm">
+                            <div className="flex items-center justify-between">
+                                <h4 className="text-[10px] font-bold text-teal-400 uppercase tracking-widest flex items-center gap-2">
+                                    <FileClock className="w-3 h-3" /> Play History & Repair
+                                </h4>
 
-                            {/* Data Mode Toggle */}
-                            <div className="flex bg-slate-900 rounded p-0.5 border border-slate-700">
-                                <button
-                                    onClick={() => setHistoryMode('team')}
-                                    className={`px-2 py-1 text-[9px] font-bold rounded transition-all ${historyMode === 'team'
-                                        ? 'bg-teal-600 text-white shadow shadow-teal-500/20'
-                                        : 'text-slate-500 hover:text-slate-300'
-                                        }`}
-                                >
-                                    MY TEAM
-                                </button>
-                                <button
-                                    onClick={() => setHistoryMode('global')}
-                                    className={`px-2 py-1 text-[9px] font-bold rounded transition-all ${historyMode === 'global'
-                                        ? 'bg-indigo-600 text-white shadow shadow-indigo-500/20'
-                                        : 'text-slate-500 hover:text-slate-300'
-                                        }`}
-                                >
-                                    GLOBAL
-                                </button>
+                                {/* Data Mode Toggle */}
+                                <div className="flex bg-slate-900 rounded p-0.5 border border-slate-700">
+                                    <button
+                                        onClick={() => setHistoryMode('team')}
+                                        className={`px-2 py-1 text-[9px] font-bold rounded transition-all ${historyMode === 'team'
+                                            ? 'bg-teal-600 text-white shadow shadow-teal-500/20'
+                                            : 'text-slate-500 hover:text-slate-300'
+                                            }`}
+                                    >
+                                        MY TEAM
+                                    </button>
+                                    <button
+                                        onClick={() => setHistoryMode('global')}
+                                        className={`px-2 py-1 text-[9px] font-bold rounded transition-all ${historyMode === 'global'
+                                            ? 'bg-indigo-600 text-white shadow shadow-indigo-500/20'
+                                            : 'text-slate-500 hover:text-slate-300'
+                                            }`}
+                                    >
+                                        GLOBAL
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Role Filter */}
+                            <div className="flex gap-1 overflow-x-auto pb-1">
+                                {['ALL', 'DS', 'JG', 'MID', 'AB', 'SP'].map(role => (
+                                    <button
+                                        key={role}
+                                        onClick={() => setHistoryRoleFilter(role)}
+                                        className={`px-2 py-1 text-[9px] font-bold rounded border whitespace-nowrap ${historyRoleFilter === role
+                                            ? 'bg-teal-600 text-white border-teal-500 shadow shadow-teal-500/20'
+                                            : 'bg-slate-900 text-slate-400 border-slate-700 hover:bg-slate-800'
+                                            }`}
+                                    >
+                                        {role === 'DS' ? 'DSL' : role === 'JG' ? 'JUG' : role === 'AB' ? 'ADL' : role === 'SP' ? 'SUP' : role}
+                                    </button>
+                                ))}
                             </div>
                         </div>
 
-                        <div className="space-y-4">
+                        <ScrollArea className="flex-1 min-h-0 bg-slate-950/40 rounded-lg p-2 border border-slate-800/50 overflow-y-auto max-h-[calc(100vh-350px)] lg:max-h-[calc(100vh-400px)] shadow-inner shadow-black/50">
                             {/* Loading State */}
                             {isLoadingRecommendations && (
                                 <div className="text-center py-8">
@@ -3879,56 +4089,69 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                             {/* Recommendations List */}
                             {!isLoadingRecommendations && recommendations.historyAnalysis && recommendations.historyAnalysis.length > 0 && (
                                 <div className="grid grid-cols-1 gap-2">
-                                    {recommendations.historyAnalysis.slice(0, 8).map((rec: any, idx: number) => (
-                                        <div
-                                            key={rec.hero.id}
-                                            onClick={() => handleHeroClick(rec.hero)}
-                                            className="group bg-slate-900/40 p-2 rounded-lg border border-slate-800 hover:border-teal-500/50 hover:bg-teal-950/10 transition-all cursor-pointer flex items-center gap-3 relative overflow-hidden"
-                                        >
-                                            {/* Score Bar Background */}
+                                    {recommendations.historyAnalysis
+                                        .filter((rec: any) => {
+                                            if (historyRoleFilter === 'ALL') return true;
+                                            const roleMap: Record<string, string> = {
+                                                'DS': 'Dark Slayer',
+                                                'JG': 'Jungle',
+                                                'MID': 'Mid',
+                                                'AB': 'Abyssal Dragon',
+                                                'SP': 'Roam'
+                                            }
+                                            const targetRole = roleMap[historyRoleFilter]
+                                            return rec.hero.main_position?.includes(targetRole) || rec.hero.main_position?.includes(targetRole === 'Abyssal Dragon' ? 'Abyssal' : targetRole)
+                                        })
+                                        .map((rec: any, idx: number) => (
                                             <div
-                                                className="absolute left-0 top-0 bottom-0 bg-teal-500/5 transition-all group-hover:bg-teal-500/10"
-                                                style={{ width: `${Math.min(rec.score, 100)}%` }}
-                                            />
-
-                                            {/* Hero Icon */}
-                                            <div className="relative shrink-0">
-                                                <Image
-                                                    src={rec.hero.icon_url || rec.hero.icon || ''}
-                                                    alt={rec.hero.name}
-                                                    width={32}
-                                                    height={32}
-                                                    className="rounded-md border border-slate-700 group-hover:border-teal-400/50 transition-colors"
+                                                key={rec.hero.id}
+                                                onClick={() => handleHeroClick(rec.hero)}
+                                                className="group bg-slate-900/40 p-2 rounded-lg border border-slate-800 hover:border-teal-500/50 hover:bg-teal-950/10 transition-all cursor-pointer flex items-center gap-3 relative overflow-hidden"
+                                            >
+                                                {/* Score Bar Background */}
+                                                <div
+                                                    className="absolute left-0 top-0 bottom-0 bg-teal-500/5 transition-all group-hover:bg-teal-500/10"
+                                                    style={{ width: `${Math.min(rec.score, 100)}%` }}
                                                 />
-                                                <div className="absolute -top-1 -left-1 bg-slate-950 text-slate-400 text-[8px] font-mono border border-slate-800 rounded px-1 group-hover:text-teal-400 group-hover:border-teal-500/50">
-                                                    #{idx + 1}
-                                                </div>
-                                            </div>
 
-                                            {/* Info */}
-                                            <div className="flex-1 min-w-0 relative z-10">
-                                                <div className="flex items-center justify-between">
-                                                    <span className="text-xs font-bold text-slate-200 group-hover:text-teal-300 transition-colors truncate">
-                                                        {rec.hero.name}
-                                                    </span>
-                                                    <span className="text-[10px] font-mono font-bold text-teal-400">
-                                                        {Math.round(rec.score)} pts
-                                                    </span>
+                                                {/* Hero Icon */}
+                                                <div className="relative shrink-0">
+                                                    <Image
+                                                        src={rec.hero.icon_url || rec.hero.icon || ''}
+                                                        alt={rec.hero.name}
+                                                        width={32}
+                                                        height={32}
+                                                        className="rounded-md border border-slate-700 group-hover:border-teal-400/50 transition-colors"
+                                                    />
+                                                    <div className="absolute -top-1 -left-1 bg-slate-950 text-slate-400 text-[8px] font-mono border border-slate-800 rounded px-1 group-hover:text-teal-400 group-hover:border-teal-500/50">
+                                                        #{idx + 1}
+                                                    </div>
                                                 </div>
-                                                <div className="text-[9px] text-slate-500 flex items-center gap-1.5 truncate">
-                                                    {rec.reason.split('•').slice(0, 2).map((r: string, i: number) => (
-                                                        <span key={i} className="flex items-center gap-1">
-                                                            {i > 0 && <span className="w-0.5 h-0.5 rounded-full bg-slate-600" />}
-                                                            {r.trim()}
+
+                                                {/* Info */}
+                                                <div className="flex-1 min-w-0 relative z-10">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-xs font-bold text-slate-200 group-hover:text-teal-300 transition-colors truncate">
+                                                            {rec.hero.name}
                                                         </span>
-                                                    ))}
+                                                        <span className="text-[10px] font-mono font-bold text-teal-400">
+                                                            {Math.round(rec.score)} pts
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-[9px] text-slate-500 flex items-center gap-1.5 truncate">
+                                                        {rec.reason.split('•').slice(0, 2).map((r: string, i: number) => (
+                                                            <span key={i} className="flex items-center gap-1">
+                                                                {i > 0 && <span className="w-0.5 h-0.5 rounded-full bg-slate-600" />}
+                                                                {r.trim()}
+                                                            </span>
+                                                        ))}
+                                                    </div>
                                                 </div>
-                                            </div>
 
-                                            {/* Action Arrow */}
-                                            <ChevronUp className="w-4 h-4 text-slate-600 group-hover:text-teal-400 rotate-90 transition-all opacity-0 group-hover:opacity-100 -ml-2" />
-                                        </div>
-                                    ))}
+                                                {/* Action Arrow */}
+                                                <ChevronUp className="w-4 h-4 text-slate-600 group-hover:text-teal-400 rotate-90 transition-all opacity-0 group-hover:opacity-100 -ml-2" />
+                                            </div>
+                                        ))}
                                 </div>
                             )}
 
@@ -3939,10 +4162,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     <p className="text-xs text-slate-500">No specific history/repair data found.</p>
                                 </div>
                             )}
-
-                            {/* Section 2: Draft Repair (Static / Logic to be added later if separate from list) */}
-                            {/* We merged repair logic into the main list as "Counter" or "Synergy" reasons, so separate block might be redundant or can be a summary */}
-                        </div>
+                        </ScrollArea>
                     </TabsContent>
                 </Tabs>
 
@@ -4020,6 +4240,14 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 />
             </div >
 
+            {/* Auto-Select Analysis Modal */}
+            <AutoSelectAnalysisDialog
+                isOpen={showAnalysisModal}
+                onClose={() => setShowAnalysisModal(false)}
+                hero={autoSelectHero}
+                analysis={autoSelectAnalysis}
+                context={autoSelectContext}
+            />
         </div >
 
 
