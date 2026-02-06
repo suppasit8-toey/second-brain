@@ -62,32 +62,32 @@ export default function RoadmapPage() {
                 <TabsList className="grid w-full grid-cols-3 bg-[#0B0B15] border border-white/5 p-1 h-auto mb-8">
                     <TabsTrigger
                         value="developer"
-                        className="data-[state=active]:bg-[#1A1A2E] data-[state=active]:text-cyan-400 py-3 text-slate-400 flex items-center gap-2 transition-all duration-300"
+                        className="data-[state=active]:bg-[#1A1A2E] data-[state=active]:text-cyan-400 py-3 text-slate-400 flex flex-col md:flex-row items-center justify-center md:justify-start gap-1 md:gap-2 transition-all duration-300"
                     >
-                        <Code2 className="w-4 h-4" />
-                        <div className="flex flex-col items-start text-left">
-                            <span className="font-bold">DEVELOPER</span>
-                            <span className="text-[10px] font-normal opacity-70">App Building & Features</span>
+                        <Code2 className="w-4 h-4 mb-1 md:mb-0" />
+                        <div className="flex flex-col items-center md:items-start text-center md:text-left">
+                            <span className="font-bold text-[10px] md:text-sm">DEVELOPER</span>
+                            <span className="hidden md:block text-[10px] font-normal opacity-70">App Building & Features</span>
                         </div>
                     </TabsTrigger>
                     <TabsTrigger
                         value="professor"
-                        className="data-[state=active]:bg-[#1A1A2E] data-[state=active]:text-purple-400 py-3 text-slate-400 flex items-center gap-2 transition-all duration-300"
+                        className="data-[state=active]:bg-[#1A1A2E] data-[state=active]:text-purple-400 py-3 text-slate-400 flex flex-col md:flex-row items-center justify-center md:justify-start gap-1 md:gap-2 transition-all duration-300"
                     >
-                        <GraduationCap className="w-4 h-4" />
-                        <div className="flex flex-col items-start text-left">
-                            <span className="font-bold">PROFESSOR</span>
-                            <span className="text-[10px] font-normal opacity-70">Knowledge Base & Data</span>
+                        <GraduationCap className="w-4 h-4 mb-1 md:mb-0" />
+                        <div className="flex flex-col items-center md:items-start text-center md:text-left">
+                            <span className="font-bold text-[10px] md:text-sm">PROFESSOR</span>
+                            <span className="hidden md:block text-[10px] font-normal opacity-70">Knowledge Base & Data</span>
                         </div>
                     </TabsTrigger>
                     <TabsTrigger
                         value="tester"
-                        className="data-[state=active]:bg-[#1A1A2E] data-[state=active]:text-green-400 py-3 text-slate-400 flex items-center gap-2 transition-all duration-300"
+                        className="data-[state=active]:bg-[#1A1A2E] data-[state=active]:text-green-400 py-3 text-slate-400 flex flex-col md:flex-row items-center justify-center md:justify-start gap-1 md:gap-2 transition-all duration-300"
                     >
-                        <Bug className="w-4 h-4" />
-                        <div className="flex flex-col items-start text-left">
-                            <span className="font-bold">SYSTEM TESTER</span>
-                            <span className="text-[10px] font-normal opacity-70">QA & Bug Hunting</span>
+                        <Bug className="w-4 h-4 mb-1 md:mb-0" />
+                        <div className="flex flex-col items-center md:items-start text-center md:text-left">
+                            <span className="font-bold text-[10px] md:text-sm">SYSTEM TESTER</span>
+                            <span className="hidden md:block text-[10px] font-normal opacity-70">QA & Bug Hunting</span>
                         </div>
                     </TabsTrigger>
                 </TabsList>
