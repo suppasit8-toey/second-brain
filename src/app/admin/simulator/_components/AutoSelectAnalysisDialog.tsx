@@ -153,7 +153,7 @@ export default function AutoSelectAnalysisDialog({ isOpen, onClose, hero, analys
                                 defaultOpen={true}
                             >
                                 <div className="grid grid-cols-1 gap-2">
-                                    {context.enemyMatchups.map((matchup, i) => (
+                                    {(context?.enemyMatchups || []).map((matchup, i) => (
                                         <div key={i} className={`flex items-center gap-3 p-2 rounded-lg border ${matchup.advantage === 'Strong' ? 'bg-green-950/30 border-green-500/30' : matchup.advantage === 'Weak' ? 'bg-red-950/30 border-red-500/30' : 'bg-slate-950/50 border-white/10'}`}>
                                             {/* Enemy Hero */}
                                             <div className="relative">
