@@ -14,6 +14,7 @@ interface DraftTeamPanelProps {
     getHero: (id: string) => Hero | undefined
     manualLanes: Record<string, string[]>
     onLaneAssign: (heroId: string, lane: string) => void
+    onAnalyzeHero?: (hero: Hero) => void
     suggestionProps: {
         suggestions: any[]
         isLoading: boolean
@@ -35,6 +36,7 @@ export default function DraftTeamPanel({
     getHero,
     manualLanes,
     onLaneAssign,
+    onAnalyzeHero,
     suggestionProps
 }: DraftTeamPanelProps) {
     const isBlue = side === 'BLUE'
@@ -105,7 +107,11 @@ export default function DraftTeamPanel({
                     const preview = isActive && selectedHero ? selectedHero : null
 
                     return (
-                        <div key={i} className={`relative flex flex-col ${bgBase} border rounded-xl overflow-hidden shrink-0 transition-all duration-300 ${preview ? `${borderActive} ${shadowActive} scale-[1.02]` : borderBase}`}>
+                        <div
+                            key={i}
+                            onClick={() => hero && onAnalyzeHero?.(hero)}
+                            className={`relative flex flex-col ${bgBase} border rounded-xl overflow-hidden shrink-0 transition-all duration-300 ${preview ? `${borderActive} ${shadowActive} scale-[1.02]` : borderBase} ${hero ? 'cursor-pointer hover:border-indigo-400 hover:shadow-md' : ''}`}
+                        >
                             <div className="h-12 md:h-14 flex items-center px-3 relative overflow-hidden flex-row-reverse text-right shrink-0">
                                 {hero ? (
                                     <>

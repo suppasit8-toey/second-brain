@@ -28,6 +28,7 @@ export async function getHeroesByVersion(versionId: number) {
       hero_stats!inner (
         power_spike,
         win_rate,
+        tier,
         version_id
       )
     `)

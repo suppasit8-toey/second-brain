@@ -13,6 +13,12 @@ export interface Recommendation {
         strongAgainst: Hero[]
         weakAgainst: Hero[]
         synergyWith: Hero[]
+        specificMatchups?: {    // [NEW] Detailed matchup data matching /admin/matchups
+            enemyId: string
+            position: string
+            enemyPosition: string
+            winRate: number
+        }[]
     }
 }
 
@@ -40,7 +46,8 @@ export async function getRecommendations(
             RED?: { pickOrderStats?: Record<number, Record<string, number>> };
         };
     }, // Draft Strategy Analysis data from CEREBRO
-    mode: 'team' | 'global' = 'team' // NEW: Toggle between Team Specific and Global Meta data
+    mode: 'team' | 'global' = 'team', // NEW: Toggle between Team Specific and Global Meta data
+    explicitHeroId?: string // NEW: ID of specific hero to analyze (bypasses availability check)
 ) {
     const supabase = await createClient()
 
@@ -50,6 +57,7 @@ export async function getRecommendations(
     console.log("--- GET RECOMMENDATIONS CALL ---")
     console.log("Version ID:", versionId)
     console.log("Context:", context)
+    if (explicitHeroId) console.log("Explicit Analysis Target:", explicitHeroId)
 
     // REVISED STRATEGY: Fetch ALL heroes, and LEFT JOIN stats for this version.
     let { data: heroes, error } = await supabase
@@ -107,10 +115,11 @@ export async function getRecommendations(
     }
 
     const availableHeroes = heroes.filter(h =>
-        !allyHeroIds.includes(h.id) &&
-        !enemyHeroIds.includes(h.id) &&
-        !bannedHeroIds.includes(h.id) &&
-        !allyGlobalBans.includes(h.id)
+        (h.id === explicitHeroId) ||
+        (!allyHeroIds.includes(h.id) &&
+            !enemyHeroIds.includes(h.id) &&
+            !bannedHeroIds.includes(h.id) &&
+            !allyGlobalBans.includes(h.id))
     )
     console.log("Available Heroes:", availableHeroes.length)
 
@@ -154,21 +163,23 @@ export async function getRecommendations(
     }
 
     // --- 2. MATCHUPS & COMBOS (Global & Contextual) ---
-    // Fetch relevant matchups (Advantage vs Enemy - we counter them)
-    const { data: relativeMatchups } = await supabase
+    // Fetch ALL relevant matchups against current enemy team
+    const { data: allVsEnemyMatchups } = await supabase
         .from('matchups')
         .select('*')
         .eq('version_id', versionId)
-        .in('enemy_hero_id', enemyHeroIds) // We usually look for "Us vs Them" where Them is Enemy
-        .gt('win_rate', 50) // Only good matchups (we counter them)
+        .in('enemy_hero_id', enemyHeroIds)
 
-    // Fetch matchups where enemy counters us (we lose to them)
+    // Derived lists for legacy logic
+    const relativeMatchups = allVsEnemyMatchups?.filter(m => m.win_rate > 50) || []
+    const counteredByMatchups = allVsEnemyMatchups?.filter(m => m.win_rate < 50) || []
+
+    /* 
+    const { data: relativeMatchups } = await supabase
+        ...
     const { data: counteredByMatchups } = await supabase
-        .from('matchups')
-        .select('*')
-        .eq('version_id', versionId)
-        .in('enemy_hero_id', enemyHeroIds) // Looking for matchups vs enemy heroes
-        .lt('win_rate', 50) // Bad matchups (enemy counters us)
+        ...
+    */
 
     // Fetch relevant combos (Synergy with Ally)
     const { data: relativeCombos } = await supabase
@@ -1526,7 +1537,15 @@ export async function getRecommendations(
                 matchupData: {
                     strongAgainst: Array.from(new Set(strongAgainst)),
                     weakAgainst: Array.from(new Set(weakAgainst)),
-                    synergyWith: Array.from(new Set(synergyWith))
+                    synergyWith: Array.from(new Set(synergyWith)),
+                    specificMatchups: allVsEnemyMatchups
+                        ?.filter(m => m.hero_id === h.id)
+                        .map(m => ({
+                            enemyId: m.enemy_hero_id,
+                            position: m.position,
+                            enemyPosition: m.enemy_position,
+                            winRate: m.win_rate
+                        })) || []
                 }
             }
         })
@@ -1697,7 +1716,7 @@ export async function getRecommendations(
         synergies,
         roster: rosterDominance,
         composition: calculateComposition(allyHeroIds, heroes),
-        historyAnalysis: getHistoryRecommendations(mode, context, availableHeroes, teamStats, enemyTeamStats, relativeMatchups || [], relativeCombos || [], effectivePhase1Bans, effectivePhase2Bans, allyHeroIds, enemyHeroIds, heroes)
+        historyAnalysis: getHistoryRecommendations(mode, context, availableHeroes, teamStats, enemyTeamStats, relativeMatchups || [], relativeCombos || [], effectivePhase1Bans, effectivePhase2Bans, allyHeroIds, enemyHeroIds, heroes, explicitHeroId)
     }
 }
 
@@ -1716,7 +1735,8 @@ function getHistoryRecommendations(
     phase2Bans: Record<string, any>,
     allyHeroIds: string[],
     enemyHeroIds: string[],
-    allHeroes: Hero[]
+    allHeroes: Hero[],
+    explicitHeroId?: string
 ) {
     const recs: Recommendation[] = []
     const isTeamMode = mode === 'team'
@@ -1911,7 +1931,20 @@ function getHistoryRecommendations(
     }
 
     // --- CONVERT SMART BAN SCORES ---
-    return recs.sort((a, b) => b.score - a.score).slice(0, 20)
+    let finalRecs = recs.sort((a, b) => b.score - a.score)
+
+    // Ensure explicit hero is available in the result set if requested
+    if (explicitHeroId) {
+        // We might need to find it from the FULL list if it was filtered out by top 20 slice
+        // But since 'recs' contains everything calculated so far...
+        const explicitRec = recs.find(r => r.hero.id === explicitHeroId)
+        if (explicitRec) {
+            // Put it at the top or just ensure it's in the return list
+            finalRecs = [explicitRec, ...finalRecs.filter(r => r.hero.id !== explicitHeroId)]
+        }
+    }
+
+    return finalRecs.slice(0, 20)
 }
 
 

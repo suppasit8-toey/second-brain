@@ -13,7 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown, RefreshCw, Users, Globe, Swords, Link as LinkIcon, User, Target, Settings2, Home, Eye, Zap, Share2, Shield, Ban, History, FileClock, Wrench, AlertTriangle } from 'lucide-react'
+import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown, RefreshCw, Users, Globe, Swords, Link as LinkIcon, User, Target, Settings2, Home, Eye, Zap, Share2, Shield, Ban, History, FileClock, Wrench, AlertTriangle, Loader2 } from 'lucide-react'
 import Image from 'next/image'
 import PostDraftResult from '@/components/draft/PostDraftResult'
 import { Input } from '@/components/ui/input'
@@ -65,7 +65,12 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     const [showAnalysisModal, setShowAnalysisModal] = useState(false)
     const [autoSelectHero, setAutoSelectHero] = useState<Hero | null>(null)
     const [autoSelectAnalysis, setAutoSelectAnalysis] = useState<{ aiScore: number, historyScore: number, reasons: string[], matchupData?: { strongAgainst: Hero[], weakAgainst: Hero[], synergyWith: Hero[] } } | null>(null)
-    const [autoSelectContext, setAutoSelectContext] = useState<{ remainingAllyRoles: string[], remainingEnemyRoles: string[] } | undefined>(undefined)
+    const [autoSelectContext, setAutoSelectContext] = useState<{
+        remainingAllyRoles: string[],
+        remainingEnemyRoles: string[],
+        enemyHeroIds?: string[],
+        enemyMatchups?: { hero: Hero, role: string, advantage: 'Strong' | 'Weak' | 'Neutral' }[]
+    } | undefined>(undefined)
 
     useImperativeHandle(ref, () => ({
         togglePause,
@@ -1022,32 +1027,30 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     });
                     protectBonus = Math.min(protectBonus, 150);
                 } else {
-                    // PHASE 1 LOGIC: History + Context
+                    // PHASE 1 LOGIC: History + Context + Meta Threats
                     // 1. History (Already in 'count')
 
-                    // 2. [New] Global Ban Context (Heroes we played already -> Opponent might ban? No, we ban opponent's heroes)
-                    // Logic: Ban heroes that opponent hasn't played but are strong?
-                    // User Request: "+ Score for heroes we played already and opponent hasn't played" 
-                    // This implies denying opponent from taking "Remaining Strong Heroes" or "Heroes we already used" (If Global BP applies to opponent?)
-                    // Usually Global BP applies to SELF. Opponent CAN pick heroes we played.
-                    // So we might want to BAN heroes we played if they are strong and we can't pick them anymore?
-                    // Yes, "Opponent hasn't played yet" + "We played".
-
-                    // Check if WE played this hero (Global Ban for US)
-                    // redGlobalBans / blueGlobalBans contains heroes WE played.
-                    // But 'heroId' is the candidate to BAN.
-                    // If 'heroId' is in 'ourGlobalBans', we can't pick it. Opponent CAN.
-                    // So it's a good ban target if it's strong.
-
-                    const isGlobalBannedForUs = protectInvalidSet.has(heroId) // Wait, protectInvalidSet includes Global Bans
-                    // We need to check pure global bans list
-                    // const globalBans = ... (Need to access from scope)
-                    // 'blueGlobalBans' is defined above.
-
+                    // 2. Global Ban Context (Deny Used Hero)
                     if (blueGlobalBans.includes(heroId)) {
                         const denyScore = 20
                         protectBonus += denyScore
                         protectReasons.push(`Deny Used Hero`)
+                    }
+
+                    // 3. [NEW] Meta & Win Rate Checks (Replicating Phase 1 Bans Logic from StrategySimulator)
+                    const stats = (hero as any).hero_stats?.[0]
+                    if (stats) {
+                        // High Win Rate (>54% -> threat)
+                        if (stats.win_rate > 54) {
+                            const threatScore = (stats.win_rate - 50) * 15
+                            protectBonus += threatScore
+                            protectReasons.push(`High WR (${stats.win_rate}%)`)
+                        }
+                        // S-Tier Meta
+                        if (stats.tier === 'S') {
+                            protectBonus += 100
+                            protectReasons.push(`S-Tier Meta`)
+                        }
                     }
                 }
 
@@ -1190,6 +1193,22 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                         const denyScore = 20
                         protectBonus += denyScore
                         protectReasons.push(`Deny Used Hero`)
+                    }
+
+                    // [NEW] Meta & Win Rate Checks (Replicating Phase 1 Bans Logic)
+                    const stats = (hero as any).hero_stats?.[0]
+                    if (stats) {
+                        // High Win Rate (>54% -> threat)
+                        if (stats.win_rate > 54) {
+                            const threatScore = (stats.win_rate - 50) * 15
+                            protectBonus += threatScore
+                            protectReasons.push(`High WR (${stats.win_rate}%)`)
+                        }
+                        // S-Tier Meta
+                        if (stats.tier === 'S') {
+                            protectBonus += 100
+                            protectReasons.push(`S-Tier Meta`)
+                        }
                     }
                 }
 
@@ -1603,6 +1622,46 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         }
     }
 
+    // Helper to determine remaining roles
+    const getRemainingRoles = (picks: Record<string, string>) => {
+        const filledRoles = new Set<string>()
+        // Map API roles to Standard Lane Names
+        const ROLES_MAP: Record<string, string> = {
+            'Dark Slayer': 'Dark Slayer',
+            'DSL': 'Dark Slayer',
+            'Slayer': 'Dark Slayer',
+            'Fighter': 'Dark Slayer',
+            'Warrior': 'Dark Slayer',
+
+            'Jungle': 'Jungle',
+            'Assassin': 'Jungle',
+
+            'Mid': 'Mid',
+            'Mage': 'Mid',
+
+            'Abyssal Dragon': 'Abyssal Dragon',
+            'Abyssal': 'Abyssal Dragon',
+            'Marksman': 'Abyssal Dragon',
+            'Carry': 'Abyssal Dragon',
+
+            'Support': 'Support',
+            'Roam': 'Support'
+        }
+        const STANDARD_LANES = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Support']
+
+        Object.values(picks).forEach(pickedId => {
+            const hero = initialHeroes.find(h => String(h.id) === String(pickedId))
+            if (hero && hero.main_position) {
+                hero.main_position.forEach(pos => {
+                    const uiRole = ROLES_MAP[pos] || ROLES_MAP[pos.replace(' Lane', '')]
+                    if (uiRole) filledRoles.add(uiRole)
+                })
+            }
+        })
+
+        return STANDARD_LANES.filter(r => !filledRoles.has(r))
+    }
+
     const handleAutoSelect = () => {
         // Logic: Find best hero from recommendations using CONSENSUS (Intersection of AI & History)
         const isBan = currentStep?.type === 'BAN'
@@ -1684,45 +1743,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             const aiScore = consensusCandidates.length > 0 ? consensusCandidates[0].aiScore : (aiRecs.find((r: any) => r.hero.id === bestHero?.id)?.score || 0)
             const hScore = consensusCandidates.length > 0 ? consensusCandidates[0].hScore : 0
 
-            // Helper to determine remaining roles
-            const getRemainingRoles = (picks: Record<string, string>) => {
-                const filledRoles = new Set<string>()
-                // Map API roles to Standard Lane Names
-                const ROLES_MAP: Record<string, string> = {
-                    'Dark Slayer': 'Dark Slayer',
-                    'DSL': 'Dark Slayer',
-                    'Slayer': 'Dark Slayer',
-                    'Fighter': 'Dark Slayer',
-                    'Warrior': 'Dark Slayer',
 
-                    'Jungle': 'Jungle',
-                    'Assassin': 'Jungle',
-
-                    'Mid': 'Mid',
-                    'Mage': 'Mid',
-
-                    'Abyssal Dragon': 'Abyssal Dragon',
-                    'Abyssal': 'Abyssal Dragon',
-                    'Marksman': 'Abyssal Dragon',
-                    'Carry': 'Abyssal Dragon',
-
-                    'Support': 'Support',
-                    'Roam': 'Support'
-                }
-                const STANDARD_LANES = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Support']
-
-                Object.values(picks).forEach(pickedId => {
-                    const hero = initialHeroes.find(h => String(h.id) === String(pickedId))
-                    if (hero && hero.main_position) {
-                        hero.main_position.forEach(pos => {
-                            const uiRole = ROLES_MAP[pos] || ROLES_MAP[pos.replace(' Lane', '')]
-                            if (uiRole) filledRoles.add(uiRole)
-                        })
-                    }
-                })
-
-                return STANDARD_LANES.filter(r => !filledRoles.has(r))
-            }
 
             const currentAllyPicks = isBan ? (currentStep?.side === 'BLUE' ? state.bluePicks : state.redPicks) : (currentStep?.side === 'BLUE' ? state.bluePicks : state.redPicks)
             const currentEnemyPicks = isBan ? (currentStep?.side === 'BLUE' ? state.redPicks : state.bluePicks) : (currentStep?.side === 'BLUE' ? state.redPicks : state.bluePicks)
@@ -1732,20 +1753,237 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             // But usually in ban phase picks are empty or partial.
             // We show what we NEED.
 
+            // Calculate Detailed Enemy Matchups
+            // Calculate Detailed Enemy Matchups
+            // 1. Get default lane prediction (logic-based)
+            // Calculate Detailed Matchups
+            // If Ban Phase: Context is "Our Team" (Threat Analysis) -> Check if Ban Candidate is Strong vs Allies
+            // If Pick Phase: Context is "Enemy Team" (Counter Analysis) -> Check if Pick Candidate is Strong vs Enemies
+
+            const targetPicksMap = isBan ? currentAllyPicks : currentEnemyPicks
+            const targetTeamName = isBan
+                ? (currentStep?.side === 'BLUE' ? match.team_a_name : match.team_b_name) // Our Name
+                : (currentStep?.side === 'BLUE' ? match.team_b_name : match.team_a_name) // Enemy Name
+
+            // 1. Get default lane prediction (logic-based) for the target team
+            const defaultTargetLanes = predictLanes(targetPicksMap)
+
+            // Clean Team Name
+            const cleanTargetTeamName = targetTeamName?.replace(/\s*\(Bot\)\s*$/i, '') || targetTeamName
+            const targetTeamStats = cleanTargetTeamName ? teamStats[cleanTargetTeamName] : undefined
+
+            const enemyMatchups = Object.values(targetPicksMap).map(targetId => {
+                const targetHero = getHero(targetId)
+                if (!targetHero) return null
+
+                // Determine Role: Try History First, then Fallback to Logic
+                let role = 'Flex'
+
+                if (targetTeamStats && targetTeamStats.heroStats && targetTeamStats.heroStats[targetId]) {
+                    // Find most played role
+                    const roleStats = targetTeamStats.heroStats[targetId].roleStats || {}
+                    let maxPicks = -1
+                    let bestRole = null
+
+                    Object.entries(roleStats).forEach(([r, stats]: [string, any]) => {
+                        if (stats.picks > maxPicks) {
+                            maxPicks = stats.picks
+                            bestRole = r
+                        }
+                    })
+
+                    if (bestRole) {
+                        role = bestRole
+                    } else {
+                        // Fallback to predictLanes
+                        role = Object.entries(defaultTargetLanes).find(([_, id]) => id === targetId)?.[0] || 'Flex'
+                    }
+                } else {
+                    // Fallback to predictLanes
+                    role = Object.entries(defaultTargetLanes).find(([_, id]) => id === targetId)?.[0] || 'Flex'
+                }
+
+                // Determine Advantage
+                // Check if recommended hero (bestHero) describes this target in their lists
+                // [UPDATED] Use detailed specificMatchups if available for precise Role vs Role lookup
+
+                const aiRecMatch = aiRecs.find((r: any) => r.hero.id === bestHero?.id)
+                const mData = aiRecMatch?.matchupData || (consensusCandidates.length > 0 ? consensusCandidates[0].matchupData : undefined)
+                const specificMatchups = mData?.specificMatchups
+
+                let advantage: 'Strong' | 'Weak' | 'Neutral' = 'Neutral'
+
+                // Need to know OUR role to query specific matchup (My Role vs Enemy Role)
+                // We haven't calculated recommendedRole yet in this scope... let's peek ahead or infer
+                // Quick inference of bestHero's likely role for this specific context
+                let myLikelyRole = 'Mid'
+                if (bestHero?.main_position) {
+                    // Try to match with remaining roles
+                    const remainingRoles = getRemainingRoles(isBan ? targetPicksMap : currentAllyPicks) // If ban, we are targetPicks? No, isBan targetPicksMap IS currentAllyPicks. Correct.
+                    const heroRoles = bestHero.main_position.map((p: string) => {
+                        if (['Dark Slayer', 'Slayer', 'DSL'].includes(p)) return 'Dark Slayer'
+                        if (['Abyssal Dragon', 'Abyssal', 'Carry'].includes(p)) return 'Abyssal Dragon'
+                        if (['Roam', 'Support'].includes(p)) return 'Roam'
+                        return p
+                    })
+                    const match = remainingRoles.find(r => heroRoles.includes(r))
+                    myLikelyRole = match || heroRoles[0] || 'Mid'
+                }
+
+                if (specificMatchups && specificMatchups.length > 0) {
+                    // Strict Lookup: MyID, MyRole, EnemyID, EnemyRole
+                    const record = specificMatchups.find((m: any) =>
+                        String(m.enemyId) === String(targetId) &&
+                        m.position === myLikelyRole &&
+                        m.enemyPosition === role // role is the Determined Role of the enemy/target
+                    )
+
+                    if (record) {
+                        if (record.winRate >= 53) advantage = 'Strong'
+                        else if (record.winRate <= 47) advantage = 'Weak'
+                        else advantage = 'Neutral'
+                    } else {
+                        // Relaxed Lookup: Ignore My Role (maybe I play diff role but still counter?)
+                        // Or Ignore Enemy Role?
+                        // "Use data from /admin/matchups" implies STRICT.
+                        // If no record, Neutral.
+                        // BUT, fallback to general global lists if strict fails?
+                        if (mData.strongAgainst.some((h: Hero) => String(h.id) === String(targetId))) {
+                            // Only fallback if we REALLY don't have strict data, but user said "Data is wrong", implies they WANT Strict.
+                            // So maybe trusted Strict result (undefined = Neutral/Unknown) is better than implicit Global?
+                            // Let's keep Global as fallback but verify strict first.
+                            advantage = 'Strong'
+                        }
+                        else if (mData.weakAgainst.some((h: Hero) => String(h.id) === String(targetId))) {
+                            advantage = 'Weak'
+                        }
+                    }
+                } else if (mData) {
+                    // Legacy Fallback
+                    if (mData.strongAgainst.some((h: Hero) => String(h.id) === String(targetId))) {
+                        // If Ban Phase: "Strong Against Ally" -> High Threat (We show as 'Strong' context implies Threat)
+                        // If Pick Phase: "Strong Against Enemy" -> Counter (We show as 'Strong')
+                        advantage = 'Strong'
+                    }
+                    else if (mData.weakAgainst.some((h: Hero) => String(h.id) === String(targetId))) {
+                        advantage = 'Weak'
+                    }
+                }
+
+                return {
+                    hero: targetHero,
+                    role,
+                    advantage
+                }
+            }).filter(Boolean) as { hero: Hero, role: string, advantage: 'Strong' | 'Weak' | 'Neutral' }[]
+
+            const remainingEnemyRolesList = getRemainingRoles(currentEnemyPicks)
+
+            // [NEW] Predict Enemy Picks for Missing Roles
+            const predictedEnemyHeroes: { role: string, hero: Hero, reason: string }[] = []
+
+            remainingEnemyRolesList.forEach(role => {
+                let predictedHero: Hero | null = null
+                let reason = ""
+
+                const enemyTeamName = isBan
+                    ? (currentStep?.side === 'BLUE' ? match.team_b_name : match.team_a_name)
+                    : (currentStep?.side === 'BLUE' ? match.team_b_name : match.team_a_name)
+
+                const cleanEnemyTeamName = enemyTeamName?.replace(/\s*\(Bot\)\s*$/i, '') || enemyTeamName
+                const enemyStats = cleanEnemyTeamName ? teamStats[cleanEnemyTeamName] : undefined
+
+                if (enemyStats && enemyStats.heroStats) {
+                    // Normalize Role Key for DB lookup
+                    let dbRole = role
+                    if (role === 'Abyssal Dragon') dbRole = 'Abyssal'
+                    else if (role === 'Support') dbRole = 'Roam'
+
+                    // Find candidates
+                    const candidates = Object.entries(enemyStats.heroStats)
+                        .map(([hId, stats]: [string, any]) => {
+                            const rStats = stats.roleStats?.[dbRole]
+                            if (rStats && rStats.picks > 0) {
+                                return { hId, picks: rStats.picks, wins: rStats.wins }
+                            }
+                            return null
+                        })
+                        .filter((c): c is { hId: string, picks: number, wins: number } => c !== null)
+                        .sort((a, b) => b.picks - a.picks || b.wins - a.wins)
+
+                    // Pick top available
+                    for (const cand of candidates) {
+                        // Check availability (not picked/banned)
+                        // Note: unavailableIds includes current picks and bans.
+                        if (!unavailableIds.includes(cand.hId)) {
+                            const hero = getHero(cand.hId)
+                            if (hero) {
+                                predictedHero = hero
+                                // Thai: "ประวัติ: X เกม"
+                                reason = `ประวัติ: ${cand.picks} เกม`
+                                break
+                            }
+                        }
+                    }
+                }
+
+                if (predictedHero) {
+                    predictedEnemyHeroes.push({ role, hero: predictedHero, reason })
+                }
+            })
+
             setAutoSelectContext({
                 remainingAllyRoles: getRemainingRoles(currentAllyPicks),
-                remainingEnemyRoles: getRemainingRoles(currentEnemyPicks)
+                remainingEnemyRoles: remainingEnemyRolesList,
+                enemyHeroIds: Object.values(currentEnemyPicks),
+                enemyMatchups,
+                predictedEnemyHeroes
             })
 
             // Extract Matchup Data from AI Recs or Consensus
             const aiRecMatch = aiRecs.find((r: any) => r.hero.id === bestHero?.id)
             const matchupData = aiRecMatch?.matchupData || (consensusCandidates.length > 0 ? consensusCandidates[0].matchupData : undefined)
 
+            // [NEW] Determine Recommended Role
+            // Logic: Find which of the 'remainingAllyRoles' this hero can fill.
+            // Priority: Main Role matches > Secondary Role matches > Any match
+            let recommendedRole = "Flex"
+            const remainingAllyRolesList = getRemainingRoles(currentAllyPicks)
+
+            if (bestHero && bestHero.main_position) {
+                // Map API roles in bestHero.main_position to Standard Lane Names
+                const ROLES_MAP: Record<string, string> = {
+                    'Dark Slayer': 'Dark Slayer', 'DSL': 'Dark Slayer', 'Slayer': 'Dark Slayer', 'Fighter': 'Dark Slayer', 'Warrior': 'Dark Slayer',
+                    'Jungle': 'Jungle', 'Assassin': 'Jungle',
+                    'Mid': 'Mid', 'Mage': 'Mid',
+                    'Abyssal Dragon': 'Abyssal Dragon', 'Abyssal': 'Abyssal Dragon', 'Marksman': 'Abyssal Dragon', 'Carry': 'Abyssal Dragon',
+                    'Support': 'Support', 'Roam': 'Support'
+                }
+
+                // normalized hero roles
+                const heroRoles = bestHero.main_position.map(p => ROLES_MAP[p] || ROLES_MAP[p.replace(' Lane', '')]).filter(Boolean)
+
+                // Find intersection with remaining roles
+                const possibleRoles = remainingAllyRolesList.filter(r => heroRoles.includes(r))
+
+                if (possibleRoles.length > 0) {
+                    // Show all possible roles joined
+                    recommendedRole = possibleRoles.join(' / ')
+                } else {
+                    // Fallback: If no intersection (e.g. all filled or invalid mapping), show the hero's natural roles
+                    // This answers "Where CAN I play this?" even if the team full/confused.
+                    if (heroRoles.length > 0) {
+                        recommendedRole = heroRoles.join(' / ')
+                    }
+                }
+            }
+
             setAutoSelectAnalysis({
                 aiScore,
                 historyScore: hScore,
                 reasons,
-                matchupData
+                matchupData,
+                recommendedRole
             })
             setShowAnalysisModal(true)
         } else {
@@ -2065,6 +2303,147 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         )
     }
 
+    const handleAnalyzePickedHero = async (hero: Hero) => {
+        if (isLoadingRecommendations) return
+        setIsLoadingRecommendations(true)
+
+        // 1. Determine Team Context (Ally vs Enemy) based on who picked this hero
+        const isBluePick = Object.values(state.bluePicks).includes(hero.id)
+        const isRedPick = Object.values(state.redPicks).includes(hero.id)
+
+        let currentAllyPicks = isBluePick ? state.bluePicks : state.redPicks
+        let currentEnemyPicks = isBluePick ? state.redPicks : state.bluePicks
+        let side = isBluePick ? 'BLUE' : 'RED'
+
+        // Specator/Edge Case: If not found in either (shouldn't happen for picked hero), fallback to current step side
+        if (!isBluePick && !isRedPick) {
+            side = currentStep?.side || 'BLUE'
+            currentAllyPicks = side === 'BLUE' ? state.bluePicks : state.redPicks
+            currentEnemyPicks = side === 'BLUE' ? state.redPicks : state.bluePicks
+        }
+
+        const recs = await getRecommendations(
+            match.version_id,
+            Object.values(state.bluePicks),
+            Object.values(state.redPicks),
+            [...state.blueBans, ...state.redBans],
+            [...teamAGlobalBans, ...teamBGlobalBans],
+            {
+                matchId: match.id,
+                side: side as 'BLUE' | 'RED', // Analyze from the perspective of the hero's team
+                phase: 'PICK',
+                pickOrder: state.stepIndex + 1, // Hypothetical next step or current
+                targetTeamName: side === 'BLUE' ? match.team_a_name : match.team_b_name,
+                enemyTeamName: side === 'BLUE' ? match.team_b_name : match.team_a_name,
+                tournamentId: match.tournament_id
+            },
+            currentMode,
+            undefined,
+            historyMode,
+            hero.id
+        )
+
+        // Find our hero analysis
+        const analysis = recs.analyst.find((r: any) => r.hero.id === hero.id) || recs.smartBan.find((r: any) => r.hero.id === hero.id) || recs.history.find((r: any) => r.hero.id === hero.id)
+
+        if (analysis) {
+            // 2. Calculate Enemy Matchups (Replicating handleAutoSelect Logic)
+            const mData = analysis.matchupData
+            const specificMatchups = mData?.specificMatchups
+
+            // Determine Hero's Role for Matchup Context
+            let myLikelyRole = 'Mid'
+            if (hero.main_position) {
+                const remainingRoles = getRemainingRoles(currentAllyPicks)
+                // Filter out the slot this hero occupies? No, we want to know what role it fills.
+                // Simplified: Just take first main role or infer from remaining if relevant.
+                myLikelyRole = hero.main_position[0]
+                // Enhanced matching logic could go here but simple is safer for crash prevention
+            }
+
+            const enemyMatchups = Object.entries(currentEnemyPicks).map(([slotIdx, targetId]) => {
+                const targetHero = initialHeroes.find(h => h.id === targetId)
+                if (!targetHero) return null
+
+                // Determine Enemy Role (Simple approximation based on slot or main role)
+                const isBan = false // We are analyzing picks
+                // Logic from handleAutoSelect for role determination:
+                // ... (simplified version)
+                let role = targetHero.main_position?.[0] || 'Flex'
+                // For accurate role, we might check manualLanes?
+                // check manualLanes: 
+                const assignedLanes = manualLanes[targetHero.id]
+                if (assignedLanes && assignedLanes.length > 0) {
+                    // specific lane names map needed? 
+                    // The component uses 'Dark Slayer', etc.
+                    // manualLanes stores IDs like 'Dark Slayer'.
+                    role = assignedLanes[0] // Assuming map aligns
+                }
+
+                let advantage: 'Strong' | 'Weak' | 'Neutral' = 'Neutral'
+
+                if (specificMatchups && specificMatchups.length > 0) {
+                    const record = specificMatchups.find((m: any) =>
+                        String(m.enemyId) === String(targetId) &&
+                        m.position === myLikelyRole &&
+                        m.enemyPosition === role
+                    )
+                    if (record) {
+                        if (record.winRate >= 53) advantage = 'Strong'
+                        else if (record.winRate <= 47) advantage = 'Weak'
+                        else advantage = 'Neutral'
+                    }
+                }
+
+                // Fallback to General Lists if specific not found or neutral
+                if (advantage === 'Neutral' && mData) {
+                    if (mData.strongAgainst.some((h: Hero) => String(h.id) === String(targetId))) advantage = 'Strong'
+                    else if (mData.weakAgainst.some((h: Hero) => String(h.id) === String(targetId))) advantage = 'Weak'
+                }
+
+                return {
+                    hero: targetHero,
+                    role,
+                    advantage
+                }
+            }).filter(Boolean) as { hero: Hero, role: string, advantage: 'Strong' | 'Weak' | 'Neutral' }[]
+
+            // 3. Recommended Role Logic
+            const remainingAllyRolesList = getRemainingRoles(currentAllyPicks)
+            // Since the hero IS picked, it fills a role. We should really check what role it was assigned or just list its capabilities.
+            // We can re-use the "intersection" logic.
+            let recommendedRole = "Flex"
+            // const heroRoles = hero.main_position... (simplified)
+            if (hero.main_position) {
+                recommendedRole = hero.main_position.join(' / ')
+            }
+
+            setAutoSelectAnalysis({
+                aiScore: analysis.score,
+                historyScore: analysis.score,
+                reasons: Array.isArray(analysis.reason) ? analysis.reason : [analysis.reason],
+                matchupData: analysis.matchupData,
+                recommendedRole
+            })
+            setAutoSelectHero(hero)
+
+            // Populate Context with Enemy Data
+            setAutoSelectContext({
+                remainingAllyRoles: remainingAllyRolesList,
+                remainingEnemyRoles: getRemainingRoles(currentEnemyPicks),
+                enemyHeroIds: Object.values(currentEnemyPicks),
+                enemyMatchups,
+                predictedEnemyHeroes: [] // Can implement if needed, but maybe overkill for now. User asked for "Analysis" of current state.
+            })
+            setShowAnalysisModal(true)
+        } else {
+            console.warn("Hero analysis not found despite explicit request:", hero.name)
+        }
+
+        setIsLoadingRecommendations(false)
+    }
+
+
     return (
         <div className="flex flex-col lg:flex-row h-full w-full overflow-hidden gap-1 p-0 lg:p-1 text-white bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black overscroll-none">
             {/* MOBILE SECTION 1: Locked Header (Score & Game Info) */}
@@ -2109,10 +2488,11 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 {!state.isFinished && !state.isPaused && (
                     <Button
                         size="icon"
-                        className="h-12 w-12 shrink-0 bg-indigo-600 hover:bg-indigo-500 text-white shadow-[0_0_15px_rgba(99,102,241,0.5)] border border-indigo-400 rounded-lg"
+                        className={`h-12 w-12 shrink-0 bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all ${!isLoadingRecommendations ? 'shadow-[0_0_20px_rgba(99,102,241,0.8)] border-indigo-300 scale-105' : 'shadow-none'}`}
                         onClick={handleAutoSelect}
+                        disabled={isLoadingRecommendations}
                     >
-                        <Brain className="w-6 h-6" />
+                        {isLoadingRecommendations ? <Loader2 className="w-6 h-6 animate-spin" /> : <Brain className="w-6 h-6" />}
                     </Button>
                 )}
                 <Button
@@ -2188,8 +2568,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 }
                             })
                             return slots
+                            return slots
                         })()
                     }}
+                    onAnalyzeHero={handleAnalyzePickedHero}
                 />
             </div>
 
@@ -2256,11 +2638,12 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                         <Button
                             size="sm"
                             variant="outline"
-                            className="h-8 w-12 px-0 border-indigo-500/30 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/20 hover:border-indigo-500/50"
-                            title="Auto Select (AI Best Pick)"
+                            className={`h-8 w-12 px-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${!isLoadingRecommendations ? 'bg-indigo-500/20 border-indigo-400 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.6)]' : 'border-indigo-500/30 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/20 hover:border-indigo-500/50'}`}
+                            title={isLoadingRecommendations ? "Loading Analysis..." : "Auto Select (AI Best Pick)"}
                             onClick={handleAutoSelect}
+                            disabled={isLoadingRecommendations}
                         >
-                            <Brain className="w-4 h-4" />
+                            {isLoadingRecommendations ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
                         </Button>
                     )}
 
@@ -2342,8 +2725,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                                 }
                                             })
                                             return slots
+                                            return slots
                                         })()
                                     }}
+                                    onAnalyzeHero={handleAnalyzePickedHero}
                                 />
                                 {/* RED Side (Right) */}
                                 <DraftTeamPanel
@@ -2375,8 +2760,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                                 }
                                             })
                                             return slots
+                                            return slots
                                         })()
                                     }}
+                                    onAnalyzeHero={handleAnalyzePickedHero}
                                 />
                             </div>
                         </div>
@@ -2387,7 +2774,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                         {/* Filters */}
                         <div className="flex flex-col gap-0.5 flex-1 min-h-0">
                             <div className="flex gap-2 shrink-0">
-                                <div className="relative flex-1">
+                                <div className="relative flex-1 hidden lg:block">
                                     <Input
                                         placeholder="Search heroes..."
                                         value={searchQuery}
@@ -2410,7 +2797,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 </div>
                             </div>
 
-                            <div className="flex-1 overflow-y-auto bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 shadow-inner shadow-black/50">
+                            <ScrollArea className="flex-1 bg-slate-950/40 rounded-lg p-2 border border-indigo-500/10 shadow-inner shadow-black/50 overflow-y-auto max-h-[calc(100vh-220px)] lg:max-h-[calc(100vh-140px)] custom-scrollbar">
                                 {filteredHeroes.length === 0 ? (
                                     <div className="flex items-center justify-center h-full text-slate-500">
                                         No heroes found.
@@ -2482,24 +2869,29 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                                 >
                                                     <Image src={hero.icon_url} alt={hero.name} fill className="object-cover" sizes="5vw" />
                                                     {statusLabel && (
-                                                        <div className={`absolute inset-0 flex items-center justify-center z-10 ${isEnemyUsed ? '' : 'bg-black/60'}`}>
-                                                            <span className={`
-                                                        font-black text-white uppercase tracking-tighter 
-                                                        ${isEnemyUsed
-                                                                    ? 'text-[8px] bg-slate-800/90 py-0.5 w-full text-center bottom-0 absolute tracking-normal'
-                                                                    : `text-[8px] sm:text-[10px] -rotate-12 border-2 border-white/50 px-1 rounded transform ${statusColor}`
-                                                                }
-                                                    `}>
-                                                                {statusLabel}
-                                                            </span>
-                                                        </div>
+                                                        isEnemyUsed ? (
+                                                            <div className="absolute bottom-0 left-0 right-0 z-10 bg-slate-900/80 py-0.5 border-t border-white/10">
+                                                                <div className="text-[8px] font-bold text-slate-300 text-center leading-none uppercase tracking-wider">
+                                                                    USED
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="absolute inset-0 flex items-center justify-center z-10 bg-black/60">
+                                                                <span className={`
+                                                            font-black text-white uppercase tracking-tighter 
+                                                            text-[8px] sm:text-[10px] -rotate-12 border-2 border-white/50 px-1 rounded transform ${statusColor}
+                                                        `}>
+                                                                    {statusLabel}
+                                                                </span>
+                                                            </div>
+                                                        )
                                                     )}
                                                 </button>
                                             )
                                         })}
                                     </div>
                                 )}
-                            </div>
+                            </ScrollArea>
 
 
                         </div>
@@ -4235,8 +4627,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 }
                             })
                             return slots
+                            return slots
                         })()
                     }}
+                    onAnalyzeHero={handleAnalyzePickedHero}
                 />
             </div >
 
@@ -4247,6 +4641,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 hero={autoSelectHero}
                 analysis={autoSelectAnalysis}
                 context={autoSelectContext}
+                phase={currentStep?.type}
             />
         </div >
 
