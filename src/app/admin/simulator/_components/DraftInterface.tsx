@@ -64,7 +64,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
     const [showAnalysisModal, setShowAnalysisModal] = useState(false)
     const [autoSelectHero, setAutoSelectHero] = useState<Hero | null>(null)
-    const [autoSelectAnalysis, setAutoSelectAnalysis] = useState<{ aiScore: number, historyScore: number, reasons: string[], matchupData?: { strongAgainst: Hero[], weakAgainst: Hero[], synergyWith: Hero[] } } | null>(null)
+    const [autoSelectAnalysis, setAutoSelectAnalysis] = useState<{ aiScore: number, historyScore: number, reasons: string[], recommendedRole?: string, matchupData?: { strongAgainst: Hero[], weakAgainst: Hero[], synergyWith: Hero[] } } | null>(null)
     const [autoSelectContext, setAutoSelectContext] = useState<{
         remainingAllyRoles: string[],
         remainingEnemyRoles: string[],
