@@ -1962,7 +1962,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 }
 
                 // normalized hero roles
-                const heroRoles = bestHero.main_position.map(p => ROLES_MAP[p] || ROLES_MAP[p.replace(' Lane', '')]).filter(Boolean)
+                const heroRoles = bestHero.main_position.map((p: string) => ROLES_MAP[p] || ROLES_MAP[p.replace(' Lane', '')]).filter(Boolean)
 
                 // Find intersection with remaining roles
                 const possibleRoles = remainingAllyRolesList.filter(r => heroRoles.includes(r))
