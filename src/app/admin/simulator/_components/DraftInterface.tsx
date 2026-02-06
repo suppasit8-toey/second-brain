@@ -69,7 +69,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         remainingAllyRoles: string[],
         remainingEnemyRoles: string[],
         enemyHeroIds?: string[],
-        enemyMatchups?: { hero: Hero, role: string, advantage: 'Strong' | 'Weak' | 'Neutral' }[]
+        enemyMatchups?: { hero: Hero, role: string, advantage: 'Strong' | 'Weak' | 'Neutral' }[],
+        predictedEnemyHeroes?: { role: string, hero: Hero, reason: string }[]
     } | undefined>(undefined)
 
     useImperativeHandle(ref, () => ({
