@@ -1780,57 +1780,60 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         const historyRecs = recommendations.historyAnalysis || []
         const consensusCandidates: any[] = [] // Initialize here
 
-        // === PRIORITY 1: Use DISPLAYED Suggestions (blueSuggestions/redSuggestions) ===
-        const displayedSuggestions = currentStep?.side === 'BLUE' ? blueSuggestions : redSuggestions
-        if (displayedSuggestions && displayedSuggestions.length > 0) {
-            const availableDisplayed = displayedSuggestions.filter((s: any) => isAvailable(String(s.hero?.id)))
-            if (availableDisplayed.length > 0) {
-                bestHero = availableDisplayed[0].hero
-                aiScore = availableDisplayed[0].score || 0
-                pickReason = `Advisor แนะนำ: ${availableDisplayed[0].reason || 'Top suggestion'}`
-                reasons = (availableDisplayed[0].reason || '').split(/, |; /).filter(Boolean)
-                console.log("Auto-Select: Using Displayed Suggestion", bestHero.name, "Score:", aiScore)
+
+        // === PRIORITY 1: Consensus (AI + History intersection) ===
+        // This logic ensures "Auto Select" matches "Analysis" tab Recommendation
+        const aiMap = new Map<string, any>(aiRecs.map((r: any) => [r.hero.id, r]))
+        const historyMap = new Map<string, any>(historyRecs.map((r: any) => [r.hero.id, r]))
+
+        aiMap.forEach((aiItem: any, heroId: string) => {
+            if (historyMap.has(heroId) && isAvailable(heroId)) {
+                const historyItem = historyMap.get(heroId)
+                consensusCandidates.push({
+                    hero: aiItem.hero,
+                    score: (aiItem.score || 0) + (historyItem.score || 0),
+                    aiScore: aiItem.score,
+                    hScore: historyItem.score,
+                    reason: `${aiItem.reason} + ${historyItem.reason}`,
+                    matchupData: aiItem.matchupData // Preserve matchup data
+                })
             }
+        })
+
+        consensusCandidates.sort((a, b) => b.score - a.score)
+
+        if (consensusCandidates.length > 0) {
+            bestHero = consensusCandidates[0].hero
+            aiScore = consensusCandidates[0].aiScore
+            hScore = consensusCandidates[0].hScore
+            pickReason = `ข้อมูลตรงกัน: AI(${aiScore}) + ประวัติ(${hScore})`
+            reasons = (consensusCandidates[0].reason || '').split(/ \+ | • |, /).filter(Boolean)
+            console.log("Auto-Select: Consensus Pick", bestHero.name, "Score:", consensusCandidates[0].score)
         }
 
-        // === PRIORITY 2: Fallback to Consensus (AI + History intersection) ===
+        // === PRIORITY 2: Fallback to Displayed Suggestions (AI Score) ===
         if (!bestHero) {
-            const aiMap = new Map<string, any>(aiRecs.map((r: any) => [r.hero.id, r]))
-            const historyMap = new Map<string, any>(historyRecs.map((r: any) => [r.hero.id, r]))
-
-            aiMap.forEach((aiItem: any, heroId: string) => {
-                if (historyMap.has(heroId) && isAvailable(heroId)) {
-                    const historyItem = historyMap.get(heroId)
-                    consensusCandidates.push({
-                        hero: aiItem.hero,
-                        score: (aiItem.score || 0) + (historyItem.score || 0),
-                        aiScore: aiItem.score,
-                        hScore: historyItem.score,
-                        reason: `${aiItem.reason} + ${historyItem.reason}`,
-                        matchupData: aiItem.matchupData // Preserve matchup data
-                    })
+            const displayedSuggestions = currentStep?.side === 'BLUE' ? blueSuggestions : redSuggestions
+            if (displayedSuggestions && displayedSuggestions.length > 0) {
+                const availableDisplayed = displayedSuggestions.filter((s: any) => isAvailable(String(s.hero?.id)))
+                if (availableDisplayed.length > 0) {
+                    bestHero = availableDisplayed[0].hero
+                    aiScore = availableDisplayed[0].score || 0
+                    pickReason = `Advisor แนะนำ: ${availableDisplayed[0].reason || 'Top suggestion'}`
+                    reasons = (availableDisplayed[0].reason || '').split(/, |; /).filter(Boolean)
+                    console.log("Auto-Select: Using Displayed Suggestion (No Consensus)", bestHero.name, "Score:", aiScore)
                 }
-            })
+            }
 
-            consensusCandidates.sort((a, b) => b.score - a.score)
-
-
-            if (consensusCandidates.length > 0) {
-                bestHero = consensusCandidates[0].hero
-                aiScore = consensusCandidates[0].aiScore
-                hScore = consensusCandidates[0].hScore
-                pickReason = `ข้อมูลตรงกัน: AI(${aiScore}) + ประวัติ(${hScore})`
-                reasons = (consensusCandidates[0].reason || '').split(/ \+ | • |, /).filter(Boolean)
-                console.log("Auto-Select: Consensus Pick", bestHero.name, "Score:", consensusCandidates[0].score)
-            } else {
-                // Fallback to top available AI pick
+            // Final Fallback: Raw AI list if displayed suggestions fail
+            if (!bestHero) {
                 const availableAI = aiRecs.filter((r: any) => isAvailable(r.hero.id))
                 if (availableAI.length > 0) {
                     bestHero = availableAI[0].hero
                     aiScore = availableAI[0].score || 0
                     pickReason = `AI เท่านั้น (คะแนน: ${aiScore}) - ไม่พบข้อมูลในประวัติ`
                     reasons = (availableAI[0].reason || '').split(/, /).filter(Boolean)
-                    console.log("Auto-Select: AI Partial Pick", bestHero.name)
+                    console.log("Auto-Select: AI Fallback Pick", bestHero.name)
                 }
             }
         }

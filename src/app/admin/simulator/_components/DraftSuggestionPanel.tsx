@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Brain, Sparkles, Loader2, Target, History, Shield, ChevronDown, ChevronUp, Globe, Swords, Users, Link as LinkIcon, ShieldBan, Settings2, ScanSearch } from 'lucide-react';
+import { Brain, Sparkles, Loader2, Target, History, Shield, ChevronDown, ChevronUp, Globe, Swords, Users, Link as LinkIcon, ShieldBan, Settings2, ScanSearch, AlertTriangle } from 'lucide-react';
 import Image from 'next/image';
 import { Hero, AnalysisLayerConfig } from '@/utils/types';
 import Link from 'next/link';
@@ -324,8 +324,8 @@ export default function DraftSuggestionPanel({
                     <div
                         key={s.hero.id}
                         className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors ${isFallback
-                                ? 'bg-slate-900/40 border-slate-800 hover:bg-slate-800/60'
-                                : 'bg-indigo-950/30 border-indigo-500/20 hover:bg-indigo-900/40'
+                            ? 'bg-slate-900/40 border-slate-800 hover:bg-slate-800/60'
+                            : 'bg-indigo-950/30 border-indigo-500/20 hover:bg-indigo-900/40'
                             }`}
                         onClick={() => onSelectHero && onSelectHero(s.hero)}
                     >
