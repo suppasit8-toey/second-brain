@@ -216,7 +216,7 @@ export async function getRecommendations(
         .from('matchups')
         .select('hero_id, enemy_hero_id, win_rate')
         .eq('version_id', versionId)
-        .lt('win_rate', 35)
+        .lt('win_rate', 40)
 
     // --- 1. PREPARE ROSTER & TEAM DATA (Enhanced) ---
     let teamRoster: any[] = []
@@ -837,10 +837,9 @@ export async function getRecommendations(
                 const worstThreat = validCounters.sort((a, b) => a.win_rate - b.win_rate)[0]
                 const counterHeroName = heroes.find(x => x.id === worstThreat.enemy_hero_id)?.name
 
-                // Calculate penalty: Starts at 50, increases as WR drops below 35%
-                // Example: WR 30% -> Penalty 50 + (35-30)*4 = 70
-                // Example: WR 20% -> Penalty 50 + (35-20)*4 = 110
-                const penalty = 50 + Math.max(0, (35 - worstThreat.win_rate) * 4)
+                // Calculate penalty: Starts at 50, increases as WR drops below 40%
+                // Example: WR 30% -> Penalty 50 + (40-30)*4 = 90
+                const penalty = 50 + Math.max(0, (40 - worstThreat.win_rate) * 4)
 
                 score -= penalty
                 reasons.push(`⚠️ Risk: Exposed to ${counterHeroName} (${worstThreat.win_rate.toFixed(0)}% WR) -${Math.round(penalty)}`)
@@ -849,14 +848,30 @@ export async function getRecommendations(
 
         // 3.1 [Hero Pool] Team Comfort & Win Rate
         if (wComfort > 0) {
-            const teamHeroStat = teamStats.heroStats[h.id]
-            if (teamHeroStat) {
-                const teamWR = (teamHeroStat.wins / teamHeroStat.picks) * 100
-                const volumeBonus = Math.min(teamHeroStat.picks * 5, 25)
-                const wrBonus = teamWR > 60 ? 15 : (teamWR > 50 ? 5 : 0)
-                const totalComfort = (volumeBonus + wrBonus) * wComfort
-                score += totalComfort
-                reasons.push(`Team Pool (${teamHeroStat.picks} games) +${Math.round(totalComfort)}`)
+            const teamHeroStat = teamStats.heroStats?.[h.id]
+            // Use teamStats.games if available, otherwise fallback to rough estimate or just ignore %
+            const totalGames = teamStats.games || 0
+
+            if (teamHeroStat && totalGames > 0) {
+                const pickRate = (teamHeroStat.picks / totalGames) * 100
+
+                // User Request: Low % -> +0, High % (Often) -> +100
+                // Threshold: 20% seems like a reasonable "Often" (1 in 5 games)
+                if (pickRate >= 20) {
+                    const bonus = 100 * wComfort
+                    score += bonus
+                    reasons.push(`Team Pool (${pickRate.toFixed(0)}% Pick Rate) +${Math.round(bonus)}`)
+                } else {
+                    // +0 Score for low pick rate
+                    // reasons.push(`Team Pool (${pickRate.toFixed(0)}%) +0`) // Optional: explicit 0?
+                }
+            } else if (teamHeroStat) {
+                // Fallback if no total games: Use raw picks
+                if (teamHeroStat.picks >= 3) {
+                    const bonus = 100 * wComfort
+                    score += bonus
+                    reasons.push(`Team Pool (${teamHeroStat.picks} games) +${Math.round(bonus)}`)
+                }
             }
         }
 

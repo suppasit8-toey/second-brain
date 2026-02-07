@@ -17,6 +17,15 @@ const config: Config = {
                 "text-main": "#f3e8ff",
                 "text-muted": "#a78bfa",
             },
+            keyframes: {
+                "glow-pulse": {
+                    "0%, 100%": { filter: "drop-shadow(0 0 2px rgba(168, 85, 247, 0.4))" },
+                    "50%": { filter: "drop-shadow(0 0 8px rgba(168, 85, 247, 0.8))" },
+                },
+            },
+            animation: {
+                "glow-pulse": "glow-pulse 3s infinite ease-in-out",
+            },
         },
     },
     plugins: [],

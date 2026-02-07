@@ -235,7 +235,7 @@ export default function DraftInterface({ match, game, initialHeroes }: DraftInte
                         onClick={() => setIsAiOpen(!isAiOpen)}
                     >
                         <div className="flex items-center gap-2">
-                            <Brain className={`w-4 h-4 lg:w-5 lg:h-5 text-indigo-400 ${isAiOpen ? 'animate-pulse' : ''}`} />
+                            <Brain className={`w-4 h-4 lg:w-5 lg:h-5 text-indigo-400 ${isAiOpen ? 'animate-glow-pulse' : ''}`} />
                             <h3 className="font-bold text-sm lg:text-base text-indigo-100 tracking-wider">CEREBRO AI</h3>
                             <span className="text-[10px] lg:text-xs text-slate-500 ml-1 lg:ml-2 font-mono hidden sm:inline">{currentStep?.type === 'BAN' ? 'STRATEGIC BANS' : 'STRATEGIC PICKS'}</span>
                         </div>

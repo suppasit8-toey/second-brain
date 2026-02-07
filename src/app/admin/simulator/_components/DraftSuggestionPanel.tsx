@@ -277,46 +277,76 @@ export default function DraftSuggestionPanel({
     const renderAnalysisList = (items: Suggestion[]) => {
         // Apply position filters
         const activePosFilters = Array.from(positionFilters).filter(f => f !== 'history');
-        const filteredItems = items.filter(s => {
-            if (activePosFilters.length === 0) return true;
-            const heroPositions = s.hero.main_position || [];
-            return activePosFilters.some(filter => {
-                const normalizedFilter = filter === 'Abyssal' ? ['Abyssal', 'Abyssal Dragon'] : [filter];
-                return heroPositions.some(pos =>
-                    normalizedFilter.some(f => pos.toLowerCase().includes(f.toLowerCase()))
-                );
+
+        const filterItemsByPosition = (list: Suggestion[]) => {
+            return list.filter(s => {
+                if (activePosFilters.length === 0) return true;
+                const heroPositions = s.hero.main_position || [];
+                return activePosFilters.some(filter => {
+                    const normalizedFilter = filter === 'Abyssal' ? ['Abyssal', 'Abyssal Dragon'] : [filter];
+                    return heroPositions.some(pos =>
+                        normalizedFilter.some(f => pos.toLowerCase().includes(f.toLowerCase()))
+                    );
+                });
             });
-        });
+        };
+
+        const filteredAnalysis = filterItemsByPosition(items);
+        let displayItems = filteredAnalysis;
+        let isFallback = false;
+
+        // Fallback Logic: If no overlap found, use History
+        // [USER REQUEST] Show History Fallback instead of empty message
+        if (filteredAnalysis.length === 0 && !isLoading) {
+            const filteredHistory = filterItemsByPosition(historySuggestions);
+            if (filteredHistory.length > 0) {
+                displayItems = filteredHistory.slice(0, 10); // Limit fallback to top 10
+                isFallback = true;
+            }
+        }
 
         if (isLoading) return <div className="text-center text-xs text-slate-500 py-4"><Loader2 className="w-4 h-4 animate-spin inline mr-1" /> Analyzing...</div>;
-        if (filteredItems.length === 0) return <div className="text-center text-xs text-slate-500 py-4 italic">No high-confidence overlap found.</div>;
+
+        if (displayItems.length === 0) {
+            return <div className="text-center text-xs text-slate-500 py-4 italic">No high-confidence overlap found.</div>;
+        }
 
         return (
             <div className="space-y-2">
-                {filteredItems.map(s => (
+                {isFallback && (
+                    <div className="bg-orange-950/20 border border-orange-500/20 rounded p-2 mb-2 flex items-center gap-2">
+                        <AlertTriangle className="w-3 h-3 text-orange-400" />
+                        <span className="text-[10px] text-orange-200">No strict overlap found. Showing <strong>History / Comfort</strong> picks.</span>
+                    </div>
+                )}
+
+                {displayItems.map(s => (
                     <div
                         key={s.hero.id}
-                        className="flex items-center gap-2 p-2 rounded bg-indigo-950/30 border border-indigo-500/20 hover:bg-indigo-900/40 cursor-pointer transition-colors"
+                        className={`flex items-center gap-2 p-2 rounded border cursor-pointer transition-colors ${isFallback
+                                ? 'bg-slate-900/40 border-slate-800 hover:bg-slate-800/60'
+                                : 'bg-indigo-950/30 border-indigo-500/20 hover:bg-indigo-900/40'
+                            }`}
                         onClick={() => onSelectHero && onSelectHero(s.hero)}
                     >
-                        <div className="relative w-12 h-12 rounded overflow-hidden border border-indigo-400/50 shrink-0">
+                        <div className={`relative w-12 h-12 rounded overflow-hidden border shrink-0 ${isFallback ? 'border-slate-600' : 'border-indigo-400/50'}`}>
                             <Image src={s.hero.icon_url} alt={s.hero.name} fill className="object-cover" />
                         </div>
                         <div className="min-w-0 flex-1">
                             <div className="flex items-center justify-between mb-0.5">
-                                <span className="font-bold text-indigo-100 text-xs">{s.hero.name}</span>
+                                <span className={`font-bold text-xs ${isFallback ? 'text-slate-300' : 'text-indigo-100'}`}>{s.hero.name}</span>
                                 <div className="flex gap-1">
                                     {/* Combined Badge or breakdown */}
-                                    <Badge className="h-4 text-[9px] px-1 bg-indigo-500/80 hover:bg-indigo-500">
+                                    <Badge className={`h-4 text-[9px] px-1 ${isFallback ? 'bg-slate-700 text-slate-300' : 'bg-indigo-500/80 hover:bg-indigo-500'}`}>
                                         AI: {s.cerebroScore?.toFixed(0) || '-'}
                                     </Badge>
-                                    <Badge className="h-4 text-[9px] px-1 bg-orange-500/80 hover:bg-orange-500">
-                                        H: {s.historyScore?.toFixed(0) || '-'}
+                                    <Badge className={`h-4 text-[9px] px-1 ${isFallback ? 'bg-orange-600/80 text-white' : 'bg-orange-500/80 hover:bg-orange-500'}`}>
+                                        H: {s.historyScore?.toFixed(0) || s.score?.toFixed(0) || '-'}
                                     </Badge>
                                 </div>
                             </div>
-                            <div className="text-[9px] text-indigo-300 leading-tight">
-                                Consensus Analysis
+                            <div className={`text-[9px] leading-tight ${isFallback ? 'text-slate-500' : 'text-indigo-300'}`}>
+                                {isFallback ? (s.reason || 'History Recommendation') : 'Consensus Analysis'}
                             </div>
                             <div className="flex gap-1 mt-1">
                                 {s.phase === 'BAN' || s.type === 'ban'

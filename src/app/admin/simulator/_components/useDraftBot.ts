@@ -132,6 +132,14 @@ export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initi
 
         const currentPhase = draftState.currentStep?.type === 'BAN' ? 'BAN' : 'PICK'
 
+        // [USER REQUEST] Strict Wait for Analysis (ALL SLOTS)
+        // Ensure we don't rush into Fallback logic. Wait for "Brain" to load.
+        // We already have 'suggestions' defined above (line 120).
+        if (!suggestions || suggestions.length === 0 || suggestionLoading) {
+            console.log(`🤖 Bot STRICTLY waiting for Analysis data (Slot ${draftState.stepIndex})...`)
+            return
+        }
+
         // Execute Bot Move
         const executeBotMove = async () => {
             console.log("🤖 Bot is thinking...")
@@ -207,26 +215,88 @@ export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initi
                             ? Object.values(draftState.redPicks).filter(Boolean).map(id => String(id))
                             : Object.values(draftState.bluePicks).filter(Boolean).map(id => String(id))
 
-                        const availableBans = suggestions.filter((s: any) =>
-                            !draftState.blueBans.map(String).includes(String(s.hero.id)) &&
-                            !draftState.redBans.map(String).includes(String(s.hero.id)) &&
-                            !allPickedIds.includes(String(s.hero.id)) &&
-                            !enemyPicks.includes(String(s.hero.id)) &&
-                            !opponentGlobalBans.map(String).includes(String(s.hero.id))
-                        )
+                        // Resolve enemy roles to see what they have already covered
+                        const enemyFilledRoles = resolveTeamRoles(enemyPicks, initialHeroes)
+                        console.log(`🤖 [STRATEGY] Enemy Filled Roles: ${Array.from(enemyFilledRoles).join(', ')}`)
+
+                        const availableBans = suggestions.filter((s: any) => {
+                            const heroId = String(s.hero.id)
+                            // Standard filters
+                            if (draftState.blueBans.map(String).includes(heroId)) return false
+                            if (draftState.redBans.map(String).includes(heroId)) return false
+                            if (allPickedIds.includes(heroId)) return false
+                            if (enemyPicks.includes(heroId)) return false
+                            if (opponentGlobalBans.map(String).includes(heroId)) return false
+
+                            // NEW: Don't ban heroes for roles the enemy already has filled
+                            // If the hero PRIMARILY plays a role that is already filled, skip it.
+                            // We need to check if ALL of the hero's standard roles are covered.
+                            const heroRoles = s.hero.main_position?.map((r: string) => normalizeRole(r)) || []
+                            const isRoleFilled = heroRoles.length > 0 && heroRoles.every((r: string) => enemyFilledRoles.has(r))
+
+                            if (isRoleFilled) {
+                                // console.log(`🤖 [STRATEGY] Skipping Ban ${s.hero.name} (Roles ${heroRoles.join(', ')} occupied by enemy)`)
+                                return false
+                            }
+
+                            return true
+                        })
+
                         if (availableBans.length > 0) {
                             console.log(`🤖 [STRATEGY] Advisor BAN: ${availableBans[0].hero.name}`)
                             bestHeroId = availableBans[0].hero.id
                         }
                     } else {
                         // PICK Phase - Use Advisor but respect roles
+                        // [USER REQUEST] Analysis Overlap Logic + History Fallback
+
+                        // 1. Separate Suggestions for Analysis
+                        const HISTORY_KEYWORDS = ['team ban', 'team pool', 'comfort', 'protect', 'deny', 'repair', 'scrim', 'pattern', 'opening ban', 'mvp'];
+
+                        const cerebroSuggestions = suggestions.filter((s: any) => s.cerebroScore !== undefined || (s.type !== 'history' && !s.reason?.includes('Team Comfort')))
+                        const historySuggestions = suggestions.filter((s: any) => {
+                            const reasonLower = s.reason?.toLowerCase() || '';
+                            const isHistory = s.type === 'history' || HISTORY_KEYWORDS.some(k => reasonLower.includes(k)) || s.historyScore !== undefined;
+                            return isHistory && (s.historyScore !== undefined || s.type === 'history')
+                        }).sort((a: any, b: any) => (b.historyScore || 0) - (a.historyScore || 0))
+
+                        // 2. Calculate Overlap (Intersection)
+                        const cerebroIds = new Set(cerebroSuggestions.map((s: any) => String(s.hero.id)))
+                        const overlapSuggestions = historySuggestions.filter((s: any) => cerebroIds.has(String(s.hero.id)))
+
+                        // 3. Decision Logic
+                        let targetList = []
+                        let decisionSource = ''
+
+                        if (overlapSuggestions.length > 0) {
+                            // PRIORITY 1: High Confidence Overlap
+                            targetList = overlapSuggestions
+                            decisionSource = 'ANALYSIS (Overlap)'
+                        } else if (historySuggestions.length > 0) {
+                            // PRIORITY 2: History Fallback
+                            // If no overlap, prefer History (Comfort/Team Pool) over pure AI
+                            targetList = historySuggestions
+                            decisionSource = 'HISTORY (Fallback)'
+                        } else {
+                            // PRIORITY 3: Pure AI (Cerebro)
+                            targetList = cerebroSuggestions
+                            decisionSource = 'CEREBRO (AI Only)'
+                        }
+
+                        // Fallback to raw suggestions if everything fails
+                        if (targetList.length === 0) targetList = suggestions
+
+                        console.log(`🤖 [STRATEGY] Decision Source: ${decisionSource}, Candidates: ${targetList.length}`)
+
+                        // 4. Select from Target List (Filtering for Validity)
                         const allyPicks = (draftState.currentStep.side === 'BLUE'
                             ? Object.values(draftState.bluePicks)
                             : Object.values(draftState.redPicks)
                         ).filter(Boolean).map(id => String(id))
 
                         const bannedIds = [...draftState.blueBans, ...draftState.redBans].map(String)
-                        const availableSuggestions = suggestions.filter((s: any) => {
+
+                        const availableSuggestions = targetList.filter((s: any) => {
                             const heroIdStr = String(s.hero.id)
                             return !allPickedIds.includes(heroIdStr) && !bannedIds.includes(heroIdStr)
                         })

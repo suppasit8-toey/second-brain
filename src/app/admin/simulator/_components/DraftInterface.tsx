@@ -3148,7 +3148,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                         <ChevronDown className="w-4 h-4 rotate-90" />
                                     </Button>
                                     <h3 className="font-mono tracking-[0.2em] font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-300 flex items-center gap-2 text-xs md:text-sm truncate min-w-0 drop-shadow-[0_0_10px_rgba(99,102,241,0.5)]">
-                                        <Brain className="w-4 h-4 md:w-5 md:h-5 shrink-0 text-cyan-400" />
+                                        <Brain className="w-4 h-4 md:w-5 md:h-5 shrink-0 text-cyan-400 animate-glow-pulse" />
                                         <span className="shrink-0">CEREBRO AI</span>
                                         <span className="text-slate-500 mx-2">|</span>
                                         <span className="truncate text-indigo-200">{currentMode.name.includes('Pro Competitive Standard') ? 'PRO' : currentMode.name.split('(')[0]}</span>
