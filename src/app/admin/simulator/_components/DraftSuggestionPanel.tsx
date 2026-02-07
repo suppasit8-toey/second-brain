@@ -30,6 +30,7 @@ interface DraftSuggestionPanelProps {
     onSelectHero?: (hero: Hero) => void;
     activeLayers: AnalysisLayerConfig[];
     upcomingSlots?: { type: 'BAN' | 'PICK', slotNum: number }[];
+    predictions?: any; // Passed from DraftInterface (calculatedEnemyPredictions)
 }
 
 // Position filter icons - using abbreviated text
@@ -52,7 +53,8 @@ export default function DraftSuggestionPanel({
     isLoading,
     onSelectHero,
     activeLayers,
-    upcomingSlots = []
+    upcomingSlots = [],
+    predictions
 }: DraftSuggestionPanelProps) {
     const [isCollapsed, setIsCollapsed] = useState(true);
     const [positionFilters, setPositionFilters] = useState<Set<string>>(new Set());
@@ -161,6 +163,26 @@ export default function DraftSuggestionPanel({
             analysisSuggestions: uniqueAnalysis
         };
     }, [suggestions]);
+
+    // Prediction Rendering Logic
+    const predictionList = useMemo(() => {
+        if (!predictions) return [];
+        // Determine Opponent Side based on panel side
+        // If Panel is BLUE, we show RED predictions (what the enemy will do)
+        const targetSide = side === 'BLUE' ? 'red' : 'blue'; // Lowercase for object key
+        const data = predictions[targetSide];
+        if (!data || !data.predictions) return [];
+        return data.predictions.map((p: any) => ({
+            hero: p.hero,
+            score: Math.round((p.wins / p.picks) * 100), // Win Rate as score
+            picks: p.picks,
+            wins: p.wins,
+            role: p.role,
+            reason: `${p.picks} games (${Math.round((p.wins / p.picks) * 100)}% WR)`,
+            type: 'history', // Treat as history-based suggestion
+            phase: 'PICK'
+        }));
+    }, [predictions, side]);
 
 
     const renderGrid = (items: Suggestion[], emptyMsg: string) => {
@@ -309,6 +331,90 @@ export default function DraftSuggestionPanel({
         )
     }
 
+    // Prediction List - Show ONLY the next predicted enemy pick
+    const renderPredictionList = (items: any[]) => {
+        if (isLoading) {
+            return (
+                <div className="flex items-center justify-center py-6">
+                    <Loader2 className="w-6 h-6 animate-spin text-purple-400" />
+                    <span className="ml-2 text-xs text-slate-400">Analyzing...</span>
+                </div>
+            )
+        }
+
+        if (!items || items.length === 0) {
+            return (
+                <div className="text-center text-xs text-slate-500 py-4 italic">
+                    No prediction data available.
+                </div>
+            )
+        }
+
+        // Get ONLY the first prediction (next enemy pick)
+        const nextPick = items[0]
+
+        // Determine opponent's next pick order
+        const targetSide = side === 'BLUE' ? 'red' : 'blue'
+        const nextPhases = predictions?.[targetSide]?.nextPhases || []
+        const nextPickOrder = nextPhases.length > 0 ? nextPhases[0] : 'NEXT PICK'
+
+        return (
+            <div className="flex flex-col items-center gap-3 py-2">
+                {/* Pick Order Badge */}
+                <div className="flex items-center gap-2">
+                    <Badge className="bg-purple-600 text-white text-xs px-3 py-1 font-bold">
+                        {nextPickOrder}
+                    </Badge>
+                    <span className="text-[10px] text-slate-400">Enemy Prediction</span>
+                </div>
+
+                {/* Hero Card - Larger single display */}
+                <div
+                    className="relative group flex flex-col items-center gap-2 p-4 rounded-2xl bg-gradient-to-b from-purple-950/50 to-slate-900/80 border-2 border-purple-500/40 hover:border-purple-400 hover:shadow-[0_0_20px_rgba(168,85,247,0.4)] transition-all duration-300 cursor-pointer"
+                    onClick={() => onSelectHero && onSelectHero(nextPick.hero)}
+                >
+                    {/* Hero Image */}
+                    <div className="relative w-20 h-20 rounded-xl overflow-hidden border-2 border-purple-500/50 shadow-lg">
+                        <Image src={nextPick.hero.icon_url} alt={nextPick.hero.name} fill className="object-cover" />
+
+                        {/* Role Badge */}
+                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent py-1 px-2">
+                            <span className="text-[9px] font-bold text-purple-300 uppercase">{nextPick.role}</span>
+                        </div>
+                    </div>
+
+                    {/* Hero Name */}
+                    <div className="text-lg font-black text-white text-center">{nextPick.hero.name}</div>
+
+                    {/* Stats */}
+                    <div className="flex items-center gap-3 text-xs">
+                        <div className="flex items-center gap-1 text-purple-300">
+                            <span className="font-bold">{nextPick.picks}</span>
+                            <span className="text-slate-400">games</span>
+                        </div>
+                        <div className="w-px h-3 bg-slate-600" />
+                        <div className="flex items-center gap-1 text-green-400">
+                            <span className="font-bold">{nextPick.score}%</span>
+                            <span className="text-slate-400">WR</span>
+                        </div>
+                    </div>
+
+                    {/* Score Badge - Top Right */}
+                    <div className="absolute -top-2 -right-2 z-10">
+                        <div className="bg-purple-600 text-white text-sm font-black px-2.5 py-1 rounded-full shadow-lg border border-purple-400">
+                            {nextPick.score}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Reason */}
+                <div className="text-[10px] text-slate-400 text-center max-w-[200px]">
+                    Based on opponent's most played hero for <span className="text-purple-300 font-bold">{nextPick.role}</span> role
+                </div>
+            </div>
+        )
+    }
+
 
 
 
@@ -324,20 +430,16 @@ export default function DraftSuggestionPanel({
                         </CardTitle>
 
                         {upcomingSlots.length > 0 && (
-                            <Badge className={`text-[9px] px-2 py-0.5 font-bold ${upcomingSlots[0].type === 'BAN'
+                            <Badge className={`text-[9px] px-2 py-0.5 font-bold whitespace-nowrap ${upcomingSlots[0].type === 'BAN'
                                 ? 'bg-red-600 text-white'
                                 : 'bg-green-600 text-white'}`}>
-                                {upcomingSlots[0].type === 'BAN' ? 'BAN' : 'PICK'} #{upcomingSlots[0].slotNum}
+                                {upcomingSlots[0].type === 'BAN' ? 'BAN' : 'PICK'} {upcomingSlots[0].slotNum}/{upcomingSlots[0].type === 'BAN' ? 4 : 5}
                             </Badge>
                         )}
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    {isActive && (
-                        <Badge variant="outline" className="bg-green-500/10 text-green-400 border-green-500/30 text-[10px] animate-pulse">
-                            ACTIVE
-                        </Badge>
-                    )}
+
                     <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-white p-0">
                         {isCollapsed ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     </Button>
@@ -348,10 +450,11 @@ export default function DraftSuggestionPanel({
                 <CardContent className="p-0">
                     <Tabs defaultValue="cerebro" value={activeTab} onValueChange={setActiveTab} className="w-full">
                         <div className="px-3 pt-2">
-                            <TabsList className="grid w-full grid-cols-3 h-6 bg-slate-900/80 rounded-md p-0.5">
+                            <TabsList className="grid w-full grid-cols-4 h-6 bg-slate-900/80 rounded-md p-0.5">
                                 <TabsTrigger value="cerebro" className="text-[9px] px-1 data-[state=active]:bg-indigo-600 data-[state=active]:text-white rounded-sm">CEREBRO AI</TabsTrigger>
                                 <TabsTrigger value="history" className="text-[9px] px-1 data-[state=active]:bg-orange-600 data-[state=active]:text-white rounded-sm">HISTORY</TabsTrigger>
                                 <TabsTrigger value="analysis" className="text-[9px] px-1 data-[state=active]:bg-teal-600 data-[state=active]:text-white rounded-sm">ANALYSIS</TabsTrigger>
+                                <TabsTrigger value="prediction" className="text-[9px] px-1 data-[state=active]:bg-purple-600 data-[state=active]:text-white rounded-sm">PREDICTION</TabsTrigger>
                             </TabsList>
                         </div>
 
@@ -383,6 +486,9 @@ export default function DraftSuggestionPanel({
                             </TabsContent>
                             <TabsContent value="analysis" className="mt-0">
                                 {renderAnalysisList(analysisSuggestions)}
+                            </TabsContent>
+                            <TabsContent value="prediction" className="mt-0">
+                                {renderPredictionList(predictionList)}
                             </TabsContent>
                         </div>
                     </Tabs>

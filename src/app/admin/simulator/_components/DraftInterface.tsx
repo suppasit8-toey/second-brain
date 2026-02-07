@@ -13,7 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
-import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown, RefreshCw, Users, Globe, Swords, Link as LinkIcon, User, Target, Settings2, Home, Eye, Zap, Share2, Shield, Ban, History, FileClock, Wrench, AlertTriangle, Loader2 } from 'lucide-react'
+import { Pause, Play, Check, ShieldBan, Brain, ChevronUp, ChevronDown, RefreshCw, Users, Globe, Swords, Link as LinkIcon, User, Target, Settings2, Home, Eye, Zap, Share2, Shield, Ban, History, FileClock, Wrench, AlertTriangle, Loader2, RotateCcw } from 'lucide-react'
 import Image from 'next/image'
 import PostDraftResult from '@/components/draft/PostDraftResult'
 import { Input } from '@/components/ui/input'
@@ -40,7 +40,7 @@ interface DraftInterfaceProps {
 }
 
 const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, game, initialHeroes, teamAGlobalBans = [], teamBGlobalBans = [], onReset, onPausedChange }, ref) => {
-    const { state, currentStep, lockIn, togglePause } = useDraftEngine()
+    const { state, currentStep, lockIn, togglePause, undoLastAction } = useDraftEngine()
 
     const [recommendations, setRecommendations] = useState<any>({ analyst: [], history: [], hybrid: [], smartBan: [] })
     const [isLoadingRecommendations, setIsLoadingRecommendations] = useState(false)
@@ -141,8 +141,9 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     const [opponentPoolRoleFilter, setOpponentPoolRoleFilter] = useState('ALL')
     const [recRoleFilter, setRecRoleFilter] = useState('ALL')
     const [recTypeFilter, setRecTypeFilter] = useState<'PICKS' | 'BANS'>('PICKS')
-    const [banPhase, setBanPhase] = useState<'PHASE_1' | 'PHASE_2'>('PHASE_1')
     const [banSide, setBanSide] = useState<'BLUE' | 'RED' | 'ALL'>('ALL')
+    const [predictionRoleFilter, setPredictionRoleFilter] = useState('ALL')
+    const [predictionMode, setPredictionMode] = useState<'opponent' | 'global'>('opponent')
     const [isHeaderExpanded, setIsHeaderExpanded] = useState(false)
 
     // Auto-switch to Strategic Bans when in BAN slot, Strategic Picks when in PICK slot
@@ -1663,57 +1664,174 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         return STANDARD_LANES.filter(r => !filledRoles.has(r))
     }
 
-    const handleAutoSelect = () => {
-        // Logic: Find best hero from recommendations using CONSENSUS (Intersection of AI & History)
-        const isBan = currentStep?.type === 'BAN'
+    // Helper to get hero object - checks initialHeroes first, then heroMap as fallback
+    const getHero = (id: string) => {
+        const fromInitial = initialHeroes.find(h => h.id === id)
+        if (fromInitial) return fromInitial
 
-        // 1. Get AI Suggestions
-        const aiRecs = (isBan ? recommendations.smartBan : recommendations.hybrid) || []
+        // Fallback to heroMap if not found in initialHeroes
+        const fromMap = heroMap?.[id]
+        if (fromMap) {
+            return {
+                id,
+                name: fromMap.name || 'Unknown',
+                icon_url: fromMap.icon_url || fromMap.icon || '',
+                main_position: [],
+                damage_type: 'Physical'
+            } as Hero
+        }
 
-        // 2. Get History Suggestions
-        const historyRecs = recommendations.historyAnalysis || [] // Assuming this is populated for both phases or general history
+        return undefined
+    }
 
-        // 3. Helper to check availability
-        const isAvailable = (heroId: string) => !unavailableIds.includes(heroId)
+    // Filtering Logic
+    const filteredHeroes = initialHeroes.filter(hero => {
+        const matchesSearch = hero.name.toLowerCase().includes(searchQuery.toLowerCase())
 
-        // 4. Find Intersection (Consensus)
-        const aiMap = new Map<string, any>(aiRecs.map((r: any) => [r.hero.id, r]))
-        const historyMap = new Map<string, any>(historyRecs.map((r: any) => [r.hero.id, r]))
+        // Exact match for the new specific roles which match DB values
+        // hero.main_position is string[]
+        const matchesRole = selectedRole === 'All' || hero.main_position.includes(selectedRole)
 
-        const consensusCandidates: any[] = []
+        // Hide Picked Heroes entirely ("Cut out the ones opponent picked")
+        // But keep Banned/Global Restricted visible (as disabled/grayscale)
+        const isPicked = pickedIds.includes(hero.id)
 
-        aiMap.forEach((aiItem: any, heroId: string) => {
-            if (historyMap.has(heroId) && isAvailable(heroId)) {
-                const historyItem = historyMap.get(heroId)
-                consensusCandidates.push({
-                    hero: aiItem.hero,
-                    // Combined Score Logic
-                    score: (aiItem.score || 0) + (historyItem.score || 0),
-                    aiScore: aiItem.score,
-                    hScore: historyItem.score,
-                    reason: `${aiItem.reason} + ${historyItem.reason}`
-                })
+        // Show everything during BAN phase (disabled/badged) so user sees context
+        // PICK phase, hide Picked heroes to clean up the list
+        // ALSO hide our own Global Bans (heroes we played previously) because we can't pick them again
+        const isCurrentGlobalBan = currentGlobalBans.includes(hero.id)
+        const shouldHide = !isBanPhase && (isPicked || isCurrentGlobalBan)
+
+        return matchesSearch && matchesRole && !shouldHide
+    })
+
+    // Helper: Predict Lanes
+    const predictLanes = (picks: Record<number, string>) => {
+        const pickValues = Object.values(picks)
+        const heroes = pickValues.map(id => getHero(id)).filter(Boolean) as Hero[]
+
+        const predicted: Record<string, string> = {}
+        const lanes = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
+        const availableHeroes = [...heroes]
+
+        // Optimizations with main_position
+
+        // Jungle
+        const junglers = availableHeroes.filter(h => h.main_position.includes('Jungle') || h.main_position.includes('Assassin'))
+        if (junglers.length > 0) {
+            predicted['Jungle'] = junglers[0].id
+            availableHeroes.splice(availableHeroes.indexOf(junglers[0]), 1)
+        }
+
+        // Abyssal
+        const adcs = availableHeroes.filter(h => h.main_position.includes('Abyssal') || h.main_position.includes('Marksman'))
+        if (adcs.length > 0) {
+            predicted['Abyssal'] = adcs[0].id
+            availableHeroes.splice(availableHeroes.indexOf(adcs[0]), 1)
+        }
+
+        // Mid
+        const mages = availableHeroes.filter(h => h.main_position.includes('Mid') || h.main_position.includes('Mage'))
+        if (mages.length > 0) {
+            predicted['Mid'] = mages[0].id
+            availableHeroes.splice(availableHeroes.indexOf(mages[0]), 1)
+        }
+
+        // Roam
+        const supports = availableHeroes.filter(h => h.main_position.includes('Roam') || h.main_position.includes('Support') || h.main_position.includes('Tank'))
+        if (supports.length > 0) {
+            predicted['Roam'] = supports[0].id
+            availableHeroes.splice(availableHeroes.indexOf(supports[0]), 1)
+        }
+
+        // Dark Slayer (Warrior/Tank)
+        const ds = availableHeroes.filter(h => h.main_position.includes('Dark Slayer') || h.main_position.includes('Warrior') || h.main_position.includes('Tank'))
+        if (ds.length > 0) {
+            predicted['Dark Slayer'] = ds[0].id
+            availableHeroes.splice(availableHeroes.indexOf(ds[0]), 1)
+        }
+
+        // Fill remaining
+        lanes.forEach(lane => {
+            if (!predicted[lane] && availableHeroes.length > 0) {
+                predicted[lane] = availableHeroes[0].id
+                availableHeroes.shift()
             }
         })
 
-        // Sort Consensus by Combined Score
-        consensusCandidates.sort((a, b) => b.score - a.score)
+        return predicted
+    }
+
+    const handleAutoSelect = () => {
+        // Logic: Use DISPLAYED suggestions first, then fallback to consensus
+        const isBan = currentStep?.type === 'BAN'
+
+        // Helper to check availability
+        const isAvailable = (heroId: string) => !unavailableIds.includes(heroId)
 
         let bestHero = null
         let pickReason = "ค่าเริ่มต้น"
+        let aiScore = 0
+        let hScore = 0
+        let reasons: string[] = []
 
-        if (consensusCandidates.length > 0) {
-            // Scenario A: Consensus found -> Pick top consensus
-            bestHero = consensusCandidates[0].hero
-            pickReason = `ข้อมูลตรงกัน: AI(${consensusCandidates[0].aiScore}) + ประวัติ(${consensusCandidates[0].hScore})`
-            console.log("Auto-Select: Consensus Pick", bestHero.name, "Score:", consensusCandidates[0].score)
-        } else {
-            // Scenario B: No consensus -> Fallback to top available AI pick
-            const availableAI = aiRecs.filter((r: any) => isAvailable(r.hero.id))
-            if (availableAI.length > 0) {
-                bestHero = availableAI[0].hero
-                pickReason = `AI เท่านั้น (คะแนน: ${availableAI[0].score}) - ไม่พบข้อมูลในประวัติ`
-                console.log("Auto-Select: AI Partial Pick", bestHero.name)
+        // Hoist these for use in analysis later
+        const aiRecs = (isBan ? recommendations.smartBan : recommendations.hybrid) || []
+        const historyRecs = recommendations.historyAnalysis || []
+        const consensusCandidates: any[] = [] // Initialize here
+
+        // === PRIORITY 1: Use DISPLAYED Suggestions (blueSuggestions/redSuggestions) ===
+        const displayedSuggestions = currentStep?.side === 'BLUE' ? blueSuggestions : redSuggestions
+        if (displayedSuggestions && displayedSuggestions.length > 0) {
+            const availableDisplayed = displayedSuggestions.filter((s: any) => isAvailable(String(s.hero?.id)))
+            if (availableDisplayed.length > 0) {
+                bestHero = availableDisplayed[0].hero
+                aiScore = availableDisplayed[0].score || 0
+                pickReason = `Advisor แนะนำ: ${availableDisplayed[0].reason || 'Top suggestion'}`
+                reasons = (availableDisplayed[0].reason || '').split(/, |; /).filter(Boolean)
+                console.log("Auto-Select: Using Displayed Suggestion", bestHero.name, "Score:", aiScore)
+            }
+        }
+
+        // === PRIORITY 2: Fallback to Consensus (AI + History intersection) ===
+        if (!bestHero) {
+            const aiMap = new Map<string, any>(aiRecs.map((r: any) => [r.hero.id, r]))
+            const historyMap = new Map<string, any>(historyRecs.map((r: any) => [r.hero.id, r]))
+
+            aiMap.forEach((aiItem: any, heroId: string) => {
+                if (historyMap.has(heroId) && isAvailable(heroId)) {
+                    const historyItem = historyMap.get(heroId)
+                    consensusCandidates.push({
+                        hero: aiItem.hero,
+                        score: (aiItem.score || 0) + (historyItem.score || 0),
+                        aiScore: aiItem.score,
+                        hScore: historyItem.score,
+                        reason: `${aiItem.reason} + ${historyItem.reason}`,
+                        matchupData: aiItem.matchupData // Preserve matchup data
+                    })
+                }
+            })
+
+            consensusCandidates.sort((a, b) => b.score - a.score)
+
+
+            if (consensusCandidates.length > 0) {
+                bestHero = consensusCandidates[0].hero
+                aiScore = consensusCandidates[0].aiScore
+                hScore = consensusCandidates[0].hScore
+                pickReason = `ข้อมูลตรงกัน: AI(${aiScore}) + ประวัติ(${hScore})`
+                reasons = (consensusCandidates[0].reason || '').split(/ \+ | • |, /).filter(Boolean)
+                console.log("Auto-Select: Consensus Pick", bestHero.name, "Score:", consensusCandidates[0].score)
+            } else {
+                // Fallback to top available AI pick
+                const availableAI = aiRecs.filter((r: any) => isAvailable(r.hero.id))
+                if (availableAI.length > 0) {
+                    bestHero = availableAI[0].hero
+                    aiScore = availableAI[0].score || 0
+                    pickReason = `AI เท่านั้น (คะแนน: ${aiScore}) - ไม่พบข้อมูลในประวัติ`
+                    reasons = (availableAI[0].reason || '').split(/, /).filter(Boolean)
+                    console.log("Auto-Select: AI Partial Pick", bestHero.name)
+                }
             }
         }
 
@@ -1724,25 +1842,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             // Flatten reasons?
             // If consensus, we have combined string.
             // Let's re-parse or build array properly above
-            let reasons: string[] = []
-            if (consensusCandidates.length > 0) {
-                // Try to split the combined reason string back if possible, or just pass as array?
-                // The 'reason' field in consensusCandidates was constructed as string.
-                // Better to pass raw arrays?
-                // Let's use the constructed string and split by ' + ' or ' • ' if used earlier.
-                // In handleAutoSelect above we set: reason: `${aiItem.reason} + ${historyItem.reason}`
-                // In getRecommendations, reasons are comma joined.
-                const rawReason = consensusCandidates[0].reason || ""
-                // Split by common delimiters we introduced
-                reasons = rawReason.split(/ \+ | • |, /).filter(Boolean)
-            } else if (aiRecs.length > 0) {
-                const rawReason = aiRecs.find((r: any) => r.hero.id === bestHero?.id)?.reason || ""
-                reasons = rawReason.split(/, /).filter(Boolean)
-            }
+            // NOTE: reasons, aiScore, hScore are already calculated in logic above
 
-            // We also need separate scores
-            const aiScore = consensusCandidates.length > 0 ? consensusCandidates[0].aiScore : (aiRecs.find((r: any) => r.hero.id === bestHero?.id)?.score || 0)
-            const hScore = consensusCandidates.length > 0 ? consensusCandidates[0].hScore : 0
 
 
 
@@ -1913,6 +2014,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                         .sort((a, b) => b.picks - a.picks || b.wins - a.wins)
 
                     // Pick top available
+                    // Pick top available
                     for (const cand of candidates) {
                         // Check availability (not picked/banned)
                         // Note: unavailableIds includes current picks and bans.
@@ -1941,18 +2043,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 predictedEnemyHeroes
             })
 
-            // Extract Matchup Data from AI Recs or Consensus
-            const aiRecMatch = aiRecs.find((r: any) => r.hero.id === bestHero?.id)
-            const matchupData = aiRecMatch?.matchupData || (consensusCandidates.length > 0 ? consensusCandidates[0].matchupData : undefined)
-
-            // [NEW] Determine Recommended Role
-            // Logic: Find which of the 'remainingAllyRoles' this hero can fill.
-            // Priority: Main Role matches > Secondary Role matches > Any match
+            // [NEW] Determine Recommended Role for AutoSelect context (already calculated for predictedEnemyHeroes, but this is for the ALLY hero)
             let recommendedRole = "Flex"
             const remainingAllyRolesList = getRemainingRoles(currentAllyPicks)
-
-            if (bestHero && bestHero.main_position) {
-                // Map API roles in bestHero.main_position to Standard Lane Names
+            if (bestHero.main_position) {
                 const ROLES_MAP: Record<string, string> = {
                     'Dark Slayer': 'Dark Slayer', 'DSL': 'Dark Slayer', 'Slayer': 'Dark Slayer', 'Fighter': 'Dark Slayer', 'Warrior': 'Dark Slayer',
                     'Jungle': 'Jungle', 'Assassin': 'Jungle',
@@ -1960,136 +2054,200 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     'Abyssal Dragon': 'Abyssal Dragon', 'Abyssal': 'Abyssal Dragon', 'Marksman': 'Abyssal Dragon', 'Carry': 'Abyssal Dragon',
                     'Support': 'Support', 'Roam': 'Support'
                 }
-
-                // normalized hero roles
                 const heroRoles = bestHero.main_position.map((p: string) => ROLES_MAP[p] || ROLES_MAP[p.replace(' Lane', '')]).filter(Boolean)
-
-                // Find intersection with remaining roles
                 const possibleRoles = remainingAllyRolesList.filter(r => heroRoles.includes(r))
-
                 if (possibleRoles.length > 0) {
-                    // Show all possible roles joined
                     recommendedRole = possibleRoles.join(' / ')
-                } else {
-                    // Fallback: If no intersection (e.g. all filled or invalid mapping), show the hero's natural roles
-                    // This answers "Where CAN I play this?" even if the team full/confused.
-                    if (heroRoles.length > 0) {
-                        recommendedRole = heroRoles.join(' / ')
-                    }
+                } else if (heroRoles.length > 0) {
+                    recommendedRole = heroRoles.join(' / ')
                 }
             }
 
+            // Extract Matchup Data from AI Recs or Consensus locally
+            const aiRecMatch = aiRecs.find((r: any) => r.hero.id === bestHero?.id)
+            const matchupData = aiRecMatch?.matchupData || (consensusCandidates.length > 0 ? consensusCandidates[0].matchupData : undefined)
+
             setAutoSelectAnalysis({
-                aiScore,
-                historyScore: hScore,
-                reasons,
+                aiScore: consensusCandidates.length > 0 ? consensusCandidates[0].aiScore : (aiRecMatch?.score || 0),
+                historyScore: consensusCandidates.length > 0 ? consensusCandidates[0].hScore : 0,
+                reasons: aiRecMatch?.reason ? [aiRecMatch.reason] : [],
                 matchupData,
                 recommendedRole
             })
             setShowAnalysisModal(true)
-        } else {
-            // console.log("No auto-recommendation available")
-            alert("ไม่พบคำแนะนำอัตโนมัติจาก Cerebro หรือ ประวัติการเล่น")
         }
     }
 
-    // Helper to get hero object - checks initialHeroes first, then heroMap as fallback
-    const getHero = (id: string) => {
-        const fromInitial = initialHeroes.find(h => h.id === id)
-        if (fromInitial) return fromInitial
+    const handleAnalyzePickedHero = (hero: Hero, side: 'BLUE' | 'RED' = 'BLUE', isPrediction: boolean = false) => {
+        // Logic similar to AutoSelect but for a specific picked hero
+        // Can be Ally or Enemy
+        if (!hero) return
 
-        // Fallback to heroMap if not found in initialHeroes
-        const fromMap = heroMap?.[id]
-        if (fromMap) {
-            return {
-                id,
-                name: fromMap.name || 'Unknown',
-                icon_url: fromMap.icon_url || fromMap.icon || '',
-                main_position: [],
-                damage_type: 'Physical'
-            } as Hero
-        }
+        // Context Setup
+        const isBan = currentStep?.type === 'BAN'
 
-        return undefined
-    }
+        // Determine "Ally" vs "Enemy" perspective for the analysis
+        // If analyzing an Ally Pick -> We want to see threats (enemies)
+        // If analyzing an Enemy Pick -> We want to see counters (allies) OR who they threaten
+        // But the dialog shows "Advantage vs Enemy".
 
-    // Filtering Logic
-    const filteredHeroes = initialHeroes.filter(hero => {
-        const matchesSearch = hero.name.toLowerCase().includes(searchQuery.toLowerCase())
+        // For simplicity:
+        // "Ally Picks" = The team the hero belongs to
+        // "Enemy Picks" = The opposing team
 
-        // Exact match for the new specific roles which match DB values
-        // hero.main_position is string[]
-        const matchesRole = selectedRole === 'All' || hero.main_position.includes(selectedRole)
+        let targetAllyPicks = isPrediction ? (side === 'BLUE' ? state.bluePicks : state.redPicks) : (side === 'BLUE' ? state.bluePicks : state.redPicks)
+        // If it's a LOCKED pick, use state. If Prediction, we might need to simulate it being picked?
+        // Actually, for Analysis Dialog, we just need the LISTS of heroes to compare against.
 
-        // Hide Picked Heroes entirely ("Cut out the ones opponent picked")
-        // But keep Banned/Global Restricted visible (as disabled/grayscale)
-        const isPicked = pickedIds.includes(hero.id)
+        // Fix: If isPrediction, 'hero' is not in the picks list yet. 
+        // But 'currentAllyPicks' (for the dialog context) should probably be the OPPONENT of the hero being analyzed?
+        // No, the dialog shows "Hero X (The one analyzed)" vs "Enemies".
 
-        // Show everything during BAN phase (disabled/badged) so user sees context
-        // PICK phase, hide Picked heroes to clean up the list
-        // ALSO hide our own Global Bans (heroes we played previously) because we can't pick them again
-        const isCurrentGlobalBan = currentGlobalBans.includes(hero.id)
-        const shouldHide = !isBanPhase && (isPicked || isCurrentGlobalBan)
+        // Correct mappings:
+        // Analyzed Hero Team = side
+        // Analyzed Hero Opponents = other side
 
-        return matchesSearch && matchesRole && !shouldHide
-    })
+        const analyzedHeroTeam = side
+        const opponentTeam = side === 'BLUE' ? 'RED' : 'BLUE'
 
-    // Helper: Predict Lanes
-    const predictLanes = (picks: Record<number, string>) => {
-        const pickValues = Object.values(picks)
-        const heroes = pickValues.map(id => getHero(id)).filter(Boolean) as Hero[]
+        const currentAllyPicks = analyzedHeroTeam === 'BLUE' ? state.bluePicks : state.redPicks // Teammates
+        const currentEnemyPicks = analyzedHeroTeam === 'BLUE' ? state.redPicks : state.bluePicks // Opponents (Enemies in Dialog)
 
-        const predicted: Record<string, string> = {}
-        const lanes = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal', 'Roam']
-        const availableHeroes = [...heroes]
+        // Setup Matchups and Predictions (as in AutoSelect)
 
-        // Optimizations with main_position
+        // 1. Predict Enemy Lanes (Logic-based)
+        const defaultEnemyLanes = predictLanes(currentEnemyPicks)
+        const remainingEnemyRolesList = getRemainingRoles(currentEnemyPicks)
 
-        // Jungle
-        const junglers = availableHeroes.filter(h => h.main_position.includes('Jungle') || h.main_position.includes('Assassin'))
-        if (junglers.length > 0) {
-            predicted['Jungle'] = junglers[0].id
-            availableHeroes.splice(availableHeroes.indexOf(junglers[0]), 1)
-        }
+        // 2. Calculate Enemy Matchups (Advantage of Analyzed Hero vs Each Enemy)
+        const enemyMatchups = Object.values(currentEnemyPicks).map(targetId => {
+            const targetHero = getHero(targetId)
+            if (!targetHero) return null
 
-        // Abyssal
-        const adcs = availableHeroes.filter(h => h.main_position.includes('Abyssal') || h.main_position.includes('Marksman'))
-        if (adcs.length > 0) {
-            predicted['Abyssal'] = adcs[0].id
-            availableHeroes.splice(availableHeroes.indexOf(adcs[0]), 1)
-        }
+            // Determine Role
+            let role = 'Flex'
+            const targetTeamName = opponentTeam === 'BLUE' ? match.team_a_name : match.team_b_name
+            const cleanTargetTeamName = targetTeamName?.replace(/\s*\(Bot\)\s*$/i, '') || targetTeamName
+            const targetTeamStats = cleanTargetTeamName ? teamStats[cleanTargetTeamName] : undefined
 
-        // Mid
-        const mages = availableHeroes.filter(h => h.main_position.includes('Mid') || h.main_position.includes('Mage'))
-        if (mages.length > 0) {
-            predicted['Mid'] = mages[0].id
-            availableHeroes.splice(availableHeroes.indexOf(mages[0]), 1)
-        }
-
-        // Roam
-        const supports = availableHeroes.filter(h => h.main_position.includes('Roam') || h.main_position.includes('Support') || h.main_position.includes('Tank'))
-        if (supports.length > 0) {
-            predicted['Roam'] = supports[0].id
-            availableHeroes.splice(availableHeroes.indexOf(supports[0]), 1)
-        }
-
-        // Dark Slayer (Warrior/Tank)
-        const ds = availableHeroes.filter(h => h.main_position.includes('Dark Slayer') || h.main_position.includes('Warrior') || h.main_position.includes('Tank'))
-        if (ds.length > 0) {
-            predicted['Dark Slayer'] = ds[0].id
-            availableHeroes.splice(availableHeroes.indexOf(ds[0]), 1)
-        }
-
-        // Fill remaining
-        lanes.forEach(lane => {
-            if (!predicted[lane] && availableHeroes.length > 0) {
-                predicted[lane] = availableHeroes[0].id
-                availableHeroes.shift()
+            if (targetTeamStats && targetTeamStats.heroStats && targetTeamStats.heroStats[targetId]) {
+                const roleStats = targetTeamStats.heroStats[targetId].roleStats || {}
+                let maxPicks = -1
+                let bestRole = null
+                Object.entries(roleStats).forEach(([r, stats]: [string, any]) => {
+                    if (stats.picks > maxPicks) {
+                        maxPicks = stats.picks
+                        bestRole = r
+                    }
+                })
+                if (bestRole) role = bestRole
+                else role = Object.entries(defaultEnemyLanes).find(([_, id]) => id === targetId)?.[0] || 'Flex'
+            } else {
+                role = Object.entries(defaultEnemyLanes).find(([_, id]) => id === targetId)?.[0] || 'Flex'
             }
+
+            // Determine Advantage (Analyzed Hero vs Target)
+            // We don't have recommendations here easily, unless we fetch them or have them.
+            // Ideally we'd have 'matchupData' for the analyzed hero.
+            // We can try to find it in 'recommendations.hybrid' or 'recommendations.smartBan' IF the hero is there.
+
+            let advantage: 'Strong' | 'Weak' | 'Neutral' = 'Neutral'
+            // Search in recommendations
+            const allRecs = [...recommendations.hybrid, ...recommendations.smartBan]
+            const rec = allRecs.find((r: any) => String(r.hero.id) === String(hero.id))
+
+            if (rec && rec.matchupData) {
+                if (rec.matchupData.strongAgainst.some((h: Hero) => String(h.id) === String(targetId))) advantage = 'Strong'
+                else if (rec.matchupData.weakAgainst.some((h: Hero) => String(h.id) === String(targetId))) advantage = 'Weak'
+            }
+
+            return { hero: targetHero, role, advantage }
+        }).filter(Boolean) as { hero: Hero, role: string, advantage: 'Strong' | 'Weak' | 'Neutral' }[]
+
+        // 3. Predict Potential Enemy Picks
+        const predictedEnemyHeroes: { role: string, hero: Hero, reason: string }[] = []
+
+        // Only predict if NOT deep recursion (though here it's fine)
+        if (!isPrediction) {
+            remainingEnemyRolesList.forEach(role => {
+                let predictedHero: Hero | null = null
+                let reason = ""
+                const enemyTeamName = opponentTeam === 'BLUE' ? match.team_a_name : match.team_b_name
+                const cleanEnemyTeamName = enemyTeamName?.replace(/\s*\(Bot\)\s*$/i, '') || enemyTeamName
+                const enemyStats = cleanEnemyTeamName ? teamStats[cleanEnemyTeamName] : undefined
+
+                if (enemyStats && enemyStats.heroStats) {
+                    let dbRole = role
+                    if (role === 'Abyssal Dragon') dbRole = 'Abyssal'
+                    else if (role === 'Support') dbRole = 'Roam'
+
+                    const candidates = Object.entries(enemyStats.heroStats)
+                        .map(([hId, stats]: [string, any]) => {
+                            const rStats = stats.roleStats?.[dbRole]
+                            if (rStats && rStats.picks > 0) return { hId, picks: rStats.picks, wins: rStats.wins }
+                            return null
+                        })
+                        .filter((c): c is { hId: string, picks: number, wins: number } => c !== null)
+                        .sort((a, b) => b.picks - a.picks || b.wins - a.wins)
+
+                    for (const cand of candidates) {
+                        if (!unavailableIds.includes(cand.hId)) {
+                            const h = getHero(cand.hId)
+                            if (h) {
+                                predictedHero = h
+                                reason = `ประวัติ: ${cand.picks} เกม`
+                                break
+                            }
+                        }
+                    }
+                }
+                if (predictedHero) predictedEnemyHeroes.push({ role, hero: predictedHero, reason })
+            })
+        }
+
+        // [NEW] Determine Recommended Role for the ANALYZED hero
+        let recommendedRole = "Flex"
+        const remainingAllyRolesList = getRemainingRoles(currentAllyPicks)
+        if (hero.main_position) {
+            const ROLES_MAP: Record<string, string> = {
+                'Dark Slayer': 'Dark Slayer', 'DSL': 'Dark Slayer', 'Slayer': 'Dark Slayer', 'Fighter': 'Dark Slayer', 'Warrior': 'Dark Slayer',
+                'Jungle': 'Jungle', 'Assassin': 'Jungle',
+                'Mid': 'Mid', 'Mage': 'Mid',
+                'Abyssal Dragon': 'Abyssal Dragon', 'Abyssal': 'Abyssal Dragon', 'Marksman': 'Abyssal Dragon', 'Carry': 'Abyssal Dragon',
+                'Support': 'Support', 'Roam': 'Support'
+            }
+            const heroRoles = hero.main_position.map((p: string) => ROLES_MAP[p] || ROLES_MAP[p.replace(' Lane', '')]).filter(Boolean)
+            const possibleRoles = remainingAllyRolesList.filter(r => heroRoles.includes(r))
+            if (possibleRoles.length > 0) recommendedRole = possibleRoles.join(' / ')
+            else if (heroRoles.length > 0) recommendedRole = heroRoles.join(' / ')
+        }
+
+        // Set Context and Open
+        setAutoSelectHero(hero)
+        setAutoSelectContext({
+            remainingAllyRoles: remainingAllyRolesList,
+            remainingEnemyRoles: remainingEnemyRolesList,
+            enemyHeroIds: Object.values(currentEnemyPicks),
+            enemyMatchups,
+            predictedEnemyHeroes
         })
 
-        return predicted
+        // Score/Reason?
+        // If we have it in recs, use it. Else empty.
+        const allRecs = [...recommendations.hybrid, ...recommendations.smartBan]
+        const rec = allRecs.find((r: any) => String(r.hero.id) === String(hero.id))
+
+        setAutoSelectAnalysis({
+            aiScore: rec?.score || 0,
+            historyScore: 0,
+            reasons: rec?.reason ? [rec.reason] : [],
+            matchupData: rec?.matchupData,
+            recommendedRole
+        })
+        setShowAnalysisModal(true)
     }
+
+
 
     // Check if game is already finished (from DB)
     const isGameFinished = !!game.winner
@@ -2200,6 +2358,87 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         )
     }
 
+    // [NEW] Calculate Enemy Predictions (Memoized for Live View)
+    const calculatedEnemyPredictions = useMemo(() => {
+        if (!teamStats) return { blue: [], red: [] }
+
+        // Helper: Get Next Phases (PICKS ONLY)
+        const getNextPhases = (side: 'BLUE' | 'RED') => {
+            // Filter for only PICK steps for this side
+            const remainingPickSteps = DRAFT_SEQUENCE.slice(state.stepIndex).filter(s => s.side === side && s.type === 'PICK')
+
+            const phases: string[] = []
+            // Count past PICKS to get correct number
+            const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === side)
+            let pickCount = past.filter(s => s.type === 'PICK').length
+
+            remainingPickSteps.slice(0, 2).forEach(s => {
+                pickCount++
+                phases.push(`PICK ${pickCount}`)
+            })
+            return phases
+        }
+
+        const predictForTeam = (teamName: string, picks: Record<number, string>, side: 'BLUE' | 'RED') => {
+            const cleanName = teamName?.replace(/\s*\(Bot\)\s*$/i, '') || teamName
+            const stats = cleanName ? teamStats[cleanName] : undefined
+
+            const nextPhases = getNextPhases(side)
+
+            // If next is BAN, we should predict potential bans? 
+            // For now, let's keep predicting HERO PICKS for remaining roles (what they need).
+            // But maybe highlight if they are about to Ban?
+            // User request: "Predict opponent's forward pick" -> usually implies Picks.
+
+            if (!stats || !stats.heroStats) return { predictions: [], nextPhases }
+
+            const remainingRoles = getRemainingRoles(picks)
+            const predictions: { role: string, hero: Hero, reason: string, picks: number, wins: number }[] = []
+
+            remainingRoles.forEach(role => {
+                let dbRole = role
+                if (role === 'Abyssal Dragon') dbRole = 'Abyssal'
+                else if (role === 'Support') dbRole = 'Roam'
+
+                const candidates = Object.entries(stats.heroStats)
+                    .map(([hId, s]: [string, any]) => {
+                        const rStats = s.roleStats?.[dbRole]
+                        if (rStats && rStats.picks > 0) {
+                            return { hId, picks: rStats.picks, wins: rStats.wins }
+                        }
+                        return null
+                    })
+                    .filter((c): c is { hId: string, picks: number, wins: number } => c !== null)
+                    .sort((a, b) => b.picks - a.picks || b.wins - a.wins)
+
+                for (const cand of candidates) {
+                    if (!unavailableIds.includes(cand.hId)) {
+                        const hero = getHero(cand.hId)
+                        if (hero) {
+                            predictions.push({
+                                role,
+                                hero,
+                                reason: `Most Played ${role}`,
+                                picks: cand.picks,
+                                wins: cand.wins
+                            })
+                            break
+                        }
+                    }
+                }
+            })
+            return { predictions, nextPhases }
+        }
+
+        return {
+            blue: predictForTeam(game.blue_team_name, state.bluePicks, 'BLUE'),
+            red: predictForTeam(game.red_team_name, state.redPicks, 'RED')
+        }
+
+    }, [teamStats, game.blue_team_name, game.red_team_name, state.bluePicks, state.redPicks, unavailableIds, state.stepIndex])
+
+    // Update auto-analysis logic to uses the Ref if needed, but for now it is standalone.
+
     // Render POST-DRAFT Screen if finished AND user clicked the button
     // Helper: Get Layer Icon
     const getLayerIcon = (id: string) => {
@@ -2304,145 +2543,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         )
     }
 
-    const handleAnalyzePickedHero = async (hero: Hero) => {
-        if (isLoadingRecommendations) return
-        setIsLoadingRecommendations(true)
 
-        // 1. Determine Team Context (Ally vs Enemy) based on who picked this hero
-        const isBluePick = Object.values(state.bluePicks).includes(hero.id)
-        const isRedPick = Object.values(state.redPicks).includes(hero.id)
 
-        let currentAllyPicks = isBluePick ? state.bluePicks : state.redPicks
-        let currentEnemyPicks = isBluePick ? state.redPicks : state.bluePicks
-        let side = isBluePick ? 'BLUE' : 'RED'
-
-        // Specator/Edge Case: If not found in either (shouldn't happen for picked hero), fallback to current step side
-        if (!isBluePick && !isRedPick) {
-            side = currentStep?.side || 'BLUE'
-            currentAllyPicks = side === 'BLUE' ? state.bluePicks : state.redPicks
-            currentEnemyPicks = side === 'BLUE' ? state.redPicks : state.bluePicks
-        }
-
-        const recs = await getRecommendations(
-            match.version_id,
-            Object.values(state.bluePicks),
-            Object.values(state.redPicks),
-            [...state.blueBans, ...state.redBans],
-            [...teamAGlobalBans, ...teamBGlobalBans],
-            {
-                matchId: match.id,
-                side: side as 'BLUE' | 'RED', // Analyze from the perspective of the hero's team
-                phase: 'PICK',
-                pickOrder: state.stepIndex + 1, // Hypothetical next step or current
-                targetTeamName: side === 'BLUE' ? match.team_a_name : match.team_b_name,
-                enemyTeamName: side === 'BLUE' ? match.team_b_name : match.team_a_name,
-                tournamentId: match.tournament_id
-            },
-            currentMode,
-            undefined,
-            historyMode,
-            hero.id
-        )
-
-        // Find our hero analysis
-        const analysis = recs.analyst.find((r: any) => r.hero.id === hero.id) || recs.smartBan.find((r: any) => r.hero.id === hero.id) || recs.history.find((r: any) => r.hero.id === hero.id)
-
-        if (analysis) {
-            // 2. Calculate Enemy Matchups (Replicating handleAutoSelect Logic)
-            const mData = analysis.matchupData
-            const specificMatchups = mData?.specificMatchups
-
-            // Determine Hero's Role for Matchup Context
-            let myLikelyRole = 'Mid'
-            if (hero.main_position) {
-                const remainingRoles = getRemainingRoles(currentAllyPicks)
-                // Filter out the slot this hero occupies? No, we want to know what role it fills.
-                // Simplified: Just take first main role or infer from remaining if relevant.
-                myLikelyRole = hero.main_position[0]
-                // Enhanced matching logic could go here but simple is safer for crash prevention
-            }
-
-            const enemyMatchups = Object.entries(currentEnemyPicks).map(([slotIdx, targetId]) => {
-                const targetHero = initialHeroes.find(h => h.id === targetId)
-                if (!targetHero) return null
-
-                // Determine Enemy Role (Simple approximation based on slot or main role)
-                const isBan = false // We are analyzing picks
-                // Logic from handleAutoSelect for role determination:
-                // ... (simplified version)
-                let role = targetHero.main_position?.[0] || 'Flex'
-                // For accurate role, we might check manualLanes?
-                // check manualLanes: 
-                const assignedLanes = manualLanes[targetHero.id]
-                if (assignedLanes && assignedLanes.length > 0) {
-                    // specific lane names map needed? 
-                    // The component uses 'Dark Slayer', etc.
-                    // manualLanes stores IDs like 'Dark Slayer'.
-                    role = assignedLanes[0] // Assuming map aligns
-                }
-
-                let advantage: 'Strong' | 'Weak' | 'Neutral' = 'Neutral'
-
-                if (specificMatchups && specificMatchups.length > 0) {
-                    const record = specificMatchups.find((m: any) =>
-                        String(m.enemyId) === String(targetId) &&
-                        m.position === myLikelyRole &&
-                        m.enemyPosition === role
-                    )
-                    if (record) {
-                        if (record.winRate >= 53) advantage = 'Strong'
-                        else if (record.winRate <= 47) advantage = 'Weak'
-                        else advantage = 'Neutral'
-                    }
-                }
-
-                // Fallback to General Lists if specific not found or neutral
-                if (advantage === 'Neutral' && mData) {
-                    if (mData.strongAgainst.some((h: Hero) => String(h.id) === String(targetId))) advantage = 'Strong'
-                    else if (mData.weakAgainst.some((h: Hero) => String(h.id) === String(targetId))) advantage = 'Weak'
-                }
-
-                return {
-                    hero: targetHero,
-                    role,
-                    advantage
-                }
-            }).filter(Boolean) as { hero: Hero, role: string, advantage: 'Strong' | 'Weak' | 'Neutral' }[]
-
-            // 3. Recommended Role Logic
-            const remainingAllyRolesList = getRemainingRoles(currentAllyPicks)
-            // Since the hero IS picked, it fills a role. We should really check what role it was assigned or just list its capabilities.
-            // We can re-use the "intersection" logic.
-            let recommendedRole = "Flex"
-            // const heroRoles = hero.main_position... (simplified)
-            if (hero.main_position) {
-                recommendedRole = hero.main_position.join(' / ')
-            }
-
-            setAutoSelectAnalysis({
-                aiScore: analysis.score,
-                historyScore: analysis.score,
-                reasons: Array.isArray(analysis.reason) ? analysis.reason : [analysis.reason],
-                matchupData: analysis.matchupData,
-                recommendedRole
-            })
-            setAutoSelectHero(hero)
-
-            // Populate Context with Enemy Data
-            setAutoSelectContext({
-                remainingAllyRoles: remainingAllyRolesList,
-                remainingEnemyRoles: getRemainingRoles(currentEnemyPicks),
-                enemyHeroIds: Object.values(currentEnemyPicks),
-                enemyMatchups,
-                predictedEnemyHeroes: [] // Can implement if needed, but maybe overkill for now. User asked for "Analysis" of current state.
-            })
-            setShowAnalysisModal(true)
-        } else {
-            console.warn("Hero analysis not found despite explicit request:", hero.name)
-        }
-
-        setIsLoadingRecommendations(false)
-    }
 
 
     return (
@@ -2489,11 +2591,26 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 {!state.isFinished && !state.isPaused && (
                     <Button
                         size="icon"
-                        className={`h-12 w-12 shrink-0 bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all ${!isLoadingRecommendations ? 'shadow-[0_0_20px_rgba(99,102,241,0.8)] border-indigo-300 scale-105' : 'shadow-none'}`}
+                        className={`h-12 w-12 shrink-0 bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all ${!isLoadingRecommendations ? 'shadow-[0_0_20px_rgba(99,102,241,0.8)] border-indigo-300 animate-pulsing-wiggle' : 'shadow-none'}`}
                         onClick={handleAutoSelect}
                         disabled={isLoadingRecommendations}
                     >
                         {isLoadingRecommendations ? <Loader2 className="w-6 h-6 animate-spin" /> : <Brain className="w-6 h-6" />}
+                    </Button>
+                )}
+
+                {!state.isFinished && state.stepIndex > 0 && (
+                    <Button
+                        size="icon"
+                        variant="outline"
+                        className="h-12 w-12 shrink-0 bg-slate-900/80 border-slate-700 text-slate-300 hover:text-white"
+                        onClick={() => {
+                            undoLastAction()
+                            setSelectedHero(null)
+                        }}
+                        title="Undo"
+                    >
+                        <RotateCcw className="w-5 h-5" />
                     </Button>
                 )}
                 <Button
@@ -2552,7 +2669,15 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     manualLanes={manualLanes}
                     onLaneAssign={handleLaneAssign}
                     suggestionProps={{
-                        suggestions: blueSuggestions,
+                        suggestions: blueSuggestions.length > 0 ? blueSuggestions : (() => {
+                            const preds = (calculatedEnemyPredictions as any)?.blue?.predictions || []
+                            return preds.map((p: any) => ({
+                                hero: p.hero,
+                                score: Math.round((p.wins / p.picks) * 100),
+                                reason: `Prediction: ${p.picks} games (${Math.round((p.wins / p.picks) * 100)}% WR)`,
+                                matchupData: null
+                            }))
+                        })(),
                         isLoading: isBlueSuggestLoading,
                         onGenerate: (mode) => handleGenerateSuggestion('BLUE', mode),
                         onSelectHero: handleHeroClick,
@@ -2570,9 +2695,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                             })
                             return slots
                             return slots
-                        })()
+                        })(),
+                        predictions: calculatedEnemyPredictions
                     }}
-                    onAnalyzeHero={handleAnalyzePickedHero}
+                    onAnalyzeHero={(hero) => handleAnalyzePickedHero(hero, 'BLUE', false)}
                 />
             </div>
 
@@ -2606,6 +2732,8 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     </div>
 
                     <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20 flex items-center gap-2">
+
+
                         <Button
                             variant="outline"
                             size="sm"
@@ -2639,7 +2767,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                         <Button
                             size="sm"
                             variant="outline"
-                            className={`h-8 w-12 px-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${!isLoadingRecommendations ? 'bg-indigo-500/20 border-indigo-400 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.6)]' : 'border-indigo-500/30 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/20 hover:border-indigo-500/50'}`}
+                            className={`h-8 w-12 px-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${!isLoadingRecommendations ? 'bg-indigo-500/20 border-indigo-400 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.6)] animate-pulsing-wiggle' : 'border-indigo-500/30 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/20 hover:border-indigo-500/50'}`}
                             title={isLoadingRecommendations ? "Loading Analysis..." : "Auto Select (AI Best Pick)"}
                             onClick={handleAutoSelect}
                             disabled={isLoadingRecommendations}
@@ -2663,6 +2791,20 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                             ? 'GO TO SUMMARY'
                             : (state.isPaused ? (state.timer === 0 ? 'START DRAFT' : 'RESUME DRAFT') : selectedHero ? 'LOCK IN' : 'Select Hero')
                         }
+                    </Button>
+
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                            undoLastAction()
+                            setSelectedHero(null)
+                        }}
+                        disabled={state.stepIndex === 0 || state.isFinished}
+                        className="bg-slate-900/80 border-slate-700 hover:bg-slate-800 text-slate-400 hover:text-white transition-colors h-8 w-12 px-0"
+                        title="Undo Last Step"
+                    >
+                        <RotateCcw className="w-4 h-4" />
                     </Button>
                 </div>
 
@@ -2690,6 +2832,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                             <FileClock className="w-3 h-3 text-teal-400 hidden md:block" />
                             HISTORY
                         </TabsTrigger>
+                        <TabsTrigger value="prediction" className="text-[10px] lg:text-xs font-mono font-bold data-[state=active]:bg-purple-500/20 data-[state=active]:text-purple-300 data-[state=active]:border data-[state=active]:border-purple-500/50 skew-x-[-10deg] transition-all flex items-center gap-1 justify-center">
+                            <Target className="w-3 h-3 text-purple-400 hidden md:block" />
+                            PREDICTION
+                        </TabsTrigger>
                     </TabsList>
 
                     {/* Tab 0: BOARD (Mobile Only) - Red Left, Blue Right */}
@@ -2709,7 +2855,15 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     manualLanes={manualLanes}
                                     onLaneAssign={handleLaneAssign}
                                     suggestionProps={{
-                                        suggestions: blueSuggestions,
+                                        suggestions: blueSuggestions.length > 0 ? blueSuggestions : (() => {
+                                            const preds = (calculatedEnemyPredictions as any)?.blue?.predictions || []
+                                            return preds.map((p: any) => ({
+                                                hero: p.hero,
+                                                score: Math.round((p.wins / p.picks) * 100),
+                                                reason: `Prediction: ${p.picks} games (${Math.round((p.wins / p.picks) * 100)}% WR)`,
+                                                matchupData: null
+                                            }))
+                                        })(),
                                         isLoading: isBlueSuggestLoading,
                                         onGenerate: (mode) => handleGenerateSuggestion('BLUE', mode),
                                         onSelectHero: handleHeroClick,
@@ -2727,9 +2881,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                             })
                                             return slots
                                             return slots
-                                        })()
+                                        })(),
+                                        predictions: calculatedEnemyPredictions
                                     }}
-                                    onAnalyzeHero={handleAnalyzePickedHero}
+                                    onAnalyzeHero={(hero) => handleAnalyzePickedHero(hero, 'RED', false)}
                                 />
                                 {/* RED Side (Right) */}
                                 <DraftTeamPanel
@@ -2744,7 +2899,15 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                     manualLanes={manualLanes}
                                     onLaneAssign={handleLaneAssign}
                                     suggestionProps={{
-                                        suggestions: redSuggestions,
+                                        suggestions: redSuggestions.length > 0 ? redSuggestions : (() => {
+                                            const preds = (calculatedEnemyPredictions as any)?.red?.predictions || []
+                                            return preds.map((p: any) => ({
+                                                hero: p.hero,
+                                                score: Math.round((p.wins / p.picks) * 100),
+                                                reason: `Prediction: ${p.picks} games (${Math.round((p.wins / p.picks) * 100)}% WR)`,
+                                                matchupData: null
+                                            }))
+                                        })(),
                                         isLoading: isRedSuggestLoading,
                                         onGenerate: (mode) => handleGenerateSuggestion('RED', mode),
                                         onSelectHero: handleHeroClick,
@@ -2762,9 +2925,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                             })
                                             return slots
                                             return slots
-                                        })()
+                                        })(),
+                                        predictions: calculatedEnemyPredictions
                                     }}
-                                    onAnalyzeHero={handleAnalyzePickedHero}
+                                    onAnalyzeHero={(hero) => handleAnalyzePickedHero(hero, 'BLUE', false)}
                                 />
                             </div>
                         </div>
@@ -4557,6 +4721,158 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                             )}
                         </ScrollArea>
                     </TabsContent>
+
+
+                    {/* Tab 5: PREDICTION */}
+                    <TabsContent value="prediction" className="flex-1 min-h-0 bg-slate-950/80 backdrop-blur-md border border-purple-500/20 shadow-[0_0_20px_rgba(168,85,247,0.1)] rounded-xl p-2 data-[state=active]:flex flex-col m-0 overflow-hidden mb-14 lg:mb-0 relative before:absolute before:inset-0 before:bg-[url('/grid-pattern.svg')] before:opacity-5">
+                        <div className="flex flex-col gap-2 shrink-0 mb-2 z-10 bg-slate-950/80 p-2 rounded-lg border border-slate-800 backdrop-blur-sm">
+                            <div className="flex items-center justify-between">
+                                {(() => {
+                                    const isPVE = match.ai_metadata?.mode === 'PVE'
+                                    const isBotBlue = game.blue_team_name === match.team_b_name
+                                    // If PVE: Opponent is always Bot. If PVP: Opponent is the side NOT acting now.
+                                    const targetSide = isPVE
+                                        ? (isBotBlue ? 'BLUE' : 'RED')
+                                        : (currentStep?.side === 'BLUE' ? 'RED' : 'BLUE')
+
+                                    // Find next opponent step
+                                    const nextStepIdx = DRAFT_SEQUENCE.slice(state.stepIndex).findIndex(s => s.side === targetSide)
+                                    const nextStepAbsIdx = nextStepIdx !== -1 ? (state.stepIndex + nextStepIdx) : -1
+                                    const nextStep = nextStepAbsIdx !== -1 ? DRAFT_SEQUENCE[nextStepAbsIdx] : null
+
+                                    const teamName = targetSide === 'BLUE' ? game.blue_team_name : game.red_team_name
+                                    const title = 'ENEMY PREDICTION'
+
+                                    // Calculate Relative Count
+                                    let relativeCount = 0
+                                    let totalCount = 0
+
+                                    if (nextStep) {
+                                        // Count how many steps of this type for this side exist up to this point
+                                        const sameTypeSteps = DRAFT_SEQUENCE.filter(s => s.side === nextStep.side && s.type === nextStep.type)
+                                        totalCount = sameTypeSteps.reduce((acc, curr) => acc + curr.count, 0)
+
+                                        // Calculate current relative index
+                                        const stepsBefore = DRAFT_SEQUENCE.slice(0, nextStepAbsIdx + 1).filter(s => s.side === nextStep.side && s.type === nextStep.type)
+                                        relativeCount = stepsBefore.reduce((acc, curr) => acc + curr.count, 0)
+                                    }
+
+                                    return (
+                                        <>
+                                            <h4 className="text-[10px] font-bold text-slate-200 uppercase tracking-widest flex items-center gap-2">
+                                                <Brain className="w-3 h-3 text-purple-400" />
+                                                {title}
+                                            </h4>
+                                            <Badge variant="outline" className="text-[9px] border-slate-700 text-slate-400">
+                                                {nextStep
+                                                    ? `NEXT: ${nextStep.side} ${nextStep.type} ${relativeCount}/${totalCount}`
+                                                    : 'ADVISOR'}
+                                            </Badge>
+                                        </>
+                                    )
+                                })()}
+                            </div>
+
+                            {/* Role Filter */}
+                            <div className="flex gap-1 overflow-x-auto pb-1">
+                                {['ALL', 'DS', 'JG', 'MID', 'AB', 'SP'].map(role => (
+                                    <button
+                                        key={role}
+                                        onClick={() => setPredictionRoleFilter(role)}
+                                        className={`px-2 py-1 text-[9px] font-bold rounded border whitespace-nowrap ${predictionRoleFilter === role
+                                            ? 'bg-slate-800 text-white border-slate-600 shadow-sm'
+                                            : 'bg-slate-950 text-slate-500 border-slate-800 hover:bg-slate-900'
+                                            }`}
+                                    >
+                                        {role === 'DS' ? 'DSL' : role === 'JG' ? 'JUG' : role === 'AB' ? 'ADL' : role === 'SP' ? 'SUP' : role}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <ScrollArea className="flex-1 min-h-0 bg-slate-950/40 rounded-lg p-2 border border-slate-800/50 overflow-y-auto max-h-[calc(100vh-350px)] lg:max-h-[calc(100vh-400px)] shadow-inner shadow-black/50">
+                            <div className="space-y-2">
+                                {(() => {
+                                    // 1. Determine Opponent Side
+                                    // Simplified: We assume we want to see the "Advisor" for whoever is on the RIGHT side (Red usually) or the Bot
+                                    // If we are Blue, we want to see what Red (Bot/Enemy) is thinking.
+                                    const opponentSide = game.blue_team_name === match.team_a_name ? 'RED' : 'BLUE'
+                                    const suggestions = opponentSide === 'RED' ? redSuggestions : blueSuggestions
+
+                                    // 2. Filter & Sort
+                                    const filtered = suggestions
+                                        .filter(rec => {
+                                            if (predictionRoleFilter === 'ALL') return true
+                                            const roleMap: Record<string, string> = {
+                                                'DS': 'Dark Slayer',
+                                                'JG': 'Jungle',
+                                                'MID': 'Mid',
+                                                'AB': 'Abyssal Dragon',
+                                                'SP': 'Support'
+                                            }
+                                            const target = roleMap[predictionRoleFilter]
+                                            return rec.hero.main_position?.some((pos: string) => pos.includes(target)) || (target === 'Abyssal Dragon' && rec.hero.main_position?.some((pos: string) => pos.includes('Abyssal'))) || (target === 'Support' && rec.hero.main_position?.some((pos: string) => pos.includes('Roam')))
+                                        })
+                                        .sort((a, b) => (b.score || 0) - (a.score || 0))
+
+                                    if (filtered.length === 0) {
+                                        return (
+                                            <div className="text-center py-8 text-slate-500 text-xs">
+                                                No analysis data available.
+                                            </div>
+                                        )
+                                    }
+
+                                    return filtered.map((rec: any) => (
+                                        <div
+                                            key={rec.hero.id}
+                                            onClick={() => handleAnalyzePickedHero(rec.hero, opponentSide, true)}
+                                            className="group bg-slate-900/60 p-2 rounded-lg border border-slate-800 flex items-center justify-between cursor-pointer hover:bg-purple-900/10 hover:border-purple-500/30 transition-all relative overflow-hidden"
+                                        >
+                                            <div className="flex items-center gap-3 relative z-10">
+                                                {/* Hero Icon */}
+                                                <div className="relative w-10 h-10 shrink-0">
+                                                    <Image
+                                                        src={rec.hero.icon_url || rec.hero.icon || ''}
+                                                        alt={rec.hero.name}
+                                                        fill
+                                                        className="rounded-md object-cover border border-slate-700 shadow-sm"
+                                                    />
+                                                </div>
+
+                                                <div className="flex flex-col">
+                                                    <span className="text-sm font-bold text-slate-200 group-hover:text-purple-300 transition-colors">
+                                                        {rec.hero.name}
+                                                    </span>
+                                                    <span className="text-[10px] text-purple-400 font-medium">
+                                                        {rec.historyScore && rec.cerebroScore ? 'Consensus Analysis' : 'AI Recommendation'}
+                                                    </span>
+                                                    <Badge className="w-fit text-[8px] h-4 px-1 bg-green-900/50 text-green-400 border-green-800 hover:bg-green-900 mt-1">
+                                                        PICK
+                                                    </Badge>
+                                                </div>
+                                            </div>
+
+                                            {/* Scores */}
+                                            <div className="flex items-center gap-2 relative z-10">
+                                                <div className="flex items-center bg-slate-950/80 rounded-full px-2 py-1 border border-slate-800/50">
+                                                    <span className="text-[9px] text-slate-500 font-bold mr-1">AI:</span>
+                                                    <span className="text-[10px] font-mono font-bold text-slate-300">{Math.round(rec.cerebroScore || rec.score || 0)}</span>
+                                                </div>
+                                                <div className="flex items-center bg-slate-950/80 rounded-full px-2 py-1 border border-slate-800/50">
+                                                    <span className="text-[9px] text-slate-500 font-bold mr-1">H:</span>
+                                                    <span className="text-[10px] font-mono font-bold text-slate-300">{Math.round(rec.historyScore || 0)}</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Hover Glow */}
+                                            <div className="absolute inset-0 bg-gradient-to-r from-purple-500/0 via-purple-500/5 to-purple-500/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000 pointer-events-none" />
+                                        </div>
+                                    ))
+                                })()}
+                            </div>
+                        </ScrollArea>
+                    </TabsContent>
                 </Tabs>
 
 
@@ -4572,6 +4888,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                             isLoading={currentStep?.side === 'BLUE' ? isBlueSuggestLoading : isRedSuggestLoading}
                             onSelectHero={handleHeroClick}
                             activeLayers={currentMode.layers.filter(l => l.isActive)}
+                            predictions={calculatedEnemyPredictions}
                             upcomingSlots={(() => {
                                 const side = currentStep?.side || 'BLUE'
                                 const slots: { type: 'BAN' | 'PICK', slotNum: number }[] = []
@@ -4591,14 +4908,14 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 </div>
 
 
-            </div >
+            </div>
 
 
 
 
 
             {/* RIGHT: RED TEAM (Hidden on mobile, shown on desktop) */}
-            < div className="hidden lg:flex w-[22%] flex-col gap-1 shrink-0 bg-slate-950/50 min-h-0 overflow-hidden" >
+            <div className="hidden lg:flex w-[22%] flex-col gap-1 shrink-0 bg-slate-950/50 min-h-0 overflow-hidden">
                 <DraftTeamPanel
                     side="RED"
                     teamName={game.red_team_name}
@@ -4611,7 +4928,16 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                     manualLanes={manualLanes}
                     onLaneAssign={handleLaneAssign}
                     suggestionProps={{
-                        suggestions: redSuggestions,
+                        suggestions: redSuggestions.length > 0 ? redSuggestions : (() => {
+                            // If no manual suggestions, show AI Predictions for Red
+                            const preds = (calculatedEnemyPredictions as any)?.red?.predictions || []
+                            return preds.map((p: any) => ({
+                                hero: p.hero,
+                                score: Math.round((p.wins / p.picks) * 100), // Visual score 0-100 based on WR
+                                reason: `Prediction: ${p.picks} games (${Math.round((p.wins / p.picks) * 100)}% WR)`,
+                                matchupData: null
+                            }))
+                        })(),
                         isLoading: isRedSuggestLoading,
                         onGenerate: (mode) => handleGenerateSuggestion('RED', mode),
                         onSelectHero: handleHeroClick,
@@ -4628,12 +4954,12 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                                 }
                             })
                             return slots
-                            return slots
-                        })()
+                        })(),
+                        predictions: calculatedEnemyPredictions
                     }}
-                    onAnalyzeHero={handleAnalyzePickedHero}
+                    onAnalyzeHero={(hero) => handleAnalyzePickedHero(hero, 'RED', false)}
                 />
-            </div >
+            </div>
 
             {/* Auto-Select Analysis Modal */}
             <AutoSelectAnalysisDialog
@@ -4644,7 +4970,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 context={autoSelectContext}
                 phase={currentStep?.type}
             />
-        </div >
+        </div>
 
 
     )

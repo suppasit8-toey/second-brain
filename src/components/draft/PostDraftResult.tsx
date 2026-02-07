@@ -260,13 +260,13 @@ export default function PostDraftResult({
                 </div>
 
                 <div className="space-y-1">
-                    {pickIds.map(heroId => {
+                    {pickIds.map((heroId, index) => {
                         const hero = getHero(heroId)
                         if (!hero) return null
                         const currentRole = assignments[heroId]
 
                         return (
-                            <div key={heroId} className="flex items-center gap-2 bg-slate-900/50 p-1.5 rounded-lg border border-slate-800">
+                            <div key={`${heroId}-${index}`} className="flex items-center gap-2 bg-slate-900/50 p-1.5 rounded-lg border border-slate-800">
                                 <Image src={hero.icon_url} alt={hero.name} width={32} height={32} className="rounded border border-slate-700" />
                                 <div className="flex-1 min-w-0">
                                     <p className="font-bold text-xs truncate">{hero.name}</p>

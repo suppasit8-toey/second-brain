@@ -22,6 +22,7 @@ interface DraftTeamPanelProps {
         onSelectHero: (hero: Hero) => void
         activeLayers: any[]
         upcomingSlots: { type: 'BAN' | 'PICK', slotNum: number }[]
+        predictions?: any
     }
 }
 
@@ -171,6 +172,7 @@ export default function DraftTeamPanel({
                     onSelectHero={suggestionProps.onSelectHero}
                     activeLayers={suggestionProps.activeLayers}
                     upcomingSlots={suggestionProps.upcomingSlots}
+                    predictions={suggestionProps.predictions}
                 />
             </div>
         </div>

@@ -129,10 +129,37 @@ export function useDraftEngine({ initialPicks = [] }: UseDraftEngineProps = {}) 
 
     const togglePause = () => setState(prev => ({ ...prev, isPaused: !prev.isPaused }))
 
+    const undoLastAction = () => {
+        setState(prev => {
+            if (prev.history.length === 0) return prev
+
+            // Get previous state
+            const previousState = prev.history[prev.history.length - 1]
+
+            // Remove it from history (pop)
+            const newHistory = prev.history.slice(0, -1)
+
+            // Restore state but update history
+            // We also need to reset the timer for the restored step
+            const restoredStepIndex = previousState.stepIndex
+            const restoredStep = DRAFT_SEQUENCE[restoredStepIndex]
+            const newTimer = restoredStep ? (restoredStep.type === 'BAN' ? PHASE_TIMERS.BAN : PHASE_TIMERS.PICK) : 30
+
+            return {
+                ...previousState,
+                history: newHistory,
+                timer: newTimer,
+                isPaused: true, // Pause on undo so user can think
+                isFinished: false // Ensure not finished
+            }
+        })
+    }
+
     return {
         state,
         currentStep,
         lockIn,
-        togglePause
+        togglePause,
+        undoLastAction
     }
 }
