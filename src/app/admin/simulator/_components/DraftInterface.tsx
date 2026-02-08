@@ -991,7 +991,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             }
         })
 
-        const laneMatchups = blueStats.laneMatchups || {};
+        // Use Opponent's Lane Matchups to check THREATS (How well THEY play against US)
+        const redTeamName = game.red_team_name?.replace(/\s*\(Bot\)\s*$/i, '')
+        const opponentStats = teamStats[redTeamName || '']
+        const laneMatchups = opponentStats?.laneMatchups || {};
 
         const result = Object.entries(aggregated)
             .map(([heroId, count]) => {
@@ -1152,7 +1155,10 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             }
         })
 
-        const laneMatchups = redStats.laneMatchups || {};
+        // Use Opponent's Lane Matchups to check THREATS (How well THEY play against US)
+        const blueTeamName = game.blue_team_name?.replace(/\s*\(Bot\)\s*$/i, '')
+        const opponentStats = teamStats[blueTeamName || '']
+        const laneMatchups = opponentStats?.laneMatchups || {};
 
         const result = Object.entries(aggregated)
             .map(([heroId, count]) => {
@@ -1357,8 +1363,34 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
             if (currentPhase === 'BAN') {
                 if (blueStrategicBansRef.current.length > 0) {
-                    // Use Blue's Strategic Bans (targets Red team)
-                    blueFinal = blueStrategicBansRef.current.slice(0, 20)
+                    // Merge Blue's Strategic Bans (Client) with Smart Bans (Server)
+                    const serverBans = (blueData?.smartBan || []).map((r: any) => ({ ...r, phase: 'BAN', type: 'ban' }))
+                        .filter((r: any) => !allUnavailable.has(String(r.hero?.id)));
+
+                    const mergedBansMap = new Map<string, any>();
+
+                    // 1. Add Server Bans
+                    serverBans.forEach((b: any) => mergedBansMap.set(String(b.hero.id), { ...b }));
+
+                    // 2. Merge Client Bans
+                    blueStrategicBansRef.current.forEach((b: any) => {
+                        const existing = mergedBansMap.get(String(b.hero.id));
+                        if (existing) {
+                            const maxScore = Math.max(existing.score, b.score);
+                            const reasons = Array.from(new Set([
+                                ...(existing.reason || '').split(' • '),
+                                ...(b.reason || '').split(' • ')
+                            ])).filter(Boolean).slice(0, 3).join(' • ');
+
+                            mergedBansMap.set(String(b.hero.id), { ...existing, ...b, score: maxScore, reason: reasons, phase: 'BAN', type: 'ban' });
+                        } else {
+                            mergedBansMap.set(String(b.hero.id), { ...b, phase: 'BAN', type: 'ban' });
+                        }
+                    });
+
+                    blueFinal = Array.from(mergedBansMap.values())
+                        .sort((a: any, b: any) => b.score - a.score)
+                        .slice(0, 20);
                 } else {
                     // Fallback to smartBan only if no strategic data
                     blueFinal = (blueData?.smartBan || []).map((r: any) => ({ ...r, phase: 'BAN', type: 'ban' }))
@@ -1404,8 +1436,34 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
             if (currentPhase === 'BAN') {
                 if (redStrategicBansRef.current.length > 0) {
-                    // Use Red's Strategic Bans (targets Blue team)
-                    redFinal = redStrategicBansRef.current.slice(0, 20)
+                    // Merge Red's Strategic Bans (Client) with Smart Bans (Server)
+                    const serverBans = (redData?.smartBan || []).map((r: any) => ({ ...r, phase: 'BAN', type: 'ban' }))
+                        .filter((r: any) => !allUnavailable.has(String(r.hero?.id)));
+
+                    const mergedBansMap = new Map<string, any>();
+
+                    // 1. Add Server Bans
+                    serverBans.forEach((b: any) => mergedBansMap.set(String(b.hero.id), { ...b }));
+
+                    // 2. Merge Client Bans
+                    redStrategicBansRef.current.forEach((b: any) => {
+                        const existing = mergedBansMap.get(String(b.hero.id));
+                        if (existing) {
+                            const maxScore = Math.max(existing.score, b.score);
+                            const reasons = Array.from(new Set([
+                                ...(existing.reason || '').split(' • '),
+                                ...(b.reason || '').split(' • ')
+                            ])).filter(Boolean).slice(0, 3).join(' • ');
+
+                            mergedBansMap.set(String(b.hero.id), { ...existing, ...b, score: maxScore, reason: reasons, phase: 'BAN', type: 'ban' });
+                        } else {
+                            mergedBansMap.set(String(b.hero.id), { ...b, phase: 'BAN', type: 'ban' });
+                        }
+                    });
+
+                    redFinal = Array.from(mergedBansMap.values())
+                        .sort((a: any, b: any) => b.score - a.score)
+                        .slice(0, 20);
                 } else {
                     redFinal = (redData?.smartBan || []).map((r: any) => ({ ...r, phase: 'BAN', type: 'ban' }))
                         .filter((r: any) => !allUnavailable.has(String(r.hero?.id)))
@@ -1811,6 +1869,24 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             console.log("Auto-Select: Consensus Pick", bestHero.name, "Score:", consensusCandidates[0].score)
         }
 
+        // === PRIORITY 1.5: Fallback to History Analysis (if Analysis Tab logic) ===
+        // The Analysis Tab shows "No strict overlap found. Showing History / Comfort picks."
+        // So we should try to pick from historyRecs directly if no consensus.
+        if (!bestHero && historyRecs.length > 0) {
+            const availableHistory = historyRecs.filter((r: any) => isAvailable(String(r.hero?.id)))
+            if (availableHistory.length > 0) {
+                // Sort by score (history score)
+                availableHistory.sort((a: any, b: any) => (b.score || 0) - (a.score || 0))
+
+                bestHero = availableHistory[0].hero
+                aiScore = availableHistory[0].cerebroScore || 0 // Might be undefined
+                hScore = availableHistory[0].score || 0
+                pickReason = `ประวัติ/ความถนัด: ${availableHistory[0].reason || 'High History Score'}`
+                reasons = (availableHistory[0].reason || '').split(/, |; /).filter(Boolean)
+                console.log("Auto-Select: History Fallback Pick", bestHero.name, "Score:", hScore)
+            }
+        }
+
         // === PRIORITY 2: Fallback to Displayed Suggestions (AI Score) ===
         if (!bestHero) {
             const displayedSuggestions = currentStep?.side === 'BLUE' ? blueSuggestions : redSuggestions
@@ -1826,14 +1902,60 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             }
 
             // Final Fallback: Raw AI list if displayed suggestions fail
-            if (!bestHero) {
-                const availableAI = aiRecs.filter((r: any) => isAvailable(r.hero.id))
-                if (availableAI.length > 0) {
-                    bestHero = availableAI[0].hero
-                    aiScore = availableAI[0].score || 0
-                    pickReason = `AI เท่านั้น (คะแนน: ${aiScore}) - ไม่พบข้อมูลในประวัติ`
-                    reasons = (availableAI[0].reason || '').split(/, /).filter(Boolean)
-                    console.log("Auto-Select: AI Fallback Pick", bestHero.name)
+            // Final Fallback: Raw AI list if displayed suggestions fail
+            // [UPDATED] User requested to NOT use Raw AI Fallback if data is not fully loaded or if Displayed list is empty due to loading.
+            // We only use this if we are SURE that Displayed Suggestions are empty because there really are no suggestions, not because of loading.
+            // But checking "loading" inside here is tricky if we don't have the flag.
+            // However, the button itself is disabled if (isLoadingRecommendations).
+            // So if we are here, isLoadingRecommendations must be false?
+            // User says: "If no list in rank 2 (e.g. case not finished loading or list empty) system goes to rank 3 ... I don't want it to select because it's yet loaded."
+
+            // If we are here, it means we clicked the button, so isLoadingRecommendations should be false.
+            // BUT, maybe displayedSuggestions (blueSuggestions/redSuggestions) are empty even if isLoadingRecommendations is false?
+            // Let's add a strict check: If displayedSuggestions is empty, DO NOT fallback to Raw AI blindly unless we are sure.
+            // Actually, if displayedSuggestions is empty, it usually means no data found.
+            // The user wants to avoid "Raw AI" pick if the reason is "Not Loaded".
+            // Since we can't easily distinguish "Empty because loading" vs "Empty because no result" without flags,
+            // AND the button is disabled on loading...
+            // Maybe the user is experiencing a case where the button enabled PREMATURELY?
+            // OR they just want to disable Rank 3 entirely?
+            // "Must finish loading every time then come to rank 3" implies Rank 3 IS allowed, but only if loaded.
+
+            // Let's rely on the fact that if we are clicking, we "think" we are loaded.
+            // But if displayedSuggestions is empty, maybe we should just STOP and not pick?
+            // The user said: "If no list in rank 2 ... system goes to rank 3 ... I don't want it to select because it's yet loaded."
+            // This implies they think empty list = not loaded.
+
+            // Safe bet: If local suggestions (Rank 2) failed, DO NOT fall back to Raw AI (Rank 3).
+            // This effectively removes Rank 3.
+            // Let's comment it out or add a guard.
+            if (!bestHero && !isLoadingRecommendations) {
+                // Check if we really want to fallback. User said "Must finish loading every time then come to rank 3".
+                // If isLoadingRecommendations is false, we ARE finished loading.
+                // So why is Rank 2 empty?
+                // Maybe `blueSuggestions` is empty but `recommendations.smartBan` (Raw AI) is not?
+                // If so, Rank 3 WOULD pick.
+                // User says: "I don't want it to select because it's yet loaded."
+                // Perhaps they see Rank 3 picking IMMEDIATELY before Rank 2 appears?
+
+                // Solution: We will ONLY pick from Rank 3 if we are absolutely sure we checked Rank 2 and it was empty AND we are not loading.
+                // But wait, the button is disabled if/while loading.
+
+                // Let's assume there's a race condition where specific side loading might differ?
+                // isBlueSuggestLoading / isRedSuggestLoading
+                const isSideLoading = currentStep?.side === 'BLUE' ? isBlueSuggestLoading : isRedSuggestLoading
+
+                if (!isSideLoading) {
+                    const availableAI = aiRecs.filter((r: any) => isAvailable(r.hero.id))
+                    if (availableAI.length > 0) {
+                        bestHero = availableAI[0].hero
+                        aiScore = availableAI[0].score || 0
+                        pickReason = `AI เท่านั้น (คะแนน: ${aiScore}) - ไม่พบข้อมูลในประวัติ`
+                        reasons = (availableAI[0].reason || '').split(/, /).filter(Boolean)
+                        console.log("Auto-Select: AI Fallback Pick", bestHero.name)
+                    }
+                } else {
+                    console.log("Auto-Select: Skipped Rank 3 because side is still loading")
                 }
             }
         }
@@ -2462,8 +2584,9 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         const nextExistingGame = match.games?.find(g => g.game_number === nextGameNum)
         const nextGameTab = nextExistingGame ? nextExistingGame.id : `new-${nextGameNum}`
 
-        const currentBlueWins = match.games?.filter(g => (g.winner === 'Blue' && g.blue_team_name === match.team_a_name) || (g.winner === 'Red' && g.red_team_name === match.team_a_name)).length || 0
-        const currentRedWins = match.games?.filter(g => (g.winner === 'Blue' && g.blue_team_name === match.team_b_name) || (g.winner === 'Red' && g.red_team_name === match.team_b_name)).length || 0
+        const isCounted = (g: any) => g.id !== game.id // Exclude current game
+        const currentBlueWins = match.games?.filter(g => isCounted(g) && ((g.winner === 'Blue' && g.blue_team_name === match.team_a_name) || (g.winner === 'Red' && g.red_team_name === match.team_a_name))).length || 0
+        const currentRedWins = match.games?.filter(g => isCounted(g) && ((g.winner === 'Blue' && g.blue_team_name === match.team_b_name) || (g.winner === 'Red' && g.red_team_name === match.team_b_name))).length || 0
 
         const isBlueTeamA = game.blue_team_name === match.team_a_name
         const blueScore = isBlueTeamA ? currentBlueWins : currentRedWins
@@ -2542,6 +2665,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 nextGameId={nextGameTab}
                 seriesScore={{ blue: blueScore, red: redScore }}
                 matchMode={match.mode || 'BO1'}
+                gameNumber={game.game_number}
             />
         )
     }
@@ -2594,7 +2718,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 {!state.isFinished && !state.isPaused && (
                     <Button
                         size="icon"
-                        className={`h-12 w-12 shrink-0 bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all ${!isLoadingRecommendations ? 'shadow-[0_0_20px_rgba(99,102,241,0.8)] border-indigo-300 animate-pulsing-wiggle' : 'shadow-none'}`}
+                        className={`h-12 w-12 shrink-0 bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-400 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all ${!isLoadingRecommendations ? 'shadow-[0_0_20px_rgba(16,185,129,0.8)] border-emerald-300 animate-pulse' : 'shadow-none'}`}
                         onClick={handleAutoSelect}
                         disabled={isLoadingRecommendations}
                     >
@@ -2770,7 +2894,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                         <Button
                             size="sm"
                             variant="outline"
-                            className={`h-8 w-12 px-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${!isLoadingRecommendations ? 'bg-indigo-500/20 border-indigo-400 text-indigo-300 shadow-[0_0_15px_rgba(99,102,241,0.6)] animate-pulsing-wiggle' : 'border-indigo-500/30 text-indigo-400 hover:text-indigo-300 hover:bg-indigo-500/20 hover:border-indigo-500/50'}`}
+                            className={`h-8 w-12 px-0 transition-all disabled:opacity-50 disabled:cursor-not-allowed ${!isLoadingRecommendations ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.6)] animate-pulse' : 'border-emerald-500/30 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/20 hover:border-emerald-500/50'}`}
                             title={isLoadingRecommendations ? "Loading Analysis..." : "Auto Select (AI Best Pick)"}
                             onClick={handleAutoSelect}
                             disabled={isLoadingRecommendations}

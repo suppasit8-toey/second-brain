@@ -51,6 +51,13 @@ export async function getRecommendations(
         .in('opponent_id', enemyHeroIds) // Heroes who are opponents to current enemies
         .gt('win_rate', 50)
 
+    // Fetch Combos for Enemies (To BAN their potential combos)
+    const { data: enemyCombos } = await supabase
+        .from('hero_combos')
+        .select('*')
+        .eq('version_id', versionId)
+        .in('hero_a_id', enemyHeroIds)
+
     const analystScores: Record<string, { score: number, reasons: string[] }> = {}
 
     // Score based on Synergy
@@ -138,7 +145,25 @@ export async function getRecommendations(
         })
     }
 
-    // 2. Ban General OP Heroes (Deny)
+    // 2. Ban Synergies for Enemy Team (Deny their combos) -- USER REQUEST: +100 Score
+    if (enemyHeroIds.length > 0 && enemyCombos) {
+        enemyCombos.forEach(c => {
+            // hero_a is Enemy (Already Picked), hero_b is Candidate (To Ban)
+            if (!banScores[c.hero_b_id]) banScores[c.hero_b_id] = { score: 0, reasons: [] }
+
+            // User requested +100 for Synergy with Dolia (or generally strong combos)
+            const bonus = 100
+
+            // Resolve Enemy Name
+            const enemyHero = heroes.find(h => h.id === c.hero_a_id)
+            const enemyName = enemyHero ? enemyHero.name : 'Enemy'
+
+            banScores[c.hero_b_id].score += bonus
+            banScores[c.hero_b_id].reasons.push(`Synergy with ${enemyName}`)
+        })
+    }
+
+    // 3. Ban General OP Heroes (Deny)
     availableHeroes.forEach(h => {
         const stats = h.hero_stats[0]
         if (stats.tier === 'S' || stats.win_rate > 54) {

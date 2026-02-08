@@ -300,7 +300,7 @@ export default function DraftSuggestionPanel({
         if (filteredAnalysis.length === 0 && !isLoading) {
             const filteredHistory = filterItemsByPosition(historySuggestions);
             if (filteredHistory.length > 0) {
-                displayItems = filteredHistory.slice(0, 10); // Limit fallback to top 10
+                displayItems = filteredHistory.slice(0, 3); // Limit fallback to top 3
                 isFallback = true;
             }
         }
@@ -314,9 +314,9 @@ export default function DraftSuggestionPanel({
         return (
             <div className="space-y-2">
                 {isFallback && (
-                    <div className="bg-orange-950/20 border border-orange-500/20 rounded p-2 mb-2 flex items-center gap-2">
-                        <AlertTriangle className="w-3 h-3 text-orange-400" />
-                        <span className="text-[10px] text-orange-200">No strict overlap found. Showing <strong>History / Comfort</strong> picks.</span>
+                    <div className="bg-orange-950/20 border border-orange-500/20 rounded px-2 py-1 mb-1 flex items-center gap-1">
+                        <AlertTriangle className="w-2 h-2 text-orange-400" />
+                        <span className="text-[8px] text-orange-200">No strict overlap. Showing <strong>History / Comfort</strong> picks.</span>
                     </div>
                 )}
 
