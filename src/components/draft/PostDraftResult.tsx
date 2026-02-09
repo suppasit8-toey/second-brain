@@ -457,36 +457,42 @@ export default function PostDraftResult({
                                                 size="sm"
                                                 className="w-full h-10 text-sm font-bold bg-indigo-600 hover:bg-indigo-700 shadow-md"
                                                 onClick={() => {
-                                                    if (matchId) {
-                                                        const matchThresholds: Record<string, number> = { 'BO1': 1, 'BO3': 2, 'BO5': 3, 'BO7': 4 };
-                                                        const threshold = matchThresholds[matchMode] || 1;
+                                                    if (!matchId) {
+                                                        // No matchId - go back to simulator
+                                                        router.push('/admin/simulator')
+                                                        return
+                                                    }
 
-                                                        let isFinished = false
-                                                        if (matchMode === 'BO2') {
-                                                            if ((seriesScore.blue + seriesScore.red + 1) >= 2) isFinished = true
+                                                    const matchThresholds: Record<string, number> = { 'BO1': 1, 'BO3': 2, 'BO5': 3, 'BO7': 4 };
+                                                    const currentMatchMode = matchMode || 'BO1';
+                                                    const threshold = matchThresholds[currentMatchMode] || 1;
+                                                    const currentSeriesScore = seriesScore || { blue: 0, red: 0 };
+
+                                                    let isFinished = false
+                                                    if (currentMatchMode === 'BO2') {
+                                                        if ((currentSeriesScore.blue + currentSeriesScore.red + 1) >= 2) isFinished = true
+                                                    } else {
+                                                        const newBlueScore = currentSeriesScore.blue + (winner === 'Blue' ? 1 : 0)
+                                                        const newRedScore = currentSeriesScore.red + (winner === 'Red' ? 1 : 0)
+                                                        if (newBlueScore >= threshold || newRedScore >= threshold) isFinished = true
+                                                    }
+
+                                                    if (isFinished) {
+                                                        router.push(`/admin/simulator/${matchId}?game=summary`)
+                                                    } else {
+                                                        // Determine Max Games to check if we can create a new one
+                                                        const maxGames = currentMatchMode === 'BO1' ? 1
+                                                            : currentMatchMode === 'BO3' ? 3
+                                                                : currentMatchMode === 'BO5' ? 5
+                                                                    : currentMatchMode === 'BO7' ? 7
+                                                                        : currentMatchMode === 'BO2' ? 2 : 1;
+
+                                                        if (nextGameId) {
+                                                            router.push(`/admin/simulator/${matchId}?game=${nextGameId}`)
+                                                        } else if (typeof gameNumber === 'number' && gameNumber < maxGames) {
+                                                            router.push(`/admin/simulator/${matchId}?game=new-${gameNumber + 1}`)
                                                         } else {
-                                                            const newBlueScore = seriesScore.blue + (winner === 'Blue' ? 1 : 0)
-                                                            const newRedScore = seriesScore.red + (winner === 'Red' ? 1 : 0)
-                                                            if (newBlueScore >= threshold || newRedScore >= threshold) isFinished = true
-                                                        }
-
-                                                        if (isFinished) {
                                                             router.push(`/admin/simulator/${matchId}?game=summary`)
-                                                        } else {
-                                                            // Determine Max Games to check if we can create a new one
-                                                            const maxGames = matchMode === 'BO1' ? 1
-                                                                : matchMode === 'BO3' ? 3
-                                                                    : matchMode === 'BO5' ? 5
-                                                                        : matchMode === 'BO7' ? 7
-                                                                            : matchMode === 'BO2' ? 2 : 1;
-
-                                                            if (nextGameId) {
-                                                                router.push(`/admin/simulator/${matchId}?game=${nextGameId}`)
-                                                            } else if (gameNumber && gameNumber < maxGames) {
-                                                                router.push(`/admin/simulator/${matchId}?game=new-${gameNumber + 1}`)
-                                                            } else {
-                                                                router.push(`/admin/simulator/${matchId}?game=summary`)
-                                                            }
                                                         }
                                                     }
                                                 }}

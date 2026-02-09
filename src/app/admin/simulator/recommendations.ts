@@ -979,7 +979,9 @@ export async function getRecommendations(
             }
 
             // 3.4 [Draft Logic] Synergy
-            if (wSynergy > 0) {
+            // NOTE: For PICK phase, use relativeCombos (synergy with ally)
+            // For BAN phase, synergy calculation is handled separately at section 3.6c using enemyCombos
+            if (wSynergy > 0 && context?.phase !== 'BAN') {
                 const synergyCombo = relativeCombos?.find(c => c.hero_b_id === h.id)
                 if (synergyCombo) {
                     const partnerName = queryHeroName(synergyCombo.hero_a_id, heroes)
@@ -1190,6 +1192,97 @@ export async function getRecommendations(
                 }
             }
 
+            // 3.6d [NEW] Deny Enemy Best Pick - Think from OPPONENT perspective
+            // Calculate what hero would be best for ENEMY to pick, then recommend banning it
+            if (context?.phase === 'BAN' && wBan > 0) {
+                let denyScore = 0
+                const denyReasons: string[] = []
+
+                // 3.6d.1: Counter to OUR picks - If enemy picks this, it counters us
+                // This hero (h) beats our ally heroes
+                // Use threatMatchups which is queried from allyHeroIds
+                const countersUs = threatMatchups?.filter(m =>
+                    m.hero_id === h.id &&
+                    m.win_rate > 52
+                ) || []
+
+                if (countersUs.length > 0) {
+                    let totalCounterBonus = 0
+                    const counteredAllies: string[] = []
+
+                    countersUs.forEach(match => {
+                        const allyName = queryHeroName(match.enemy_hero_id, heroes)
+                        const winAdvantage = match.win_rate - 50
+                        const bonus = Math.max(winAdvantage * 3, 10)
+                        totalCounterBonus += bonus
+                        counteredAllies.push(allyName)
+                    })
+
+                    denyScore += totalCounterBonus
+                    const uniqueNames = Array.from(new Set(counteredAllies))
+                    denyReasons.push(`Counters ${uniqueNames.join(', ')} +${Math.round(totalCounterBonus)}`)
+                }
+
+                // 3.6d.2: Fill Enemy Missing Role - If enemy needs this role
+                const enemyMissingRoles: string[] = []
+                const ENEMY_STANDARD_ROLES = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam']
+                const enemyHeroes = heroes.filter(eh => enemyHeroIds.includes(eh.id))
+                const enemyFilledRoles = new Set<string>()
+
+                enemyHeroes.forEach(eh => {
+                    if (eh.main_position) {
+                        eh.main_position.forEach((p: string) => {
+                            const norm = p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)
+                            if (ENEMY_STANDARD_ROLES.includes(norm)) enemyFilledRoles.add(norm)
+                        })
+                    }
+                })
+
+                ENEMY_STANDARD_ROLES.forEach(r => {
+                    if (!enemyFilledRoles.has(r)) enemyMissingRoles.push(r)
+                })
+
+                // Check if this hero fills a role enemy needs
+                const heroRoles = h.main_position?.map((p: string) =>
+                    p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)
+                ) || []
+
+                const fillsEnemyRole = heroRoles.some((r: string) => enemyMissingRoles.includes(r))
+                if (fillsEnemyRole && enemyMissingRoles.length > 0 && enemyMissingRoles.length < 5) {
+                    const roleBonus = 30 // Enemy needs this role
+                    denyScore += roleBonus
+                    denyReasons.push(`Fills Enemy Role +${roleBonus}`)
+                }
+
+                // 3.6d.3: Meta Threat - High WR/S-Tier that enemy would want
+                const heroStats = h.hero_stats?.[0]
+                if (heroStats) {
+                    if (heroStats.tier === 'S') {
+                        denyScore += 50
+                        denyReasons.push(`S-Tier Meta +50`)
+                    } else if (heroStats.tier === 'A' && heroStats.win_rate > 52) {
+                        denyScore += 25
+                        denyReasons.push(`A-Tier High WR +25`)
+                    }
+
+                    // Very High Win Rate
+                    if (heroStats.win_rate > 54) {
+                        const wrBonus = Math.round((heroStats.win_rate - 50) * 8)
+                        denyScore += wrBonus
+                        denyReasons.push(`${Math.round(heroStats.win_rate)}% WR +${wrBonus}`)
+                    }
+                }
+
+                // Apply deny score with weight
+                if (denyScore > 0) {
+                    const weightedDeny = denyScore * wBan
+                    score += weightedDeny
+
+                    // Add reasons (limit to top 2)
+                    denyReasons.slice(0, 2).forEach(r => reasons.push(r))
+                }
+            }
+
             // 3.7 [Draft Strategy] Role Priority per Slot
             // 3.7 [Draft Strategy] Role Priority per Slot
             if (context?.pickOrder && teamStats.pickOrderStats) {
@@ -1330,7 +1423,10 @@ export async function getRecommendations(
             analystScores[h.id] = { score, reasons }
             // [FIX] Also populate smartBanScores used for Ban Recommendations
             if (context?.phase === 'BAN') {
-                smartBanScores[h.id] = { score, reasons }
+                // Filter out PICK-specific reasons that shouldn't appear in BAN phase
+                const pickOnlyPatterns = ['Countered by', 'Risk: Exposed', 'Weak vs', 'Main (', 'Fills ', 'Role Filled']
+                const banReasons = reasons.filter(r => !pickOnlyPatterns.some(p => r.includes(p)))
+                smartBanScores[h.id] = { score, reasons: banReasons }
             }
         } // Close wCounter > 0 block
     }) // Close forEach
@@ -1613,6 +1709,33 @@ export async function getRecommendations(
         .slice(0, 20)
 
 
+    // [NEW] Calculate Enemy Missing Roles for filtering BAN recommendations
+    // This must be before smartBanRecs so we can use it in the filter
+    const STANDARD_ROLES_FOR_BAN = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam']
+    const enemyFilledRoles = new Set<string>()
+
+    heroes?.filter(eh => enemyHeroIds.includes(eh.id)).forEach(eh => {
+        if (eh.main_position) {
+            eh.main_position.forEach((p: string) => {
+                const norm = p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)
+                if (STANDARD_ROLES_FOR_BAN.includes(norm)) enemyFilledRoles.add(norm)
+            })
+        }
+    })
+
+    const enemyMissingRolesMain = STANDARD_ROLES_FOR_BAN.filter(r => !enemyFilledRoles.has(r))
+    console.log('[DEBUG] smartBanRecs - Enemy Missing Roles:', enemyMissingRolesMain, 'Enemy Filled:', Array.from(enemyFilledRoles))
+
+    // Helper to check if hero fills any of enemy missing roles
+    const heroMatchesEnemyRole = (hero: any) => {
+        if (!hero?.main_position || enemyMissingRolesMain.length === 0) return true // No filter if no enemy picks
+        if (enemyMissingRolesMain.length === 5) return true // Phase 1: Enemy has no picks yet, show all
+
+        const heroRoles = hero.main_position.map((p: string) =>
+            p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)
+        )
+        return heroRoles.some((r: string) => enemyMissingRolesMain.includes(r))
+    }
 
     let smartBanRecs = Object.entries(smartBanScores)
         .map(([id, s]) => {
@@ -1637,7 +1760,8 @@ export async function getRecommendations(
             }
         })
         .filter(Boolean)
-        .filter(Boolean)
+        // [NEW] Filter to only show heroes that fill enemy missing roles
+        .filter((item: any) => heroMatchesEnemyRole(item?.hero))
         .sort((a, b) => b!.score - a!.score) as Recommendation[]
 
     // --- NEW: Phase-specific ban recommendations ---
@@ -1663,6 +1787,33 @@ export async function getRecommendations(
         .slice(0, 20) as any[]
 
     // Filter bans that are specifically strong for Phase 2 (based on counter analysis and P2 scrim data)
+    // [NEW] Calculate Enemy Missing Roles for filtering
+    const STANDARD_ROLES_BAN = ['Dark Slayer', 'Jungle', 'Mid', 'Abyssal Dragon', 'Roam']
+    const enemyFilledRolesForBan = new Set<string>()
+
+    heroes?.filter(eh => enemyHeroIds.includes(eh.id)).forEach(eh => {
+        if (eh.main_position) {
+            eh.main_position.forEach((p: string) => {
+                const norm = p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)
+                if (STANDARD_ROLES_BAN.includes(norm)) enemyFilledRolesForBan.add(norm)
+            })
+        }
+    })
+
+    const enemyMissingRolesForBan = STANDARD_ROLES_BAN.filter(r => !enemyFilledRolesForBan.has(r))
+    console.log('[DEBUG] Enemy Missing Roles for BAN:', enemyMissingRolesForBan, 'Enemy Filled:', Array.from(enemyFilledRolesForBan))
+
+    // Helper to check if hero fills any of enemy missing roles
+    const heroFillsEnemyRole = (hero: any) => {
+        if (!hero?.main_position || enemyMissingRolesForBan.length === 0) return true // No filter if no enemy picks or all roles missing
+        if (enemyMissingRolesForBan.length === 5) return true // Phase 1: Enemy has no picks yet, show all
+
+        const heroRoles = hero.main_position.map((p: string) =>
+            p === 'Abyssal' ? 'Abyssal Dragon' : (p === 'Support' ? 'Roam' : p)
+        )
+        return heroRoles.some((r: string) => enemyMissingRolesForBan.includes(r))
+    }
+
     let smartBanPhase2 = Object.entries(smartBanScores)
         .map(([id, s]) => {
             const h = heroes?.find(x => x.id === id)
@@ -1680,6 +1831,8 @@ export async function getRecommendations(
             }
         })
         .filter(Boolean)
+        // [NEW] Filter to only show heroes that fill enemy missing roles
+        .filter((item: any) => heroFillsEnemyRole(item?.hero))
         .sort((a, b) => b!.score - a!.score)
         .slice(0, 20) as any[]
 
