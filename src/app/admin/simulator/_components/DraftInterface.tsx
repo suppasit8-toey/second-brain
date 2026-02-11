@@ -1524,38 +1524,74 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         const isBanPhase = currentStep.type === 'BAN'
 
         if (isBanPhase) {
-            // Set loading if no data yet
-            if (blueStrategicBans.length === 0 && blueSuggestions.length === 0) {
+            // Set loading if no data yet (AND no server data)
+            // Note: recommendations might be empty initially too.
+            if (blueStrategicBans.length === 0 && blueSuggestions.length === 0 && (!recommendations.smartBan || recommendations.smartBan.length === 0)) {
                 setIsBlueSuggestLoading(true)
             }
-            if (redStrategicBans.length === 0 && redSuggestions.length === 0) {
+            if (redStrategicBans.length === 0 && redSuggestions.length === 0 && (!recommendations.smartBan || recommendations.smartBan.length === 0)) {
                 setIsRedSuggestLoading(true)
             }
 
-            // Blue Advisor - set data when Strategic Bans is ready
-            if (blueStrategicBans.length > 0 && blueSuggestions.length === 0) {
-                const formatted = blueStrategicBans.slice(0, 20).map((r: any) => ({
-                    hero: r.hero,
-                    score: r.score,
-                    reason: r.reason,
-                    type: 'ban',
-                    stepIndex: state.stepIndex
-                }))
-                setBlueSuggestions(formatted)
-                setIsBlueSuggestLoading(false)
+            // --- HELPER: Merge SmartBan (Server) + StrategicBans (Client) ---
+            const mergeBans = (clientBans: any[], teamSide: 'BLUE' | 'RED') => {
+                const isBlueAlloc = teamSide === 'BLUE'
+                const serverBans = recommendations.smartBan || [] // Global pool from server
+
+                // Determine unavailables
+                const bannedIds = [...state.blueBans, ...state.redBans].map(String).filter(Boolean)
+                const pickedIds = [...Object.values(state.bluePicks), ...Object.values(state.redPicks)].map(String).filter(Boolean)
+                const allUnavailable = new Set([...bannedIds, ...pickedIds, ...teamAGlobalBans, ...teamBGlobalBans, ...botOpponentGlobalBans])
+
+                const mergedBansMap = new Map<string, any>()
+
+                // 1. Add Server Bans (filtered)
+                serverBans.forEach((b: any) => {
+                    if (!allUnavailable.has(String(b.hero.id))) {
+                        mergedBansMap.set(String(b.hero.id), { ...b, type: 'ban', stepIndex: state.stepIndex })
+                    }
+                })
+
+                // 2. Merge Client Bans
+                clientBans.forEach((b: any) => {
+                    if (allUnavailable.has(String(b.hero.id))) return
+
+                    const existing = mergedBansMap.get(String(b.hero.id))
+                    if (existing) {
+                        const maxScore = Math.max(existing.score, b.score)
+                        // Combine unique reasons
+                        const reasons = Array.from(new Set([
+                            ...(existing.reason || '').split(' • '),
+                            ...(b.reason || '').split(' • ')
+                        ])).filter(Boolean).slice(0, 3).join(' • ')
+
+                        mergedBansMap.set(String(b.hero.id), { ...existing, ...b, score: maxScore, reason: reasons, type: 'ban', stepIndex: state.stepIndex })
+                    } else {
+                        mergedBansMap.set(String(b.hero.id), { ...b, type: 'ban', stepIndex: state.stepIndex })
+                    }
+                })
+
+                return Array.from(mergedBansMap.values())
+                    .sort((a: any, b: any) => b.score - a.score)
+                    .slice(0, 20)
             }
 
-            // Red Advisor - set data when Strategic Bans is ready
-            if (redStrategicBans.length > 0 && redSuggestions.length === 0) {
-                const formatted = redStrategicBans.slice(0, 20).map((r: any) => ({
-                    hero: r.hero,
-                    score: r.score,
-                    reason: r.reason,
-                    type: 'ban',
-                    stepIndex: state.stepIndex
-                }))
-                setRedSuggestions(formatted)
-                setIsRedSuggestLoading(false)
+            // Blue Advisor - set data when Strategic Bans OR Smart Bans is ready
+            if ((blueStrategicBans.length > 0 || (recommendations.smartBan && recommendations.smartBan.length > 0)) && blueSuggestions.length === 0) {
+                const formatted = mergeBans(blueStrategicBans, 'BLUE')
+                if (formatted.length > 0) {
+                    setBlueSuggestions(formatted)
+                    setIsBlueSuggestLoading(false)
+                }
+            }
+
+            // Red Advisor - set data when Strategic Bans OR Smart Bans is ready
+            if ((redStrategicBans.length > 0 || (recommendations.smartBan && recommendations.smartBan.length > 0)) && redSuggestions.length === 0) {
+                const formatted = mergeBans(redStrategicBans, 'RED')
+                if (formatted.length > 0) {
+                    setRedSuggestions(formatted)
+                    setIsRedSuggestLoading(false)
+                }
             }
         }
     }, [currentStep?.type, blueStrategicBans.length, redStrategicBans.length, blueSuggestions.length, redSuggestions.length])

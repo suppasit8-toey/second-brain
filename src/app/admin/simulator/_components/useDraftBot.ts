@@ -244,17 +244,9 @@ export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initi
                             if (enemyPicks.includes(heroId)) return false
                             if (opponentGlobalBans.map(String).includes(heroId)) return false
 
-                            // NEW: Don't ban heroes for roles the enemy already has filled
-                            // If the hero PRIMARILY plays a role that is already filled, skip it.
-                            // We need to check if ALL of the hero's standard roles are covered.
-                            const heroRoles = s.hero.main_position?.map((r: string) => normalizeRole(r)) || []
-                            const isRoleFilled = heroRoles.length > 0 && heroRoles.every((r: string) => enemyFilledRoles.has(r))
-
-                            if (isRoleFilled) {
-                                // console.log(`🤖 [STRATEGY] Skipping Ban ${s.hero.name} (Roles ${heroRoles.join(', ')} occupied by enemy)`)
-                                return false
-                            }
-
+                            // Trust the Analysis/Advisor completely.
+                            // If it's in the list, it's a valid ban candidate.
+                            // The Analysis engine (or Strategic Bans) should be responsible for filtering out invalid bans.
                             return true
                         })
 
