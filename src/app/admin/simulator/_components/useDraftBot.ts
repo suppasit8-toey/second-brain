@@ -145,15 +145,31 @@ export function useDraftBot({ game, match, draftState, onLockIn, isPaused, initi
             console.log("🤖 Bot is thinking...")
             processingRef.current = true
 
-            // Simulate "Thinking" time (2-5 seconds)
-            const delay = Math.floor(Math.random() * 3000) + 2000
+            // Simulate "Thinking" time (3-5 seconds)
+            const delay = Math.floor(Math.random() * 2000) + 3000
             await new Promise(r => setTimeout(r, delay))
 
             if (!processingRef.current) return
 
+            // [NEW] Strict Re-Check after delay: Ensure suggestions are STILL loaded and valid
+            // If while we were "thinking", the recommendations updated or are loading, we should wait.
+            // Actually, if they are loading, we should probably abort and let the effect trigger again when not loading.
+            if (suggestionLoading) {
+                console.log("🤖 Bot finished thinking, but suggestions are LOADING again. Aborting to wait.")
+                processingRef.current = false
+                return
+            }
+
+            // Determine which suggestions to use
+            const suggestions = draftState.currentStep.side === 'BLUE' ? blueSuggestions : redSuggestions
+
+            if (!suggestions || suggestions.length === 0) {
+                console.log("🤖 Bot finished thinking, but NO suggestions available. Aborting.")
+                processingRef.current = false
+                return
+            }
+
             try {
-                // Determine which suggestions to use
-                const suggestions = draftState.currentStep.side === 'BLUE' ? blueSuggestions : redSuggestions
                 let bestHeroId = ''
 
                 // Get all currently picked hero IDs to prevent duplicates (convert to strings for consistent comparison)
