@@ -1821,7 +1821,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
     }
 
     const handleAutoSelect = () => {
-        // Logic: Use DISPLAYED suggestions first, then fallback to consensus
+        // Logic: Use the SAME data as the Analysis tab in DraftSuggestionPanel
         const isBan = currentStep?.type === 'BAN'
 
         // Helper to check availability
@@ -1833,129 +1833,88 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         let hScore = 0
         let reasons: string[] = []
 
-        // Hoist these for use in analysis later
-        const aiRecs = (isBan ? recommendations.smartBan : recommendations.hybrid) || []
-        const historyRecs = recommendations.historyAnalysis || []
-        const consensusCandidates: any[] = [] // Initialize here
+        // Use the SAME processed suggestions that flow to DraftSuggestionPanel
+        const displayedSuggestions = currentStep?.side === 'BLUE' ? blueSuggestions : redSuggestions
 
+        // Replicate the EXACT Analysis tab logic from DraftSuggestionPanel
+        const HISTORY_KEYWORDS = ['team ban', 'team pool', 'comfort', 'protect', 'deny', 'repair', 'scrim', 'pattern', 'opening ban', 'mvp']
 
-        // === PRIORITY 1: Consensus (AI + History intersection) ===
-        // This logic ensures "Auto Select" matches "Analysis" tab Recommendation
-        const aiMap = new Map<string, any>(aiRecs.map((r: any) => [r.hero.id, r]))
-        const historyMap = new Map<string, any>(historyRecs.map((r: any) => [r.hero.id, r]))
+        // CEREBRO subset: items with cerebroScore or non-history type
+        const cerebroItems = displayedSuggestions
+            .filter((s: any) => s.cerebroScore !== undefined || (s.type !== 'history' && !s.reason?.includes('Team Comfort')))
+            .map((s: any) => ({ ...s, _cerebroScore: s.cerebroScore ?? s.score }))
 
-        aiMap.forEach((aiItem: any, heroId: string) => {
-            if (historyMap.has(heroId) && isAvailable(heroId)) {
-                const historyItem = historyMap.get(heroId)
-                consensusCandidates.push({
-                    hero: aiItem.hero,
-                    score: (aiItem.score || 0) + (historyItem.score || 0),
-                    aiScore: aiItem.score,
-                    hScore: historyItem.score,
-                    reason: `${aiItem.reason} + ${historyItem.reason}`,
-                    matchupData: aiItem.matchupData // Preserve matchup data
-                })
+        // HISTORY subset: items with historyScore or history type
+        const historyItems: any[] = []
+        displayedSuggestions.forEach((s: any) => {
+            const reasonLower = s.reason?.toLowerCase() || ''
+            const isHistory = s.type === 'history' || HISTORY_KEYWORDS.some(k => reasonLower.includes(k)) || s.historyScore !== undefined
+            if (isHistory && (s.historyScore !== undefined || s.type === 'history')) {
+                historyItems.push({ ...s, _historyScore: s.historyScore ?? s.score })
             }
         })
 
-        consensusCandidates.sort((a, b) => b.score - a.score)
+        // ANALYSIS: Overlap between cerebro and history hero IDs
+        const cerebroHeroIds = new Set(cerebroItems.map((c: any) => String(c.hero.id)))
+        const historyHeroIds = new Set(historyItems.map((h: any) => String(h.hero.id)))
+        const intersectionIds = new Set([...historyHeroIds].filter(x => cerebroHeroIds.has(x)))
 
-        if (consensusCandidates.length > 0) {
-            bestHero = consensusCandidates[0].hero
-            aiScore = consensusCandidates[0].aiScore
-            hScore = consensusCandidates[0].hScore
-            pickReason = `ข้อมูลตรงกัน: AI(${aiScore}) + ประวัติ(${hScore})`
-            reasons = (consensusCandidates[0].reason || '').split(/ \+ | • |, /).filter(Boolean)
-            console.log("Auto-Select: Consensus Pick", bestHero.name, "Score:", consensusCandidates[0].score)
+        // === PRIORITY 1: Analysis Overlap (matches what Analysis tab shows) ===
+        const analysisCandidates = displayedSuggestions
+            .filter((s: any) => intersectionIds.has(String(s.hero.id)) && isAvailable(String(s.hero.id)))
+
+        // Deduplicate by hero ID, keeping highest combined score
+        const analysisMap = new Map<string, any>()
+        analysisCandidates.forEach((s: any) => {
+            const id = String(s.hero.id)
+            const existing = analysisMap.get(id)
+            const currentCombined = (s.cerebroScore || 0) + (s.historyScore || 0)
+            const existingCombined = existing ? (existing.cerebroScore || 0) + (existing.historyScore || 0) : 0
+            if (!existing || currentCombined > existingCombined) {
+                analysisMap.set(id, s)
+            }
+        })
+
+        const sortedAnalysis = Array.from(analysisMap.values())
+            .sort((a, b) => ((b.cerebroScore || 0) + (b.historyScore || 0)) - ((a.cerebroScore || 0) + (a.historyScore || 0)))
+
+        if (sortedAnalysis.length > 0) {
+            const top = sortedAnalysis[0]
+            bestHero = top.hero
+            aiScore = top.cerebroScore || 0
+            hScore = top.historyScore || 0
+            pickReason = `Analysis ตรงกัน: AI(${aiScore}) + History(${hScore})`
+            reasons = (top.reason || '').split(/ \+ | • |, /).filter(Boolean)
+            console.log("Auto-Select: Analysis Overlap Pick", bestHero.name, "AI:", aiScore, "H:", hScore)
         }
 
-        // === PRIORITY 1.5: Fallback to History Analysis (if Analysis Tab logic) ===
-        // The Analysis Tab shows "No strict overlap found. Showing History / Comfort picks."
-        // So we should try to pick from historyRecs directly if no consensus.
-        if (!bestHero && historyRecs.length > 0) {
-            const availableHistory = historyRecs.filter((r: any) => isAvailable(String(r.hero?.id)))
-            if (availableHistory.length > 0) {
-                // Sort by score (history score)
-                availableHistory.sort((a: any, b: any) => (b.score || 0) - (a.score || 0))
+        // === PRIORITY 2: Fallback to History items (matches Analysis tab fallback) ===
+        if (!bestHero && historyItems.length > 0) {
+            const availableHistory = historyItems
+                .filter((r: any) => isAvailable(String(r.hero?.id)))
+                .sort((a: any, b: any) => (b._historyScore || 0) - (a._historyScore || 0))
 
+            if (availableHistory.length > 0) {
                 bestHero = availableHistory[0].hero
-                aiScore = availableHistory[0].cerebroScore || 0 // Might be undefined
-                hScore = availableHistory[0].score || 0
+                aiScore = availableHistory[0].cerebroScore || 0
+                hScore = availableHistory[0]._historyScore || 0
                 pickReason = `ประวัติ/ความถนัด: ${availableHistory[0].reason || 'High History Score'}`
                 reasons = (availableHistory[0].reason || '').split(/, |; /).filter(Boolean)
                 console.log("Auto-Select: History Fallback Pick", bestHero.name, "Score:", hScore)
             }
         }
 
-        // === PRIORITY 2: Fallback to Displayed Suggestions (AI Score) ===
+        // === PRIORITY 3: Fallback to Displayed Suggestions (top suggestion) ===
         if (!bestHero) {
-            const displayedSuggestions = currentStep?.side === 'BLUE' ? blueSuggestions : redSuggestions
             if (displayedSuggestions && displayedSuggestions.length > 0) {
                 const availableDisplayed = displayedSuggestions.filter((s: any) => isAvailable(String(s.hero?.id)))
                 if (availableDisplayed.length > 0) {
                     bestHero = availableDisplayed[0].hero
-                    aiScore = availableDisplayed[0].score || 0
+                    aiScore = availableDisplayed[0].cerebroScore || availableDisplayed[0].score || 0
+                    hScore = availableDisplayed[0].historyScore || 0
                     pickReason = `Advisor แนะนำ: ${availableDisplayed[0].reason || 'Top suggestion'}`
                     reasons = (availableDisplayed[0].reason || '').split(/, |; /).filter(Boolean)
-                    console.log("Auto-Select: Using Displayed Suggestion (No Consensus)", bestHero.name, "Score:", aiScore)
-                }
-            }
-
-            // Final Fallback: Raw AI list if displayed suggestions fail
-            // Final Fallback: Raw AI list if displayed suggestions fail
-            // [UPDATED] User requested to NOT use Raw AI Fallback if data is not fully loaded or if Displayed list is empty due to loading.
-            // We only use this if we are SURE that Displayed Suggestions are empty because there really are no suggestions, not because of loading.
-            // But checking "loading" inside here is tricky if we don't have the flag.
-            // However, the button itself is disabled if (isLoadingRecommendations).
-            // So if we are here, isLoadingRecommendations must be false?
-            // User says: "If no list in rank 2 (e.g. case not finished loading or list empty) system goes to rank 3 ... I don't want it to select because it's yet loaded."
-
-            // If we are here, it means we clicked the button, so isLoadingRecommendations should be false.
-            // BUT, maybe displayedSuggestions (blueSuggestions/redSuggestions) are empty even if isLoadingRecommendations is false?
-            // Let's add a strict check: If displayedSuggestions is empty, DO NOT fallback to Raw AI blindly unless we are sure.
-            // Actually, if displayedSuggestions is empty, it usually means no data found.
-            // The user wants to avoid "Raw AI" pick if the reason is "Not Loaded".
-            // Since we can't easily distinguish "Empty because loading" vs "Empty because no result" without flags,
-            // AND the button is disabled on loading...
-            // Maybe the user is experiencing a case where the button enabled PREMATURELY?
-            // OR they just want to disable Rank 3 entirely?
-            // "Must finish loading every time then come to rank 3" implies Rank 3 IS allowed, but only if loaded.
-
-            // Let's rely on the fact that if we are clicking, we "think" we are loaded.
-            // But if displayedSuggestions is empty, maybe we should just STOP and not pick?
-            // The user said: "If no list in rank 2 ... system goes to rank 3 ... I don't want it to select because it's yet loaded."
-            // This implies they think empty list = not loaded.
-
-            // Safe bet: If local suggestions (Rank 2) failed, DO NOT fall back to Raw AI (Rank 3).
-            // This effectively removes Rank 3.
-            // Let's comment it out or add a guard.
-            if (!bestHero && !isLoadingRecommendations) {
-                // Check if we really want to fallback. User said "Must finish loading every time then come to rank 3".
-                // If isLoadingRecommendations is false, we ARE finished loading.
-                // So why is Rank 2 empty?
-                // Maybe `blueSuggestions` is empty but `recommendations.smartBan` (Raw AI) is not?
-                // If so, Rank 3 WOULD pick.
-                // User says: "I don't want it to select because it's yet loaded."
-                // Perhaps they see Rank 3 picking IMMEDIATELY before Rank 2 appears?
-
-                // Solution: We will ONLY pick from Rank 3 if we are absolutely sure we checked Rank 2 and it was empty AND we are not loading.
-                // But wait, the button is disabled if/while loading.
-
-                // Let's assume there's a race condition where specific side loading might differ?
-                // isBlueSuggestLoading / isRedSuggestLoading
-                const isSideLoading = currentStep?.side === 'BLUE' ? isBlueSuggestLoading : isRedSuggestLoading
-
-                if (!isSideLoading) {
-                    const availableAI = aiRecs.filter((r: any) => isAvailable(r.hero.id))
-                    if (availableAI.length > 0) {
-                        bestHero = availableAI[0].hero
-                        aiScore = availableAI[0].score || 0
-                        pickReason = `AI เท่านั้น (คะแนน: ${aiScore}) - ไม่พบข้อมูลในประวัติ`
-                        reasons = (availableAI[0].reason || '').split(/, /).filter(Boolean)
-                        console.log("Auto-Select: AI Fallback Pick", bestHero.name)
-                    }
-                } else {
-                    console.log("Auto-Select: Skipped Rank 3 because side is still loading")
+                    console.log("Auto-Select: Using Top Displayed Suggestion", bestHero.name, "Score:", aiScore)
                 }
             }
         }
@@ -2034,8 +1993,9 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
                 // Check if recommended hero (bestHero) describes this target in their lists
                 // [UPDATED] Use detailed specificMatchups if available for precise Role vs Role lookup
 
-                const aiRecMatch = aiRecs.find((r: any) => r.hero.id === bestHero?.id)
-                const mData = aiRecMatch?.matchupData || (consensusCandidates.length > 0 ? consensusCandidates[0].matchupData : undefined)
+                // Extract Matchup Data from displayed suggestions
+                const suggestion = displayedSuggestions?.find((s: any) => s.hero.id === bestHero?.id)
+                const mData = suggestion?.matchupData
                 const specificMatchups = mData?.specificMatchups
 
                 let advantage: 'Strong' | 'Weak' | 'Neutral' = 'Neutral'
@@ -2189,13 +2149,14 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
             }
 
             // Extract Matchup Data from AI Recs or Consensus locally
-            const aiRecMatch = aiRecs.find((r: any) => r.hero.id === bestHero?.id)
-            const matchupData = aiRecMatch?.matchupData || (consensusCandidates.length > 0 ? consensusCandidates[0].matchupData : undefined)
+            // Extract Matchup Data from displayed suggestions
+            const suggestion = displayedSuggestions?.find((s: any) => s.hero.id === bestHero.id)
+            const matchupData = suggestion?.matchupData
 
             setAutoSelectAnalysis({
-                aiScore: consensusCandidates.length > 0 ? consensusCandidates[0].aiScore : (aiRecMatch?.score || 0),
-                historyScore: consensusCandidates.length > 0 ? consensusCandidates[0].hScore : 0,
-                reasons: aiRecMatch?.reason ? [aiRecMatch.reason] : [],
+                aiScore,
+                historyScore: hScore,
+                reasons,
                 matchupData,
                 recommendedRole
             })
@@ -2374,6 +2335,85 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
 
 
 
+    // [NEW] Calculate Enemy Predictions (Memoized for Live View)
+    const calculatedEnemyPredictions = useMemo(() => {
+        if (!teamStats) return { blue: [], red: [] }
+
+        // Helper: Get Next Phases (PICKS ONLY)
+        const getNextPhases = (side: 'BLUE' | 'RED') => {
+            // Filter for only PICK steps for this side
+            const remainingPickSteps = DRAFT_SEQUENCE.slice(state.stepIndex).filter(s => s.side === side && s.type === 'PICK')
+
+            const phases: string[] = []
+            // Count past PICKS to get correct number
+            const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === side)
+            let pickCount = past.filter(s => s.type === 'PICK').length
+
+            remainingPickSteps.slice(0, 2).forEach(s => {
+                pickCount++
+                phases.push(`PICK ${pickCount}`)
+            })
+            return phases
+        }
+
+        const predictForTeam = (teamName: string, picks: Record<number, string>, side: 'BLUE' | 'RED') => {
+            const cleanName = teamName?.replace(/\s*\(Bot\)\s*$/i, '') || teamName
+            const stats = cleanName ? teamStats[cleanName] : undefined
+
+            const nextPhases = getNextPhases(side)
+
+            // If next is BAN, we should predict potential bans? 
+            // For now, let's keep predicting HERO PICKS for remaining roles (what they need).
+            // But maybe highlight if they are about to Ban?
+            // User request: "Predict opponent's forward pick" -> usually implies Picks.
+
+            if (!stats || !stats.heroStats) return { predictions: [], nextPhases }
+
+            const remainingRoles = getRemainingRoles(picks)
+            const predictions: { role: string, hero: Hero, reason: string, picks: number, wins: number }[] = []
+
+            remainingRoles.forEach(role => {
+                let dbRole = role
+                if (role === 'Abyssal Dragon') dbRole = 'Abyssal'
+                else if (role === 'Support') dbRole = 'Roam'
+
+                const candidates = Object.entries(stats.heroStats)
+                    .map(([hId, s]: [string, any]) => {
+                        const rStats = s.roleStats?.[dbRole]
+                        if (rStats && rStats.picks > 0) {
+                            return { hId, picks: rStats.picks, wins: rStats.wins }
+                        }
+                        return null
+                    })
+                    .filter((c): c is { hId: string, picks: number, wins: number } => c !== null)
+                    .sort((a, b) => b.picks - a.picks || b.wins - a.wins)
+
+                for (const cand of candidates) {
+                    if (!unavailableIds.includes(cand.hId)) {
+                        const hero = getHero(cand.hId)
+                        if (hero) {
+                            predictions.push({
+                                role,
+                                hero,
+                                reason: `Most Played ${role}`,
+                                picks: cand.picks,
+                                wins: cand.wins
+                            })
+                            break
+                        }
+                    }
+                }
+            })
+            return { predictions, nextPhases }
+        }
+
+        return {
+            blue: predictForTeam(game.blue_team_name, state.bluePicks, 'BLUE'),
+            red: predictForTeam(game.red_team_name, state.redPicks, 'RED')
+        }
+
+    }, [teamStats, game.blue_team_name, game.red_team_name, state.bluePicks, state.redPicks, unavailableIds, state.stepIndex])
+
     // Check if game is already finished (from DB)
     const isGameFinished = !!game.winner
 
@@ -2483,84 +2523,7 @@ const DraftInterface = forwardRef<DraftControls, DraftInterfaceProps>(({ match, 
         )
     }
 
-    // [NEW] Calculate Enemy Predictions (Memoized for Live View)
-    const calculatedEnemyPredictions = useMemo(() => {
-        if (!teamStats) return { blue: [], red: [] }
 
-        // Helper: Get Next Phases (PICKS ONLY)
-        const getNextPhases = (side: 'BLUE' | 'RED') => {
-            // Filter for only PICK steps for this side
-            const remainingPickSteps = DRAFT_SEQUENCE.slice(state.stepIndex).filter(s => s.side === side && s.type === 'PICK')
-
-            const phases: string[] = []
-            // Count past PICKS to get correct number
-            const past = DRAFT_SEQUENCE.slice(0, state.stepIndex).filter(s => s.side === side)
-            let pickCount = past.filter(s => s.type === 'PICK').length
-
-            remainingPickSteps.slice(0, 2).forEach(s => {
-                pickCount++
-                phases.push(`PICK ${pickCount}`)
-            })
-            return phases
-        }
-
-        const predictForTeam = (teamName: string, picks: Record<number, string>, side: 'BLUE' | 'RED') => {
-            const cleanName = teamName?.replace(/\s*\(Bot\)\s*$/i, '') || teamName
-            const stats = cleanName ? teamStats[cleanName] : undefined
-
-            const nextPhases = getNextPhases(side)
-
-            // If next is BAN, we should predict potential bans? 
-            // For now, let's keep predicting HERO PICKS for remaining roles (what they need).
-            // But maybe highlight if they are about to Ban?
-            // User request: "Predict opponent's forward pick" -> usually implies Picks.
-
-            if (!stats || !stats.heroStats) return { predictions: [], nextPhases }
-
-            const remainingRoles = getRemainingRoles(picks)
-            const predictions: { role: string, hero: Hero, reason: string, picks: number, wins: number }[] = []
-
-            remainingRoles.forEach(role => {
-                let dbRole = role
-                if (role === 'Abyssal Dragon') dbRole = 'Abyssal'
-                else if (role === 'Support') dbRole = 'Roam'
-
-                const candidates = Object.entries(stats.heroStats)
-                    .map(([hId, s]: [string, any]) => {
-                        const rStats = s.roleStats?.[dbRole]
-                        if (rStats && rStats.picks > 0) {
-                            return { hId, picks: rStats.picks, wins: rStats.wins }
-                        }
-                        return null
-                    })
-                    .filter((c): c is { hId: string, picks: number, wins: number } => c !== null)
-                    .sort((a, b) => b.picks - a.picks || b.wins - a.wins)
-
-                for (const cand of candidates) {
-                    if (!unavailableIds.includes(cand.hId)) {
-                        const hero = getHero(cand.hId)
-                        if (hero) {
-                            predictions.push({
-                                role,
-                                hero,
-                                reason: `Most Played ${role}`,
-                                picks: cand.picks,
-                                wins: cand.wins
-                            })
-                            break
-                        }
-                    }
-                }
-            })
-            return { predictions, nextPhases }
-        }
-
-        return {
-            blue: predictForTeam(game.blue_team_name, state.bluePicks, 'BLUE'),
-            red: predictForTeam(game.red_team_name, state.redPicks, 'RED')
-        }
-
-    }, [teamStats, game.blue_team_name, game.red_team_name, state.bluePicks, state.redPicks, unavailableIds, state.stepIndex])
 
     // Update auto-analysis logic to uses the Ref if needed, but for now it is standalone.
 

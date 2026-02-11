@@ -113,6 +113,42 @@ export default function PostDraftResult({
         if (!initialData?.winner && winPrediction !== 50) {
             setWinner(winPrediction > 50 ? 'Blue' : 'Red')
         }
+
+        // --- AI Auto-Select MVP for both teams ---
+        const scoreMVP = (pickIds: string[]) => {
+            let bestId = ''
+            let bestScore = -1
+            pickIds.forEach(id => {
+                const h = getHero(id)
+                if (!h) return
+                let score = 0
+                const stats = h.hero_stats?.[0]
+                if (stats) {
+                    // Tier bonus
+                    const tierBonus: Record<string, number> = { S: 50, A: 40, B: 30, C: 20, D: 10 }
+                    score += tierBonus[stats.tier] || 0
+                    // Win rate bonus
+                    if (stats.win_rate > 50) score += (stats.win_rate - 50)
+                }
+                // Carry role bonus (Jungle/Mid are typical playmakers)
+                const pos = h.main_position || []
+                if (pos.includes('Jungle') || pos.includes('Mid')) score += 10
+                if (score > bestScore) {
+                    bestScore = score
+                    bestId = id
+                }
+            })
+            return bestId
+        }
+
+        if (!initialData?.blueKeyPlayer) {
+            const aiBlue = scoreMVP(blueIds)
+            if (aiBlue) setBlueKeyPlayer(aiBlue)
+        }
+        if (!initialData?.redKeyPlayer) {
+            const aiRed = scoreMVP(redIds)
+            if (aiRed) setRedKeyPlayer(aiRed)
+        }
     }, [])
 
     const handleAssignmentChange = (heroId: string, role: string) => {
@@ -131,26 +167,6 @@ export default function PostDraftResult({
     }
 
     const [showSuccess, setShowSuccess] = useState(false)
-    const [autoSaved, setAutoSaved] = useState(false)
-
-    // 2. Bot Auto-Save: Automatically save when positions are assigned and winner is set
-    useEffect(() => {
-        // Skip if already saved, or if this is a manual edit session
-        if (autoSaved || initialData?.winner || submitting) return
-
-        // Check if we have all assignments and a winner selected
-        const allPickIds = [...Object.values(bluePicks), ...Object.values(redPicks)]
-        const allAssigned = allPickIds.every(id => assignments[id])
-
-        if (allAssigned && winner && Object.keys(assignments).length > 0) {
-            // Auto-save after a short delay to allow UI to render
-            const timer = setTimeout(() => {
-                setAutoSaved(true)
-                handleSubmit()
-            }, 500)
-            return () => clearTimeout(timer)
-        }
-    }, [assignments, winner, autoSaved, submitting])
 
     const handleSubmit = async () => {
         // Validation Check - DISABLED per user request
@@ -501,10 +517,18 @@ export default function PostDraftResult({
                                             </Button>
                                         </div>
                                     ) : (
-                                        <Button size="lg" className="w-full h-12 text-lg font-bold bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 shadow-lg shadow-green-900/20 mt-1" onClick={handleSubmit} disabled={submitting}>
-                                            {submitting ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Save className="w-5 h-5 mr-2" />}
-                                            {initialData ? "UPDATE" : "SAVE"}
-                                        </Button>
+                                        <>
+                                            {!winner && (
+                                                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-2 flex items-center justify-center gap-2 text-yellow-400 mb-1">
+                                                    <AlertTriangle className="w-4 h-4" />
+                                                    <span className="font-bold text-xs">⚠ กรุณาเลือกทีมที่ชนะก่อน</span>
+                                                </div>
+                                            )}
+                                            <Button size="lg" className={`w-full h-12 text-lg font-bold shadow-lg mt-1 ${!winner ? 'bg-slate-700 cursor-not-allowed opacity-50' : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 shadow-green-900/20'}`} onClick={handleSubmit} disabled={submitting || !winner}>
+                                                {submitting ? <Loader2 className="w-5 h-5 animate-spin mr-2" /> : <Save className="w-5 h-5 mr-2" />}
+                                                {initialData ? "UPDATE" : "SAVE"}
+                                            </Button>
+                                        </>
                                     )}
                                 </div>
                             </div>
